@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-people me-2"></i>Клиенты</h4>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#clientModal">
+    <i class="bi bi-plus-lg me-1"></i>Новый клиент
+  </button>
+</div>
+
+<div class="row mb-3">
+  <div class="col">
+    <form method="GET" class="d-flex gap-2 flex-wrap">
+      <select name="status_filter" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+        <option value="">Все</option>
+        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Активные</option>
+        <option value="paused" {% if status_filter == 'paused' %}selected{% endif %}>Приостановлены</option>
+        <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Закрытые</option>
+      </select>
+      <input type="text" name="search" class="form-control form-control-sm" placeholder="Поиск..." value="{{ search }}" style="width: 180px;">
+      <select name="sort" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+        <option value="name" {% if sort == 'name' %}selected{% endif %}>По названию</option>
+        <option value="contract_end" {% if sort == 'contract_end' %}selected{% endif %}>По окончанию договора</option>
+        <option value="tasks" {% if sort == 'tasks' %}selected{% endif %}>По задачам</option>
+      </select>
+      <select name="order" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+        <option value="asc" {% if order == 'asc' %}selected{% endif %}>По возрастанию</option>
+        <option value="desc" {% if order == 'desc' %}selected{% endif %}>По убыванию</option>
+      </select>
+      <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-search"></i></button>
+      {% if search or status_filter %}
+        <a href="/clients" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    {% if clients %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>#</th>
+              <th>Организация</th>
+              <th>Домен</th>
+              <th>Договор до</th>
+              <th>Статус</th>
+              <th>Задач</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in clients %}
+            {% set end_aware = to_tz(c.contract_end) %}
+            {% set days_left = (end_aware - now).days if end_aware else 0 %}
+            {% set overdue_ct = c.tasks | selectattr('status', 'equalto', 'overdue') | list | length %}
+            <tr>
+              <td>{{ c.id }}</td>
+              <td><a href="/clients/{{ c.id }}" class="text-decoration-none"><strong>{{ c.org_name }}</strong></a></td>
+              <td>{% if c.domain %}{{ c.domain }}{% else %}<span class="text-secondary">—</span>{% endif %}</td>
+              <td>
+                {% if end_aware %}
+                  {% if days_left < 0 %}
+                    <span class="text-danger">{{ end_aware.strftime('%d.%m.%Y') }}</span>
+                  {% elif days_left < 14 %}
+                    <span class="text-warning">{{ end_aware.strftime('%d.%m.%Y') }} ({{ days_left }} дн.)</span>
+                  {% else %}
+                    {{ end_aware.strftime('%d.%m.%Y') }}
+                  {% endif %}
+                {% else %}<span class="text-secondary">—</span>{% endif %}
+              </td>
+              <td>
+                <form method="POST" action="/clients/{{ c.id }}/status" class="d-inline">
+                  <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="active" {% if c.status == 'active' %}selected{% endif %}>Активен</option>
+                    <option value="paused" {% if c.status == 'paused' %}selected{% endif %}>Пауза</option>
+                    <option value="closed" {% if c.status == 'closed' %}selected{% endif %}>Закрыт</option>
+                  </select>
+                </form>
+              </td>
+              <td>
+                {{ c.tasks | length if c.tasks else 0 }}
+                {% if overdue_ct > 0 %}<span class="badge bg-danger ms-1">{{ overdue_ct }} просроч.</span>{% endif %}
+              </td>
+              <td>
+                <a href="/clients/{{ c.id }}" class="btn btn-sm btn-outline-info" title="Подробнее"><i class="bi bi-eye"></i></a>
+                <form method="POST" action="/clients/{{ c.id }}/delete" class="d-inline" onsubmit="return confirm('Удалить клиента {{ c.org_name }}?')">
+                  <button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-trash"></i></button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="p-4 text-center text-secondary">
+        <i class="bi bi-people" style="font-size: 2rem;"></i>
+        <p class="mt-2">Нет клиентов</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="clientModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="POST" action="/clients/create">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Новый клиент</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Название организации</label>
+            <input type="text" name="org_name" class="form-control" required autofocus>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Домен</label>
+            <input type="text" name="domain" class="form-control" placeholder="spbpack.net">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Окончание договора</label>
+            <input type="date" name="contract_end" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Данные организации</label>
+            <textarea name="org_data" class="form-control" rows="3" placeholder="Телефон, email, адрес, INN, KPP..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

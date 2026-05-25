@@ -16,6 +16,7 @@ class Client(Base):
     contract_start = Column(DateTime(timezone=True), nullable=False)
     contract_end = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(20), default='active')
+    org_data = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     tasks = relationship('Task', back_populates='client', cascade='all, delete-orphan')

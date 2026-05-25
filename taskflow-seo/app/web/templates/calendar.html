@@ -1,0 +1,467 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Календарь</h4>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#taskModal">
+    <i class="bi bi-plus-lg me-1"></i>Новая задача
+  </button>
+</div>
+
+<div class="row">
+  <div class="col-lg-8 mb-3">
+    <div class="card">
+      <div class="card-body">
+        <div id="calendar"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center py-2">
+        <span class="fw-semibold"><i class="bi bi-list-task me-1"></i>Все задачи</span>
+        <span class="badge bg-secondary" id="taskCount">0</span>
+      </div>
+      <div class="card-body p-2">
+        <div class="row g-1 mb-2">
+          <div class="col-5">
+            <select class="form-select form-select-sm" id="sortField" onchange="applySort()">
+              <option value="deadline">Срок</option>
+              <option value="status">Статус</option>
+              <option value="priority">Важность</option>
+              <option value="type">Тип</option>
+              <option value="title">Название</option>
+            </select>
+          </div>
+          <div class="col-3">
+            <select class="form-select form-select-sm" id="sortOrder" onchange="applySort()">
+              <option value="asc">↑</option>
+              <option value="desc">↓</option>
+            </select>
+          </div>
+          <div class="col-4">
+            <select class="form-select form-select-sm" id="statusFilter" onchange="applySort()">
+              <option value="">Все</option>
+              <option value="todo">К выполнению</option>
+              <option value="in_progress">В работе</option>
+              <option value="done">Выполнено</option>
+              <option value="overdue">Просрочено</option>
+            </select>
+          </div>
+        </div>
+        <div style="max-height:460px;overflow-y:auto" id="taskList">
+          <div class="text-center text-secondary py-3"><div class="spinner-border spinner-border-sm me-1"></div>Загрузка…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Модалка просмотра/редактирования задачи #}
+<div class="modal fade" id="taskDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="detailTitle">Задача</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer" id="detailFooter"></div>
+    </div>
+  </div>
+</div>
+
+{# Модалка создания задачи #}
+<div class="modal fade" id="taskModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <form method="POST" action="/tasks/create" id="createTaskForm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Новая задача</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row">
+            <div class="col-md-8 mb-3">
+              <label class="form-label">Название</label>
+              <input type="text" name="title" class="form-control" required>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Тип</label>
+              <select name="task_type" class="form-select" onchange="onTaskTypeChange(this)">
+                <option value="custom">Обычная</option>
+                <option value="article">Статья</option>
+                <option value="seo">SEO</option>
+                <option value="dev">Разработка</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Важность</label>
+              <select name="priority" class="form-select">
+                <option value="low">Низкий</option>
+                <option value="medium" selected>Средний</option>
+                <option value="high">Высокий</option>
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Клиент</label>
+              <select name="client_id" class="form-select">
+                <option value="">—</option>
+                {% for c in all_clients %}
+                <option value="{{ c.id }}">{{ c.org_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Срок</label>
+              <input type="datetime-local" name="deadline" class="form-control" id="createDeadline">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Заметка</label>
+            <textarea name="notes" class="form-control" rows="2" placeholder="Краткая заметка"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Комментарий</label>
+            <textarea name="comment" class="form-control" rows="4" placeholder="Подробное описание задачи, что и как нужно сделать"></textarea>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Чек-лист</label>
+            <div id="calChecklist"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addChecklistItem()"><i class="bi bi-plus"></i> Добавить пункт</button>
+              <div class="btn-group btn-group-sm ms-2">
+                <button type="button" class="btn btn-outline-info btn-sm dropdown-toggle" data-bs-toggle="dropdown">Шаблон</button>
+                <ul class="dropdown-menu">
+                  {% for key, items in CHECKLIST_TEMPLATES.items() %}
+                  <li><a class="dropdown-item" href="#" onclick="loadTemplate('{{ key }}'); return false">{{ {'article':'Статья','seo':'SEO','dev':'Разработка'}[key] }}</a></li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+#calendar { min-height: 500px; }
+.fc-daygrid-event { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; font-size: 0.78rem; line-height: 1.2; padding: 1px 3px; }
+.fc-daygrid-day-frame { min-height: 80px !important; }
+.fc-daygrid-day-number { font-size: 0.8rem; }
+.fc .fc-daygrid-more-link { font-size: 0.75rem; }
+.fc .fc-toolbar-title { font-size: 1.1rem; }
+@media (max-width: 992px) { #calendar { min-height: 350px; } }
+</style>
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fullcalendar/drag@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales/ru.global.min.js"></script>
+<script>
+const TEMPLATES = {{ checklist_templates_json|safe }};
+const tplMap = {};
+Object.keys(TEMPLATES).forEach(k => { tplMap[k] = TEMPLATES[k].map(i => i.text); });
+
+const STATUS_LABELS = {todo:'К выполнению', in_progress:'В работе', done:'Выполнено', overdue:'Просрочено'};
+const PRIO_LABELS = {high:'Высокий', medium:'Средний', low:'Низкий'};
+const TYPE_LABELS = {article:'Статья', seo:'SEO', dev:'Разработка', custom:'Обычная'};
+const STATUS_CLASS = {todo:'bg-secondary', in_progress:'bg-primary', done:'bg-success', overdue:'bg-danger'};
+
+let allTasksData = [];
+let detailTaskId = null;
+let detailChecklistOrig = [];
+
+function addChecklistItem(text) {
+  const c = document.getElementById('calChecklist');
+  if (!c) return;
+  const div = document.createElement('div');
+  div.className = 'input-group input-group-sm mb-1';
+  div.innerHTML = '<input type="text" class="form-control" value="' + (text||'') + '" placeholder="Пункт">'
+    + '<button type="button" class="btn btn-outline-danger" onclick="this.closest(\'.input-group\').remove()"><i class="bi bi-x"></i></button>';
+  c.appendChild(div);
+}
+
+function loadTemplate(type) {
+  const c = document.getElementById('calChecklist');
+  c.innerHTML = '';
+  const items = tplMap[type] || [];
+  items.forEach(text => addChecklistItem(text));
+}
+
+function onTaskTypeChange(sel) {
+  loadTemplate(sel.value);
+}
+
+function collectChecklist() {
+  const c = document.getElementById('calChecklist');
+  if (!c) return null;
+  const items = [];
+  c.querySelectorAll('input').forEach(inp => {
+    const v = inp.value.trim();
+    if (v) items.push({text: v, done: false});
+  });
+  return items.length ? items : null;
+}
+
+document.getElementById('createTaskForm')?.addEventListener('submit', function(e) {
+  const checklist = collectChecklist();
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden';
+  hidden.name = 'checklist_raw';
+  hidden.value = checklist ? JSON.stringify(checklist) : '';
+  this.appendChild(hidden);
+});
+
+// ─── Task list panel ────────────────────────────────────────
+
+function loadTaskList() {
+  fetch('/api/tasks/all').then(r => r.json()).then(data => {
+    allTasksData = data;
+    applySort();
+  });
+}
+
+function applySort() {
+  const field = document.getElementById('sortField').value;
+  const order = document.getElementById('sortOrder').value;
+  const statusFilter = document.getElementById('statusFilter').value;
+
+  let list = [...allTasksData];
+  if (statusFilter) list = list.filter(t => t.status === statusFilter);
+
+  list.sort((a, b) => {
+    let cmp = 0;
+    if (field === 'deadline') {
+      const da = a.deadline ? new Date(a.deadline) : new Date('9999-12-31');
+      const db = b.deadline ? new Date(b.deadline) : new Date('9999-12-31');
+      cmp = da - db;
+    } else if (field === 'status') {
+      const orderMap = {overdue:0, todo:1, in_progress:2, done:3};
+      cmp = (orderMap[a.status]||4) - (orderMap[b.status]||4);
+    } else if (field === 'priority') {
+      const orderMap = {high:0, medium:1, low:2};
+      cmp = (orderMap[a.priority]||1) - (orderMap[b.priority]||1);
+    } else if (field === 'type') {
+      cmp = (a.task_type||'').localeCompare(b.task_type||'');
+    } else {
+      cmp = (a.title||'').localeCompare(b.title||'');
+    }
+    return order === 'desc' ? -cmp : cmp;
+  });
+
+  renderTaskList(list);
+}
+
+function renderTaskList(list) {
+  const el = document.getElementById('taskList');
+  document.getElementById('taskCount').textContent = list.length;
+  if (!list.length) {
+    el.innerHTML = '<div class="text-center text-secondary py-3">Нет задач</div>';
+    return;
+  }
+  el.innerHTML = list.map(t => {
+    const dl = t.deadline ? new Date(t.deadline).toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : '—';
+    return '<div class="d-flex align-items-center gap-2 p-1 border-bottom border-secondary task-row" style="cursor:pointer" onclick="openDetailModal(' + t.id + ')">'
+      + '<span class="badge ' + (STATUS_CLASS[t.status]||'bg-secondary') + '" style="width:8px;height:8px;padding:0;border-radius:50%"></span>'
+      + '<span class="flex-grow-1 text-truncate small">' + t.title + '</span>'
+      + '<small class="text-secondary text-nowrap">' + dl + '</small>'
+      + '</div>';
+  }).join('');
+}
+
+// ─── Detail modal with inline editing ───────────────────────
+
+function openDetailModal(id) {
+  fetch('/api/tasks/all').then(r => r.json()).then(all => {
+    const t = all.find(x => x.id === id) || allTasksData.find(x => x.id === id);
+    if (!t) { alert('Задача не найдена'); return; }
+
+    detailTaskId = t.id;
+    detailChecklistOrig = JSON.parse(JSON.stringify(t.checklist || []));
+
+    const modal = new bootstrap.Modal(document.getElementById('taskDetailModal'));
+    document.getElementById('detailTitle').textContent = '#' + t.id + ' ' + t.title;
+
+    let notesHtml = '<label class="form-label mb-0 mt-1">Заметка</label><textarea class="form-control mb-2" id="detailNotes" rows="2" style="white-space:pre-wrap">' + (t.notes || '') + '</textarea>';
+    let commentHtml = '<label class="form-label mb-0 mt-1">Комментарий</label><textarea class="form-control mb-2" id="detailComment" rows="3" style="white-space:pre-wrap">' + (t.comment || '') + '</textarea>';
+
+    let checklistHtml = '';
+    if (t.checklist && t.checklist.length) {
+      checklistHtml = '<label class="form-label fw-semibold mt-2">Чек-лист</label><div id="detailChecklist">'
+        + t.checklist.map((ci, i) => renderChecklistItem(ci, i)).join('')
+        + '</div>';
+    }
+
+    document.getElementById('detailBody').innerHTML = '<table class="table table-sm table-borderless mb-2">'
+      + '<tr><td class="text-secondary" style="width:120px">Тип</td><td>' + (TYPE_LABELS[t.task_type]||t.task_type) + '</td></tr>'
+      + (t.client ? '<tr><td class="text-secondary">Клиент</td><td>' + t.client + '</td></tr>' : '')
+      + '<tr><td class="text-secondary">Срок</td><td>' + (t.deadline ? new Date(t.deadline).toLocaleString('ru-RU') : '—') + '</td></tr>'
+      + '<tr><td class="text-secondary">Статус</td><td><span class="badge ' + (STATUS_CLASS[t.status]||'bg-secondary') + '" id="detailStatusBadge">' + (STATUS_LABELS[t.status]||t.status) + '</span></td></tr>'
+      + '<tr><td class="text-secondary">Важность</td><td>' + (PRIO_LABELS[t.priority]||t.priority) + '</td></tr>'
+      + '</table>'
+      + notesHtml
+      + commentHtml
+      + checklistHtml;
+
+    document.getElementById('detailFooter').innerHTML = ''
+      + '<button class="btn btn-primary btn-sm" onclick="saveDetailChanges()"><i class="bi bi-check-lg"></i> Сохранить</button>'
+      + (t.status !== 'done'
+        ? '<form method="POST" action="/tasks/' + t.id + '/done" class="d-inline"><button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Выполнено</button></form>'
+        : '')
+      + '<a href="/tasks?search=%23' + t.id + '" class="btn btn-outline-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> В список задач</a>';
+
+    modal.show();
+  });
+}
+
+function renderChecklistItem(ci, i) {
+  const checked = ci.done ? 'checked' : '';
+  const textVal = ci.text || '';
+  const reminderVal = ci.reminder || '';
+  const reminderHtml = reminderVal
+    ? '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" value="' + reminderVal.replace('Z','').slice(0,16) + '" style="max-width:200px">'
+    : '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" style="max-width:200px">';
+  return '<div class="input-group input-group-sm mb-1">'
+    + '<div class="input-group-text">'
+    + '<input class="form-check-input mt-0" type="checkbox" ' + checked + ' onchange="onChecklistToggle(' + i + ', this.checked)">'
+    + '</div>'
+    + '<input type="text" class="form-control" id="ci_text_' + i + '" value="' + textVal.replace(/"/g,'&quot;') + '">'
+    + reminderHtml
+    + '<button class="btn btn-outline-danger" onclick="removeDetailChecklistItem(' + i + ')"><i class="bi bi-x"></i></button>'
+    + '</div>';
+}
+
+function onChecklistToggle(i, checked) {
+  // update visuals only; actual save happens in saveDetailChanges
+}
+
+function removeDetailChecklistItem(i) {
+  const el = document.querySelector('#detailChecklist .input-group:nth-child(' + (i+1) + ')');
+  if (el) el.remove();
+}
+
+function saveDetailChanges() {
+  const notes = document.getElementById('detailNotes')?.value || '';
+  const comment = document.getElementById('detailComment')?.value || '';
+
+  // Collect checklist from UI
+  const checklistItems = [];
+  const container = document.getElementById('detailChecklist');
+  if (container) {
+    const groups = container.querySelectorAll('.input-group');
+    groups.forEach(g => {
+      const cb = g.querySelector('.form-check-input');
+      const textInput = g.querySelector('input[id^="ci_text_"]');
+      const remindInput = g.querySelector('input[id^="ci_remind_"]');
+      if (textInput) {
+        const text = textInput.value.trim();
+        if (text) {
+          const item = {text: text, done: cb ? cb.checked : false};
+          if (remindInput && remindInput.value) {
+            const d = new Date(remindInput.value);
+            if (!isNaN(d.getTime())) item.reminder = d.toISOString();
+          }
+          checklistItems.push(item);
+        }
+      }
+    });
+  }
+
+  // Save notes + checklist
+  fetch('/api/tasks/' + detailTaskId, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({notes: notes, comment: comment, checklist: checklistItems.length ? checklistItems : null})
+  }).then(r => {
+    if (r.ok) {
+      showToast('Сохранено');
+      loadTaskList();
+      bootstrap.Modal.getInstance(document.getElementById('taskDetailModal')).hide();
+    } else {
+      alert('Ошибка сохранения');
+    }
+  }).catch(() => alert('Ошибка сети'));
+}
+
+// ─── Calendar ───────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadTaskList();
+
+  const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    initialView: 'dayGridMonth',
+    locale: 'ru',
+    firstDay: 1,
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,timeGridDay'
+    },
+    editable: true,
+    droppable: false,
+    dateClick: function(info) {
+      const d = new Date(info.date);
+      if (info.view.type === 'dayGridMonth') d.setHours(12, 0, 0, 0);
+      const local = d.toLocaleString('sv-SE', {timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}).replace(' ', 'T').slice(0, 16);
+      document.getElementById('createDeadline').value = local;
+      const modal = new bootstrap.Modal(document.getElementById('taskModal'));
+      modal.show();
+    },
+    eventDrop: function(info) {
+      const eventId = info.event.id;
+      const newDate = info.event.start.toISOString();
+      if (!confirm('Перенести на ' + info.event.start.toLocaleString('ru-RU') + '?')) {
+        info.revert();
+        return;
+      }
+      fetch('/api/tasks/' + eventId, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({deadline: newDate})
+      }).then(r => {
+        if (!r.ok) { info.revert(); alert('Ошибка'); }
+        else { showToast('Срок изменён'); loadTaskList(); }
+      }).catch(() => { info.revert(); alert('Ошибка сети'); });
+    },
+    eventClick: function(info) {
+      info.jsEvent.preventDefault();
+      const id = info.event.extendedProps.is_checklist
+        ? info.event.extendedProps.task_id
+        : parseInt(info.event.id);
+      openDetailModal(id);
+    },
+    events: function(fetchInfo, successCallback) {
+      fetch('/api/tasks?start=' + fetchInfo.startStr + '&end=' + fetchInfo.endStr)
+        .then(r => r.json())
+        .then(data => successCallback(data));
+    },
+    eventDidMount: function(info) {
+      info.el.style.cursor = 'pointer';
+      if (info.event.extendedProps.is_checklist) {
+        info.el.style.borderStyle = 'dashed';
+        info.el.style.opacity = '0.85';
+      }
+      info.el.title = info.event.title + (info.event.extendedProps.client ? ' (' + info.event.extendedProps.client + ')' : '');
+    }
+  });
+  calendar.render();
+});
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast align-items-center text-bg-success border-0 position-fixed bottom-0 end-0 m-3';
+  t.innerHTML = '<div class="d-flex"><div class="toast-body">' + msg + '</div><button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+  document.body.appendChild(t);
+  const toast = new bootstrap.Toast(t, {delay: 3000});
+  toast.show();
+  t.addEventListener('hidden.bs.toast', function() { t.remove(); });
+}
+</script>
+{% endblock %}

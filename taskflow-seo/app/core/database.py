@@ -21,6 +21,7 @@ async def _migrate():
     async with engine.begin() as conn:
         for col in [
             'ALTER TABLE tasks ADD COLUMN comment TEXT',
+            'ALTER TABLE clients ADD COLUMN org_data TEXT',
         ]:
             try:
                 await conn.execute(text(col))

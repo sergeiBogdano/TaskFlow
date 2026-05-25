@@ -1,0 +1,10 @@
+body { background: var(--bs-body-bg); }
+.sidebar { background: var(--bs-dark); }
+.sidebar .nav-link { color: var(--bs-secondary-color); border-radius: 0.5rem; margin-bottom: 0.125rem; }
+.sidebar .nav-link:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+.sidebar .nav-link.active { background: var(--bs-primary); color: #fff; }
+.card { border-color: var(--bs-border-color); }
+.table > :not(caption) > * > * { vertical-align: middle; }
+.badge { font-weight: 500; }
+.fc-event { cursor: pointer !important; }
+.fc-daygrid-event { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

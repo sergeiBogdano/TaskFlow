@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <a href="/clients" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="mb-0 d-inline"><i class="bi bi-people me-2"></i>{{ client.org_name }}</h4>
+  </div>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#quickTaskModal">
+    <i class="bi bi-plus-lg me-1"></i>Добавить задачу
+  </button>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <small class="text-secondary">Домен</small>
+        <div>{% if client.domain %}{{ client.domain }}{% else %}<span class="text-secondary">—</span>{% endif %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <small class="text-secondary">Статус</small>
+        <div>
+          <form method="POST" action="/clients/{{ client.id }}/status" class="d-inline">
+            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+              <option value="active" {% if client.status == 'active' %}selected{% endif %}>Активен</option>
+              <option value="paused" {% if client.status == 'paused' %}selected{% endif %}>Пауза</option>
+              <option value="closed" {% if client.status == 'closed' %}selected{% endif %}>Закрыт</option>
+            </select>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <small class="text-secondary">Договор до</small>
+        {% set end_aware = to_tz(client.contract_end) %}
+        {% set days_left = (end_aware - now).days if end_aware else 0 %}
+        {% if end_aware %}
+          <div class="{% if days_left < 0 %}text-danger{% elif days_left < 14 %}text-warning{% endif %}">
+            {{ end_aware.strftime('%d.%m.%Y') }}
+            {% if days_left < 0 %} (просрочен){% elif days_left < 14 %} (осталось {{ days_left }} дн.){% endif %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if client.org_data %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span><i class="bi bi-building me-1"></i>Данные организации</span>
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editClientModal"><i class="bi bi-pencil"></i></button>
+  </div>
+  <div class="card-body">
+    <pre style="white-space:pre-wrap;margin:0;font-family:inherit">{{ client.org_data }}</pre>
+  </div>
+</div>
+{% else %}
+<div class="mb-3 text-center">
+  <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#editClientModal"><i class="bi bi-plus"></i> Добавить данные организации</button>
+</div>
+{% endif %}
+
+{% if upcoming_tasks %}
+<div class="card mb-3">
+  <div class="card-header"><i class="bi bi-calendar3 me-1"></i>Ближайшие задачи (7 дней)</div>
+  <div class="card-body p-0">
+    <ul class="list-group list-group-flush">
+      {% for t in upcoming_tasks %}
+      {% set dl_aware = to_tz(t.deadline) %}
+      <li class="list-group-item d-flex justify-content-between align-items-center" style="cursor:pointer" onclick="openDetailModal({{ t.id }})">
+        <div>
+          <span class="badge bg-secondary me-1">#{{ t.id }}</span>
+          {{ t.title }}
+        </div>
+        <small class="{% if dl_aware and dl_aware < now %}text-danger{% endif %}">{{ dl_aware.strftime('%d.%m.%Y %H:%M') if dl_aware else '?' }}</small>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-list-task me-1"></i>Все задачи</div>
+  <div class="card-body p-0">
+    {% if tasks %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>#</th>
+              <th>Задача</th>
+              <th>Срок</th>
+              <th>Важность</th>
+              <th>Статус</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tasks %}
+            {% set dl_aware = to_tz(t.deadline) %}
+            <tr class="{% if t.status == 'overdue' %}table-danger{% elif t.status == 'done' %}table-success{% endif %}" style="cursor:pointer" onclick="openDetailModal({{ t.id }})">
+              <td>{{ t.id }}</td>
+              <td>{{ t.title }}</td>
+              <td>
+                {% if dl_aware %}
+                  {% if dl_aware < now and t.status != 'done' %}
+                    <span class="text-danger fw-bold">{{ dl_aware.strftime('%d.%m.%Y %H:%M') }}</span>
+                  {% else %}
+                    {{ dl_aware.strftime('%d.%m.%Y %H:%M') }}
+                  {% endif %}
+                {% else %}<span class="text-secondary">—</span>{% endif %}
+              </td>
+              <td>
+                {% if t.priority == 'high' %}<span class="badge bg-danger">Высокий</span>
+                {% elif t.priority == 'medium' %}<span class="badge bg-warning text-dark">Средний</span>
+                {% else %}<span class="badge bg-secondary">Низкий</span>{% endif %}
+              </td>
+              <td>
+                {% if t.status == 'todo' %}<span class="badge bg-secondary">К выполнению</span>
+                {% elif t.status == 'in_progress' %}<span class="badge bg-primary">В работе</span>
+                {% elif t.status == 'done' %}<span class="badge bg-success">Выполнено</span>
+                {% elif t.status == 'overdue' %}<span class="badge bg-danger">Просрочено</span>{% endif %}
+              </td>
+              <td onclick="event.stopPropagation()">
+                {% if t.status != 'done' %}
+                <form method="POST" action="/tasks/{{ t.id }}/done" class="d-inline">
+                  <button class="btn btn-sm btn-outline-success" title="Выполнено"><i class="bi bi-check-lg"></i></button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="p-3 text-center text-secondary">Нет задач</div>
+    {% endif %}
+  </div>
+</div>
+
+{# Модалка просмотра/редактирования задачи #}
+<div class="modal fade" id="taskDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="detailTitle">Задача</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer" id="detailFooter"></div>
+    </div>
+  </div>
+</div>
+
+{# Модалка создания задачи #}
+<div class="modal fade" id="quickTaskModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="POST" action="/tasks/create">
+      <input type="hidden" name="client_id" value="{{ client.id }}">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Задача для {{ client.org_name }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Название</label>
+            <input type="text" name="title" class="form-control" required autofocus>
+          </div>
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Тип</label>
+              <select name="task_type" class="form-select">
+                <option value="custom">Обычная</option>
+                <option value="article">Статья</option>
+                <option value="seo">SEO</option>
+                <option value="dev">Разработка</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Важность</label>
+              <select name="priority" class="form-select">
+                <option value="low">Низкий</option>
+                <option value="medium" selected>Средний</option>
+                <option value="high">Высокий</option>
+              </select>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Срок</label>
+            <input type="datetime-local" name="deadline" class="form-control" value="{{ to_tz(client.contract_end).strftime('%Y-%m-%dT%H:%M') if client.contract_end else '' }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Заметка</label>
+            <textarea name="notes" class="form-control" rows="2" placeholder="Краткая заметка"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Комментарий</label>
+            <textarea name="comment" class="form-control" rows="4" placeholder="Подробное описание задачи"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const STATUS_LABELS = {todo:'К выполнению', in_progress:'В работе', done:'Выполнено', overdue:'Просрочено'};
+const PRIO_LABELS = {high:'Высокий', medium:'Средний', low:'Низкий'};
+const TYPE_LABELS = {article:'Статья', seo:'SEO', dev:'Разработка', custom:'Обычная'};
+const STATUS_CLASS = {todo:'bg-secondary', in_progress:'bg-primary', done:'bg-success', overdue:'bg-danger'};
+
+let detailTaskId = null;
+
+function openDetailModal(id) {
+  fetch('/api/tasks/all').then(r => r.json()).then(all => {
+    const t = all.find(x => x.id === id);
+    if (!t) { alert('Задача не найдена'); return; }
+
+    detailTaskId = t.id;
+    const modal = new bootstrap.Modal(document.getElementById('taskDetailModal'));
+    document.getElementById('detailTitle').textContent = '#' + t.id + ' ' + t.title;
+
+    let notesHtml = '<label class="form-label mb-0 mt-1">Заметка</label><textarea class="form-control mb-2" id="detailNotes" rows="2" style="white-space:pre-wrap">' + (t.notes || '') + '</textarea>';
+    let commentHtml = '<label class="form-label mb-0 mt-1">Комментарий</label><textarea class="form-control mb-2" id="detailComment" rows="3" style="white-space:pre-wrap">' + (t.comment || '') + '</textarea>';
+
+    let checklistHtml = '';
+    if (t.checklist && t.checklist.length) {
+      checklistHtml = '<label class="form-label fw-semibold mt-2">Чек-лист</label><div id="detailChecklist">'
+        + t.checklist.map((ci, i) => renderChecklistItem(ci, i)).join('')
+        + '</div>';
+    }
+
+    document.getElementById('detailBody').innerHTML = '<table class="table table-sm table-borderless mb-2">'
+      + '<tr><td class="text-secondary" style="width:120px">Тип</td><td>' + (TYPE_LABELS[t.task_type]||t.task_type) + '</td></tr>'
+      + (t.client ? '<tr><td class="text-secondary">Клиент</td><td>' + t.client + '</td></tr>' : '')
+      + '<tr><td class="text-secondary">Срок</td><td>' + (t.deadline ? new Date(t.deadline).toLocaleString('ru-RU') : '—') + '</td></tr>'
+      + '<tr><td class="text-secondary">Статус</td><td><span class="badge ' + (STATUS_CLASS[t.status]||'bg-secondary') + '">' + (STATUS_LABELS[t.status]||t.status) + '</span></td></tr>'
+      + '<tr><td class="text-secondary">Важность</td><td>' + (PRIO_LABELS[t.priority]||t.priority) + '</td></tr>'
+      + '</table>'
+      + notesHtml
+      + commentHtml
+      + checklistHtml;
+
+    document.getElementById('detailFooter').innerHTML = ''
+      + '<button class="btn btn-primary btn-sm" onclick="saveDetailChanges()"><i class="bi bi-check-lg"></i> Сохранить</button>'
+      + (t.status !== 'done'
+        ? '<form method="POST" action="/tasks/' + t.id + '/done" class="d-inline"><button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Выполнено</button></form>'
+        : '')
+      + '<a href="/tasks?search=%23' + t.id + '" class="btn btn-outline-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> В список задач</a>';
+
+    modal.show();
+  });
+}
+
+function renderChecklistItem(ci, i) {
+  const checked = ci.done ? 'checked' : '';
+  const textVal = ci.text || '';
+  const reminderVal = ci.reminder || '';
+  const reminderHtml = reminderVal
+    ? '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" value="' + reminderVal.replace('Z','').slice(0,16) + '" style="max-width:200px">'
+    : '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" style="max-width:200px">';
+  return '<div class="input-group input-group-sm mb-1">'
+    + '<div class="input-group-text">'
+    + '<input class="form-check-input mt-0" type="checkbox" ' + checked + ' onchange="onChecklistToggle(' + i + ', this.checked)">'
+    + '</div>'
+    + '<input type="text" class="form-control" id="ci_text_' + i + '" value="' + textVal.replace(/"/g,'&quot;') + '">'
+    + reminderHtml
+    + '<button class="btn btn-outline-danger" onclick="removeDetailChecklistItem(' + i + ')"><i class="bi bi-x"></i></button>'
+    + '</div>';
+}
+
+function onChecklistToggle(i, checked) {}
+
+function removeDetailChecklistItem(i) {
+  const el = document.querySelector('#detailChecklist .input-group:nth-child(' + (i+1) + ')');
+  if (el) el.remove();
+}
+
+function saveDetailChanges() {
+  const notes = document.getElementById('detailNotes')?.value || '';
+  const comment = document.getElementById('detailComment')?.value || '';
+  const checklistItems = [];
+  const container = document.getElementById('detailChecklist');
+  if (container) {
+    const groups = container.querySelectorAll('.input-group');
+    groups.forEach(g => {
+      const cb = g.querySelector('.form-check-input');
+      const textInput = g.querySelector('input[id^="ci_text_"]');
+      const remindInput = g.querySelector('input[id^="ci_remind_"]');
+      if (textInput) {
+        const text = textInput.value.trim();
+        if (text) {
+          const item = {text: text, done: cb ? cb.checked : false};
+          if (remindInput && remindInput.value) {
+            const d = new Date(remindInput.value);
+            if (!isNaN(d.getTime())) item.reminder = d.toISOString();
+          }
+          checklistItems.push(item);
+        }
+      }
+    });
+  }
+
+  fetch('/api/tasks/' + detailTaskId, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({notes: notes, comment: comment, checklist: checklistItems.length ? checklistItems : null})
+  }).then(r => {
+    if (r.ok) {
+      alert('Сохранено');
+      location.reload();
+    } else {
+      alert('Ошибка сохранения');
+    }
+  }).catch(() => alert('Ошибка сети'));
+}
+
+{# Модалка редактирования клиента #}
+<div class="modal fade" id="editClientModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="POST" action="/clients/{{ client.id }}/update">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Редактировать {{ client.org_name }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Название организации</label>
+            <input type="text" name="org_name" class="form-control" value="{{ client.org_name }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Домен</label>
+            <input type="text" name="domain" class="form-control" value="{{ client.domain or '' }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Окончание договора</label>
+            {% set end_dt = to_tz(client.contract_end) %}
+            <input type="datetime-local" name="contract_end" class="form-control" value="{{ end_dt.strftime('%Y-%m-%dT%H:%M') if end_dt else '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Данные организации</label>
+            <textarea name="org_data" class="form-control" rows="5" placeholder="Телефон, email, адрес, INN, KPP...">{{ client.org_data or '' }}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+</script>
+{% endblock %}

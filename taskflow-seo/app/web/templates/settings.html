@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-gear me-2"></i>Настройки</h4>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Основные</div>
+      <div class="card-body">
+        <form method="POST" action="/settings">
+          <div class="mb-3">
+            <label class="form-label">Часовой пояс</label>
+            <select name="timezone" class="form-select">
+              <option value="Europe/Moscow" {% if settings.timezone == 'Europe/Moscow' %}selected{% endif %}>Москва (UTC+3)</option>
+              <option value="Europe/Samara" {% if settings.timezone == 'Europe/Samara' %}selected{% endif %}>Самара (UTC+4)</option>
+              <option value="Europe/Kaliningrad" {% if settings.timezone == 'Europe/Kaliningrad' %}selected{% endif %}>Калининград (UTC+2)</option>
+              <option value="Asia/Yekaterinburg" {% if settings.timezone == 'Asia/Yekaterinburg' %}selected{% endif %}>Екатеринбург (UTC+5)</option>
+              <option value="Asia/Novosibirsk" {% if settings.timezone == 'Asia/Novosibirsk' %}selected{% endif %}>Новосибирск (UTC+7)</option>
+              <option value="Asia/Vladivostok" {% if settings.timezone == 'Asia/Vladivostok' %}selected{% endif %}>Владивосток (UTC+10)</option>
+              <option value="Asia/Kamchatka" {% if settings.timezone == 'Asia/Kamchatka' %}selected{% endif %}>Камчатка (UTC+12)</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Напоминание за (часов до срока)</label>
+            <select name="reminder_offset" class="form-select">
+              {% for h in [1, 2, 3, 6, 12, 24] %}
+                <option value="{{ h }}" {% if settings.default_reminder_offset_hours == h %}selected{% endif %}>{{ h }} ч.</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Сохранить</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Предустановки чек-листов</div>
+      <div class="card-body">
+        <form id="templatesForm">
+          {% for key, items in templates.items() %}
+          <div class="mb-3">
+            <label class="form-label">
+              {% if key == 'article' %}Статья
+              {% elif key == 'seo' %}SEO
+              {% elif key == 'dev' %}Разработка
+              {% endif %}
+            </label>
+            <div id="tpl_{{ key }}">
+              {% for item in items %}
+              <div class="input-group mb-1">
+                <input type="text" class="form-control form-control-sm tpl-input" value="{{ item.text }}" data-key="{{ key }}">
+                <button class="btn btn-sm btn-outline-danger" type="button" onclick="this.parentElement.remove()"><i class="bi bi-x"></i></button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="addTplItem('{{ key }}')"><i class="bi bi-plus"></i> Добавить</button>
+          </div>
+          {% endfor %}
+          <button type="button" class="btn btn-primary" onclick="saveTemplates()"><i class="bi bi-check-lg me-1"></i>Сохранить предустановки</button>
+          <span id="tplStatus" class="ms-2"></span>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function addTplItem(key) {
+  const c = document.getElementById('tpl_' + key);
+  const div = document.createElement('div');
+  div.className = 'input-group mb-1';
+  div.innerHTML = '<input type="text" class="form-control form-control-sm tpl-input" value="" data-key="' + key + '"><button class="btn btn-sm btn-outline-danger" type="button" onclick="this.parentElement.remove()"><i class="bi bi-x"></i></button>';
+  c.appendChild(div);
+}
+
+function saveTemplates() {
+  const data = {article: [], seo: [], dev: []};
+  document.querySelectorAll('.tpl-input').forEach(inp => {
+    const key = inp.dataset.key;
+    if (key && inp.value.trim() && data[key]) {
+      data[key].push({text: inp.value.trim(), done: false});
+    }
+  });
+  fetch('/api/templates', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(r => r.json()).then(resp => {
+    const s = document.getElementById('tplStatus');
+    if (resp.ok) {
+      s.innerHTML = '<span class="text-success">Сохранено</span>';
+      setTimeout(() => s.innerHTML = '', 3000);
+    } else {
+      s.innerHTML = '<span class="text-danger">Ошибка</span>';
+    }
+  });
+}
+</script>
+{% endblock %}

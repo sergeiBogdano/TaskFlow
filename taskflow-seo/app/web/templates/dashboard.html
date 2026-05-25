@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Дашборд</h3>
+  <span class="text-secondary">{{ now.strftime('%d.%m.%Y %H:%M') }}</span>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card border-danger h-100">
+      <div class="card-body text-center">
+        <h1 class="text-danger mb-0">{{ overdue_count }}</h1>
+        <div class="text-secondary small">Просрочено</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-warning h-100">
+      <div class="card-body text-center">
+        <h1 class="text-warning mb-0">{{ today_count }}</h1>
+        <div class="text-secondary small">На сегодня</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-info h-100">
+      <div class="card-body text-center">
+        <h1 class="text-info mb-0">{{ active_clients }}</h1>
+        <div class="text-secondary small">Активных клиентов</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-success h-100">
+      <div class="card-body text-center">
+        <h1 class="text-success mb-0">{{ done_tasks }}/{{ total_tasks }}</h1>
+        <div class="text-secondary small">Выполнено / Всего</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-exclamation-triangle me-1 text-danger"></i>Просроченные задачи</div>
+      <div class="card-body p-0">
+        {% if overdue_tasks %}
+          <ul class="list-group list-group-flush">
+            {% for t in overdue_tasks %}
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                  <span class="badge bg-danger me-1">#{{ t.id }}</span>
+                  {{ t.title }}
+                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
+                </div>
+                <small class="text-danger">{{ format_dt(t.deadline, tz) if t.deadline else '?' }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-secondary">Нет просроченных задач</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-calendar-check me-1 text-warning"></i>Задачи на сегодня</div>
+      <div class="card-body p-0">
+        {% if today_tasks %}
+          <ul class="list-group list-group-flush">
+            {% for t in today_tasks %}
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                  <span class="badge bg-warning text-dark me-1">#{{ t.id }}</span>
+                  {{ t.title }}
+                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-secondary">Нет задач на сегодня</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -21,6 +21,7 @@ class ClientService:
         contract_end: datetime,
         domain: str | None = None,
         status: str = 'active',
+        org_data: str | None = None,
     ) -> Client:
         if contract_start.tzinfo is None:
             contract_start = contract_start.replace(tzinfo=settings.tz)
@@ -33,6 +34,7 @@ class ClientService:
             contract_start=to_utc(contract_start),
             contract_end=to_utc(contract_end),
             status=status,
+            org_data=org_data,
         )
         self.session.add(client)
         await self.session.commit()
