@@ -1,0 +1,61 @@
+{
+  "title": "Тех. аудит",
+  "description": "Шаблон для технического SEO-аудита сайта",
+  "tasks": [
+    {
+      "title": "Анализ индексации",
+      "task_type": "seo",
+      "priority": "high",
+      "default_deadline_offset_days": 1,
+      "checklist": [
+        {"text": "Яндекс.Вебмастер", "done": false},
+        {"text": "Google Search Console", "done": false},
+        {"text": "Проверка дублей", "done": false}
+      ]
+    },
+    {
+      "title": "Анализ скорости загрузки",
+      "task_type": "seo",
+      "priority": "high",
+      "default_deadline_offset_days": 2,
+      "checklist": [
+        {"text": "PageSpeed Insights", "done": false},
+        {"text": "Core Web Vitals", "done": false}
+      ]
+    },
+    {
+      "title": "Проверка мета-тегов",
+      "task_type": "seo",
+      "priority": "medium",
+      "default_deadline_offset_days": 2,
+      "checklist": [
+        {"text": "Title", "done": false},
+        {"text": "Description", "done": false},
+        {"text": "H1-H6", "done": false}
+      ]
+    },
+    {
+      "title": "Анализ ссылочной структуры",
+      "task_type": "seo",
+      "priority": "medium",
+      "default_deadline_offset_days": 3,
+      "checklist": [
+        {"text": "Внутренняя перелинковка", "done": false},
+        {"text": "Битые ссылки", "done": false},
+        {"text": "Внешние ссылки", "done": false}
+      ]
+    },
+    {
+      "title": "Составление отчёта и рекомендаций",
+      "task_type": "seo",
+      "priority": "high",
+      "default_deadline_offset_days": 5,
+      "checklist": [
+        {"text": "Описание проблем", "done": false},
+        {"text": "Рекомендации", "done": false},
+        {"text": "Оценка трудозатрат", "done": false},
+        {"text": "Отправка клиенту", "done": false}
+      ]
+    }
+  ]
+}

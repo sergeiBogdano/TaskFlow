@@ -1,0 +1,114 @@
+{
+  "title": "Создание сайта",
+  "description": "Шаблон для создания сайта под ключ",
+  "tasks": [
+    {
+      "title": "Согласование ТЗ с клиентом",
+      "task_type": "seo",
+      "priority": "high",
+      "default_deadline_offset_days": 1,
+      "checklist": [
+        {"text": "Собрать требования", "done": false},
+        {"text": "Составить ТЗ", "done": false},
+        {"text": "Согласовать с клиентом", "done": false}
+      ]
+    },
+    {
+      "title": "Регистрация домена и хостинга",
+      "task_type": "dev",
+      "priority": "high",
+      "default_deadline_offset_days": 2,
+      "checklist": [
+        {"text": "Проверить доступность домена", "done": false},
+        {"text": "Зарегистрировать домен", "done": false},
+        {"text": "Настроить хостинг", "done": false}
+      ]
+    },
+    {
+      "title": "Разработка структуры сайта",
+      "task_type": "dev",
+      "priority": "high",
+      "default_deadline_offset_days": 5,
+      "checklist": [
+        {"text": "Разработать структуру", "done": false},
+        {"text": "Согласовать с клиентом", "done": false}
+      ]
+    },
+    {
+      "title": "Дизайн макетов",
+      "task_type": "custom",
+      "priority": "medium",
+      "default_deadline_offset_days": 10,
+      "checklist": [
+        {"text": "Главная страница", "done": false},
+        {"text": "Внутренние страницы", "done": false},
+        {"text": "Адаптивная версия", "done": false}
+      ]
+    },
+    {
+      "title": "Вёрстка и программирование",
+      "task_type": "dev",
+      "priority": "high",
+      "default_deadline_offset_days": 20,
+      "checklist": [
+        {"text": "Вёрстка главной", "done": false},
+        {"text": "Вёрстка внутренних", "done": false},
+        {"text": "Программирование функционала", "done": false}
+      ]
+    },
+    {
+      "title": "SEO-настройка сайта",
+      "task_type": "seo",
+      "priority": "medium",
+      "default_deadline_offset_days": 25,
+      "checklist": [
+        {"text": "Мета-теги", "done": false},
+        {"text": "SEO-дружественные URL", "done": false},
+        {"text": "Карта сайта XML", "done": false},
+        {"text": "Robots.txt", "done": false}
+      ]
+    },
+    {
+      "title": "Наполнение контентом",
+      "task_type": "article",
+      "priority": "medium",
+      "default_deadline_offset_days": 30,
+      "checklist": [
+        {"text": "Тексты страниц", "done": false},
+        {"text": "Изображения", "done": false}
+      ]
+    },
+    {
+      "title": "Тестирование",
+      "task_type": "dev",
+      "priority": "high",
+      "default_deadline_offset_days": 35,
+      "checklist": [
+        {"text": "Кросс-браузерное тестирование", "done": false},
+        {"text": "Мобильное тестирование", "done": false},
+        {"text": "Скорость загрузки", "done": false}
+      ]
+    },
+    {
+      "title": "Запуск сайта",
+      "task_type": "custom",
+      "priority": "high",
+      "default_deadline_offset_days": 40,
+      "checklist": [
+        {"text": "Перенос на боевой сервер", "done": false},
+        {"text": "Финальная проверка", "done": false},
+        {"text": "Анонс клиенту", "done": false}
+      ]
+    },
+    {
+      "title": "Передача доступов клиенту",
+      "task_type": "custom",
+      "priority": "medium",
+      "default_deadline_offset_days": 41,
+      "checklist": [
+        {"text": "Подготовить инструкцию", "done": false},
+        {"text": "Передать доступы", "done": false}
+      ]
+    }
+  ]
+}

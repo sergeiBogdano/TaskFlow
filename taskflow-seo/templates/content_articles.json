@@ -1,0 +1,20 @@
+{
+  "title": "Контент/Статьи",
+  "description": "Шаблон для пакетного создания статей",
+  "per_topic": true,
+  "tasks": [
+    {
+      "title": "Статья по теме",
+      "task_type": "article",
+      "per_topic": true,
+      "priority": "medium",
+      "default_deadline_offset_days": 3,
+      "checklist": [
+        {"text": "Черновик", "done": false},
+        {"text": "Правки", "done": false},
+        {"text": "Публикация", "done": false},
+        {"text": "Проверка", "done": false}
+      ]
+    }
+  ]
+}
