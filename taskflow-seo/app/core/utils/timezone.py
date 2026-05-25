@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dateutil import parser as dateutil_parser

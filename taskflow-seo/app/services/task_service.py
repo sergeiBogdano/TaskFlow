@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import select, update, delete, and_
@@ -19,6 +20,7 @@ class TaskService:
         client_id: int | None = None,
         task_type: str = 'custom',
         notes: str | None = None,
+        comment: str | None = None,
         deadline: datetime | None = None,
         priority: str = 'medium',
         checklist: list | None = None,
@@ -33,6 +35,7 @@ class TaskService:
             title=title,
             task_type=task_type,
             notes=notes,
+            comment=comment,
             deadline=deadline,
             priority=priority,
             status='todo',

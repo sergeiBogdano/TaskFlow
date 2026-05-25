@@ -1,16 +1,36 @@
+from __future__ import annotations
+from typing import Any, Awaitable, Callable
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from app.core.config import settings
+from typing import Optional
 
 bot = Bot(token=settings.BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-_user_id: int | None = None
+_user_id: Optional[int] = None
 
 
 def set_user_id(user_id: int):
     global _user_id
     _user_id = user_id
+
+
+class UserIdMiddleware:
+    async def __call__(
+        self,
+        handler: Callable[[types.TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: types.TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        user = None
+        if isinstance(event, types.Message):
+            user = event.from_user
+        elif isinstance(event, types.CallbackQuery):
+            user = event.from_user
+        if user:
+            set_user_id(user.id)
+        return await handler(event, data)
 
 
 async def notify_user(reminder):

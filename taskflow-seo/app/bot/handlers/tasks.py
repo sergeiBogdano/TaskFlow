@@ -306,6 +306,41 @@ async def cb_snooze(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith('note_'))
+async def cb_note(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split('_')
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer('❌ Некорректный ID задачи')
+        return
+    task_id = int(parts[1])
+    await state.set_state(TaskStates.waiting_note_text)
+    await state.update_data(note_task_id=task_id)
+    await callback.message.answer(f'📝 Введите текст заметки для задачи #{task_id}:')
+    await callback.answer()
+
+
+@router.message(TaskStates.waiting_note_text)
+async def process_note_text(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data['note_task_id']
+    note = message.text.strip()
+    if not note:
+        await message.answer('❌ Текст заметки не может быть пустым.')
+        return
+
+    async with async_session() as session:
+        service = TaskService(session)
+        task = await service.add_note(task_id, note)
+        if not task:
+            await message.answer(f'❌ Задача #{task_id} не найдена.')
+            await state.clear()
+            return
+
+        await message.answer(f'📝 Заметка добавлена к задаче #{task_id}')
+
+    await state.clear()
+
+
 @router.callback_query(F.data == 'list_all')
 async def cb_list_all(callback: types.CallbackQuery):
     await cmd_list(callback.message)

@@ -5,6 +5,10 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
+from app.bot.bot import UserIdMiddleware
+
+for path in ['data', 'logs', 'templates', 'backups']:
+    Path(path).mkdir(exist_ok=True)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -19,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 async def main():
     logger.info(f'🚀 TaskFlow-SEO запуск (таймзона: {settings.DEFAULT_TIMEZONE})')
-
-    for path in ['data', 'logs', 'templates', 'backups']:
-        Path(path).mkdir(exist_ok=True)
 
     await init_db()
     logger.info('✅ База данных инициализирована')
@@ -38,6 +39,9 @@ async def main():
     dp.include_router(clients_router)
     dp.include_router(articles_router)
     dp.include_router(settings_router)
+
+    dp.message.middleware(UserIdMiddleware())
+    dp.callback_query.middleware(UserIdMiddleware())
 
     await start_scheduler()
 

@@ -17,11 +17,39 @@ router = Router()
 
 
 class ArticleStates(StatesGroup):
+    waiting_domain = State()
     waiting_topics = State()
     waiting_deadline = State()
 
 
 article_data: dict = {}
+
+
+@router.callback_query(F.data == 'articles')
+async def cb_articles(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await state.set_state(ArticleStates.waiting_domain)
+    await callback.message.answer('🌐 Введите домен клиента. Например: <code>spbpack.net</code>', parse_mode='HTML')
+    await callback.answer()
+
+
+@router.message(ArticleStates.waiting_domain)
+async def process_domain_input(message: types.Message, state: FSMContext):
+    domain = message.text.strip()
+    async with async_session() as session:
+        client_service = ClientService(session)
+        client = await client_service.get_client_by_domain(domain)
+        if not client:
+            await message.answer(f'❌ Клиент с доменом {domain} не найден. Проверьте написание.')
+            return
+
+    await state.update_data(domain=domain, client_id=client.id, client_org=client.org_name)
+    await state.set_state(ArticleStates.waiting_topics)
+    await message.answer(
+        f'📝 Введите темы статей (каждая с новой строки):\n'
+        f'<i>Клиент: {client.org_name} ({domain})</i>',
+        parse_mode='HTML',
+    )
 
 
 @router.message(Command('articles'))

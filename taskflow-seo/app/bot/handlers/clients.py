@@ -125,6 +125,13 @@ async def process_template_choice(callback: types.CallbackQuery, state: FSMConte
     await callback.answer()
 
 
+@router.callback_query(F.data == 'new_client')
+async def cb_new_client(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await cmd_new_client(callback.message, state)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith('extend_'))
 async def cb_extend_contract(callback: types.CallbackQuery):
     client_id = int(callback.data.split('_')[1])

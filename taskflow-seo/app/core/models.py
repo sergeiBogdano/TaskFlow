@@ -30,6 +30,7 @@ class Task(Base):
     title = Column(String(200), nullable=False)
     task_type = Column(String(50), default='custom')
     notes = Column(Text, nullable=True)
+    comment = Column(Text, nullable=True)
     deadline = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(20), default='todo')
     priority = Column(String(10), default='medium')
