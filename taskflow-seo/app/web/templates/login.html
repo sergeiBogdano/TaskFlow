@@ -19,8 +19,12 @@
       {% endif %}
       <form method="POST" action="/login">
         <div class="mb-3">
-          <label class="form-label">Ключ доступа</label>
-          <input type="password" name="secret" class="form-control" required autofocus>
+          <label class="form-label">Имя пользователя</label>
+          <input type="text" name="username" class="form-control" required autofocus>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Пароль</label>
+          <input type="password" name="password" class="form-control" required>
         </div>
         <button type="submit" class="btn btn-primary w-100">Войти</button>
       </form>

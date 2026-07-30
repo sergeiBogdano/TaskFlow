@@ -1,8 +1,10 @@
 from __future__ import annotations
+
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from dateutil import parser as dateutil_parser
-import re
 
 
 def utc_now() -> datetime:
@@ -19,6 +21,14 @@ def to_utc(dt: datetime) -> datetime:
 
 def format_datetime(dt: datetime, tz: ZoneInfo, fmt: str = '%d.%m.%Y %H:%M') -> str:
     return dt.astimezone(tz).strftime(fmt)
+
+
+def safe_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=ZoneInfo('UTC'))
+    return dt
 
 
 def parse_deadline(text: str, user_tz: ZoneInfo) -> datetime | None:
@@ -52,8 +62,8 @@ def parse_deadline(text: str, user_tz: ZoneInfo) -> datetime | None:
             groups = m.groups()
             if len(groups) == 2:
                 hour, minute = int(groups[0]), int(groups[1])
-                day = now.day + (1 if 'завтра' in text else 0)
-                month, year = now.month, now.year
+                dt = now + timedelta(days=1 if 'завтра' in text else 0)
+                day, month, year = dt.day, dt.month, dt.year
             elif len(groups) == 4:
                 day, month, hour, minute = int(groups[0]), int(groups[1]), int(groups[2]), int(groups[3])
                 year = now.year
@@ -69,6 +79,15 @@ def parse_deadline(text: str, user_tz: ZoneInfo) -> datetime | None:
                         return datetime(year, month, day, hour, minute, tzinfo=user_tz)
                     except ValueError:
                         return None
+
+    try:
+        cleaned = text.replace('Z', '+00:00')
+        parsed = datetime.fromisoformat(cleaned)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=user_tz)
+        return parsed
+    except (ValueError, TypeError):
+        pass
 
     try:
         parsed = dateutil_parser.parse(text, dayfirst=True, fuzzy=True)

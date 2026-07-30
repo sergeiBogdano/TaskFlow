@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 import json
 import logging
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
-from typing import Optional
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ class TemplateService:
     def __init__(self):
         self._cache: dict[str, dict] = {}
 
-    def load_template(self, name: str) -> Optional[dict]:
+    def load_template(self, name: str) -> dict | None:
         if name in self._cache:
             return self._cache[name]
 

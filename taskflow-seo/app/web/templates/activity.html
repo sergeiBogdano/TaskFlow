@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Журнал действий (Аудит)</h4>
+  <div>
+    <form class="d-inline-flex gap-2 align-items-center" method="GET">
+      <select name="entity_type" class="form-select form-select-sm" style="width:auto;">
+        <option value="">Все типы</option>
+        <option value="task" {% if filter_type == 'task' %}selected{% endif %}>Задачи</option>
+        <option value="client" {% if filter_type == 'client' %}selected{% endif %}>Клиенты</option>
+      </select>
+      <input type="number" name="entity_id" class="form-control form-control-sm" placeholder="ID" style="width:80px" value="{{ filter_id or '' }}">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">Фильтр</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    {% if logs %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>Время</th>
+            <th>Тип</th>
+            <th>ID</th>
+            <th>Действие</th>
+            <th>Описание</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr>
+            <td class="text-nowrap small">{{ format_dt(log.created_at, tz) if log.created_at else '' }}</td>
+            <td>
+              {% if log.entity_type == 'task' %}
+                <span class="badge bg-primary">Задача</span>
+              {% elif log.entity_type == 'client' %}
+                <span class="badge bg-info text-dark">Клиент</span>
+              {% else %}
+                <span class="badge bg-secondary">{{ log.entity_type }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if log.entity_id %}
+                {% if log.entity_type == 'task' %}
+                  <a href="#" onclick="openDetailModal({{ log.entity_id }});return false;">#{{ log.entity_id }}</a>
+                {% elif log.entity_type == 'client' %}
+                  <a href="/clients/{{ log.entity_id }}">#{{ log.entity_id }}</a>
+                {% else %}
+                  {{ log.entity_id }}
+                {% endif %}
+              {% endif %}
+            </td>
+            <td>
+              {% set action_icons = {
+                'created': 'bi-plus-circle text-success',
+                'updated': 'bi-pencil text-primary',
+                'deleted': 'bi-trash text-danger',
+                'restored': 'bi-arrow-counterclockwise text-warning',
+                'status_changed': 'bi-arrow-left-right text-info',
+                'snoozed': 'bi-clock text-warning',
+                'checklist_toggle': 'bi-list-check text-info',
+              } %}
+              <i class="bi {{ action_icons.get(log.action, 'bi-record-circle') }} me-1"></i>
+              {% if log.action == 'created' %}Создание
+              {% elif log.action == 'updated' %}Изменение
+              {% elif log.action == 'deleted' %}Удаление
+              {% elif log.action == 'restored' %}Восстановление
+              {% elif log.action == 'status_changed' %}Смена статуса
+              {% elif log.action == 'snoozed' %}Отложено
+              {% elif log.action == 'checklist_toggle' %}Чек-лист
+              {% else %}{{ log.action }}{% endif %}
+            </td>
+            <td>
+              <small>{{ log.summary or '' }}</small>
+              {% if log.field_name %}
+                <br><small class="text-secondary">{{ log.field_name }}{% if log.old_value is not none %}: {{ log.old_value }} → {{ log.new_value }}{% endif %}</small>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4 text-center text-secondary">Журнал действий пуст</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

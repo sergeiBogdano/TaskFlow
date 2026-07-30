@@ -1,0 +1,40 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.pydantic]
+# suppress PydanticDeprecatedSince20 warnings in tests
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # naming
+    "UP",   # pyupgrade
+    "S",    # bandit security
+    "B",    # bugbear
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line too long
+    "N802",   # function name should be lowercase
+    "N803",   # argument name should be lowercase
+    "N806",   # variable in function should be lowercase
+    "N815",   # mixed-case variable in class scope
+    "E402",   # module level import not at top of file
+    "SIM108", # use ternary
+    "SIM114", # combine if conditions
+    "RUF001", # Cyrillic in strings (false positive for Russian text)
+    "S104",   # hardcoded bind to all interfaces (intentional for uvicorn)
+    "SIM102", # collapsible if (style preference)
+]
+
+[tool.ruff.format]
+quote-style = "preserve"

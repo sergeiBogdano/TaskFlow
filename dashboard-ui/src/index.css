@@ -1,0 +1,301 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --color-bg: #07090d;
+  --color-sidebar: #080a0f;
+  --color-header: #090c12;
+  --color-surface: #10151d;
+  --color-surface-2: #151c27;
+  --color-surface-3: #202a38;
+  --color-border: #2a3443;
+  --color-border-strong: #536173;
+  --color-text: #f5f7fb;
+  --color-text-secondary: #b9c3d0;
+  --color-muted: #7e8998;
+  --color-accent: #6f8cff;
+  --color-accent-2: #7dd3c7;
+  --color-success: #57d68d;
+  --color-warning: #d8bd7b;
+  --color-danger: #ff7180;
+  --shadow-panel: 0 14px 42px rgba(0, 0, 0, .28), 0 1px 0 rgba(255, 255, 255, .04) inset;
+  --shadow-soft: 0 8px 22px rgba(0, 0, 0, .2);
+  --shadow-lift: 0 10px 26px rgba(0, 0, 0, .22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-bg);
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #07090d;
+  color: var(--color-text);
+  min-height: 100vh;
+  letter-spacing: 0;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(136, 168, 255, .35);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #303746;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tf-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .012)),
+    color-mix(in srgb, var(--color-surface) 96%, #182033);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-panel);
+}
+
+.tf-panel-flat {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .012)),
+    color-mix(in srgb, var(--color-surface) 94%, #1b2433);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+}
+
+.tf-panel-flat:hover {
+  border-color: color-mix(in srgb, var(--color-border-strong) 72%, var(--color-border));
+}
+
+.tf-input {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .045), transparent),
+    var(--color-surface-2);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 13px;
+  outline: none;
+}
+
+.tf-input.tf-input-icon {
+  padding-left: 36px;
+}
+
+.tf-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(136, 168, 255, .14);
+}
+
+.tf-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .016)),
+    var(--color-surface-2);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset;
+}
+
+.tf-button:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .05) inset;
+}
+
+.tf-button-primary {
+  border-color: rgba(136, 168, 255, .62);
+  background: #5f86ff;
+  color: white;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .14) inset;
+}
+
+.tf-button-primary:hover {
+  background: #6d92ff;
+}
+
+.tf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .055), rgba(255, 255, 255, .014)),
+    var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tf-page-title {
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.12;
+  color: var(--color-text);
+}
+
+.tf-page-subtitle {
+  margin-top: 4px;
+  max-width: 920px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tf-premium-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.tf-premium-shell::before {
+  content: none;
+}
+
+.tf-modal-shell .text-xs {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.tf-stat-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 92px;
+}
+
+.tf-stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 14px 0 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .18), transparent);
+}
+
+.tf-task-accent {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .05) inset;
+}
+
+.tf-modal-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .008)),
+    color-mix(in srgb, var(--color-surface) 94%, #151f33);
+  border: 1px solid rgba(135, 153, 184, .34);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, .36), 0 1px 0 rgba(255, 255, 255, .055) inset;
+}
+
+.tf-table-row {
+  display: grid;
+  align-items: center;
+  min-height: 48px;
+  border-bottom: 1px solid rgba(43, 50, 64, .65);
+}
+
+.tf-table-row:hover {
+  background: rgba(255, 255, 255, .035);
+}
+
+main h2.text-xl.font-black {
+  font-size: 22px;
+  line-height: 1.12;
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+main h2.text-xl.font-black + p.text-sm {
+  margin-top: 4px;
+  max-width: 920px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+section.grid.grid-cols-2.gap-3 > .tf-panel-flat {
+  min-height: 92px;
+  position: relative;
+  overflow: hidden;
+}
+
+section.grid.grid-cols-2.gap-3 > .tf-panel-flat::after {
+  content: "";
+  position: absolute;
+  inset: auto 14px 0 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .18), transparent);
+}
+
+section.grid.grid-cols-2.gap-3 > .tf-panel-flat span.h-4.w-4 {
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .09) inset, 0 8px 18px rgba(0, 0, 0, .22);
+}
+
+section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
+  margin-top: 10px;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.tf-panel-flat.overflow-hidden > div[class*="grid-cols-[36px"] {
+  position: relative;
+}
+
+.tf-panel-flat.overflow-hidden > div[class*="grid-cols-[36px"]:not(:first-child) {
+  transition: background .12s ease;
+}
+
+.tf-panel-flat.overflow-hidden > div[class*="grid-cols-[36px"]:not(:first-child):hover {
+  background: color-mix(in srgb, var(--color-surface-2) 82%, transparent);
+}

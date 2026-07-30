@@ -1,0 +1,80 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+taskflow-seo/.env
+taskflow-seo/.env.*
+!taskflow-seo/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+taskflow-seo/venv/
+taskflow-seo/.venv/
+
+# Node / frontend
+node_modules/
+dashboard-ui/node_modules/
+dashboard-ui/dist/
+dashboard-ui/.vite/
+dashboard-ui/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+data/
+taskflow-seo/data/
+logs/
+taskflow-seo/logs/
+backups/
+taskflow-seo/backups/
+downloads/
+uploads/
+taskflow-seo/uploads/
+reports/generated/
+
+# Databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.bak
+*.sql
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+server.log
+taskflow-seo/server_err.tmp.log
+taskflow-seo/server_out.tmp.log
+
+# Build artifacts
+build/
+dist/
+*.spec
+taskflow-seo/taskflow.spec
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local experiments
+plane-preview/

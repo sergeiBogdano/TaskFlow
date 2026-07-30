@@ -1,12 +1,15 @@
 from __future__ import annotations
+
+import json
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from sqlalchemy import select, and_
+
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.core.models import Client
-from app.core.utils.timezone import utc_now, to_utc
+
 from app.core.config import settings
+from app.core.models import Client
+from app.core.utils.timezone import to_utc, utc_now
 
 
 class ClientService:
@@ -20,8 +23,11 @@ class ClientService:
         contract_start: datetime,
         contract_end: datetime,
         domain: str | None = None,
+        favicon_url: str | None = None,
         status: str = 'active',
         org_data: str | None = None,
+        client_warning: str | None = None,
+        accesses: list | None = None,
     ) -> Client:
         if contract_start.tzinfo is None:
             contract_start = contract_start.replace(tzinfo=settings.tz)
@@ -31,10 +37,13 @@ class ClientService:
         client = Client(
             org_name=org_name,
             domain=domain,
+            favicon_url=favicon_url,
             contract_start=to_utc(contract_start),
             contract_end=to_utc(contract_end),
             status=status,
             org_data=org_data,
+            client_warning=client_warning,
+            accesses=json.dumps(accesses, ensure_ascii=False) if accesses else None,
         )
         self.session.add(client)
         await self.session.commit()
@@ -42,7 +51,7 @@ class ClientService:
 
     async def get_client(self, client_id: int) -> Client | None:
         result = await self.session.execute(
-            select(Client).options(selectinload(Client.tasks)).where(Client.id == client_id)
+            select(Client).options(selectinload(Client.tasks)).where(Client.id == client_id, Client.deleted_at.is_(None))
         )
         return result.scalar_one_or_none()
 
@@ -59,9 +68,12 @@ class ClientService:
         return result.scalar_one_or_none()
 
     async def list_clients(self, status: str | None = None) -> list[Client]:
-        query = select(Client).options(selectinload(Client.tasks))
+        query = select(Client).options(selectinload(Client.tasks)).where(Client.deleted_at.is_(None))
+        conditions = []
         if status:
-            query = query.where(Client.status == status)
+            conditions.append(Client.status == status)
+        if conditions:
+            query = query.where(and_(*conditions))
         query = query.order_by(Client.created_at.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -93,13 +105,8 @@ class ClientService:
 
     async def search_clients(self, query_str: str) -> list[Client]:
         query = select(Client).options(selectinload(Client.tasks)).where(
-            and_(
-                Client.status == 'active',
-                (
-                    Client.org_name.ilike(f'%{query_str}%') |
-                    Client.domain.ilike(f'%{query_str}%')
-                ),
-            )
+            Client.org_name.ilike(f'%{query_str}%') |
+            Client.domain.ilike(f'%{query_str}%')
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())

@@ -1,90 +1,343 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-  <h3 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Дашборд</h3>
+  <div class="d-flex align-items-center">
+    <h3 class="mb-0 me-3"><i class="bi bi-speedometer2 me-2"></i>Дашборд</h3>
+    <form method="GET" style="margin:0;" id="periodForm">
+      <select class="form-select form-select-sm" style="width: auto;" name="period" onchange="this.form.submit()">
+        <option value="week" {% if period == 'week' %}selected{% endif %}>Неделя</option>
+        <option value="month" {% if period == 'month' %}selected{% endif %}>Месяц</option>
+        <option value="quarter" {% if period == 'quarter' %}selected{% endif %}>Квартал</option>
+        <option value="year" {% if period == 'year' %}selected{% endif %}>Год</option>
+        <option value="all" {% if period == 'all' %}selected{% endif %}>Все время</option>
+      </select>
+    </form>
+  </div>
   <span class="text-secondary">{{ now.strftime('%d.%m.%Y %H:%M') }}</span>
 </div>
 
-<div class="row g-3 mb-4">
-  <div class="col-md-3">
-    <div class="card border-danger h-100">
-      <div class="card-body text-center">
-        <h1 class="text-danger mb-0">{{ overdue_count }}</h1>
-        <div class="text-secondary small">Просрочено</div>
+<div class="dashboard-grid" id="dashboardGrid">
+  <div class="grid-item" data-widget-id="overdue">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>
+        <span class="small fw-semibold flex-grow-1" style="color:#ef4444;">Просрочено</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body text-center d-flex flex-column justify-content-center">
+        <h1 class="mb-0 display-5" style="color:#ef4444;">{{ overdue_count }}</h1>
       </div>
     </div>
   </div>
-  <div class="col-md-3">
-    <div class="card border-warning h-100">
-      <div class="card-body text-center">
-        <h1 class="text-warning mb-0">{{ today_count }}</h1>
-        <div class="text-secondary small">На сегодня</div>
+  <div class="grid-item" data-widget-id="today">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <i class="bi bi-calendar-check-fill me-2" style="color:#f59e0b;"></i>
+        <span class="small fw-semibold flex-grow-1" style="color:#f59e0b;">На сегодня</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body text-center d-flex flex-column justify-content-center">
+        <h1 class="mb-0 display-5" style="color:#f59e0b;">{{ today_count }}</h1>
       </div>
     </div>
   </div>
-  <div class="col-md-3">
-    <div class="card border-info h-100">
-      <div class="card-body text-center">
-        <h1 class="text-info mb-0">{{ active_clients }}</h1>
-        <div class="text-secondary small">Активных клиентов</div>
+  <div class="grid-item" data-widget-id="active_clients">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <i class="bi bi-people-fill me-2" style="color:#3b82f6;"></i>
+        <span class="small fw-semibold flex-grow-1" style="color:#3b82f6;">Активных клиентов</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body text-center d-flex flex-column justify-content-center">
+        <h1 class="mb-0 display-5" style="color:#3b82f6;">{{ active_clients }}</h1>
       </div>
     </div>
   </div>
-  <div class="col-md-3">
-    <div class="card border-success h-100">
-      <div class="card-body text-center">
-        <h1 class="text-success mb-0">{{ done_tasks }}/{{ total_tasks }}</h1>
-        <div class="text-secondary small">Выполнено / Всего</div>
+  <div class="grid-item" data-widget-id="done_tasks">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <i class="bi bi-check-circle-fill me-2" style="color:#22c55e;"></i>
+        <span class="small fw-semibold flex-grow-1" style="color:#22c55e;">Выполнено</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body text-center d-flex flex-column justify-content-center">
+        {% if period != 'all' %}
+          <h1 class="text-success mb-0 display-5">{{ done_tasks }}</h1>
+          <div class="text-secondary small">за {{ period_label }}</div>
+          {% if done_diff != 0 %}
+            <div class="text-{{ 'success' if done_diff >= 0 else 'danger' }} small fw-bold mt-1">
+              {{ '+' if done_diff > 0 else '' }}{{ done_diff }} ({{ '+' if done_pct >= 0 else '' }}{{ done_pct|round(1) }}%)
+            </div>
+          {% endif %}
+        {% else %}
+          <h1 class="text-success mb-0 display-5">{{ done_tasks }}/{{ total_tasks }}</h1>
+          <div class="text-secondary small">Выполнено / Всего</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="activity_chart">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1"><i class="bi bi-bar-chart-line me-1"></i>Активность за 14 дней</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body">
+        <canvas id="activityChart" height="220"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="status_chart">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1"><i class="bi bi-pie-chart me-1"></i>Статусы задач</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body">
+        <canvas id="statusChart" height="220"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="client_chart">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1"><i class="bi bi-bar-chart me-1"></i>Топ клиентов по задачам</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body">
+        <canvas id="clientChart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="overdue_list">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1">
+          {% if has_overdue %}
+            <i class="bi bi-exclamation-triangle text-danger me-1"></i>Просроченные задачи
+          {% else %}
+            <i class="bi bi-clock text-secondary me-1"></i>Ближайшие задачи
+          {% endif %}
+        </span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body p-0" style="max-height:300px;overflow-y:auto">
+        {% if overdue_tasks %}
+          <ul class="list-group list-group-flush">
+            {% for t in overdue_tasks %}
+              <li class="list-group-item d-flex justify-content-between align-items-center py-2" style="cursor:pointer" onclick="openDetailModal({{ t.id }})">
+                <div class="text-truncate me-2">
+                  {% if has_overdue %}<span class="badge bg-danger me-1">#{{ t.id }}</span>{% else %}<span class="badge bg-secondary me-1">#{{ t.id }}</span>{% endif %}
+                  {{ t.title }}
+                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
+                </div>
+                <small class="{% if has_overdue %}text-danger{% else %}text-secondary{% endif %} flex-shrink-0">{{ format_dt(t.deadline, tz) if t.deadline else '?' }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-secondary text-center">Нет просроченных задач</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="today_tasks">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1">
+          {% if has_today %}
+            <i class="bi bi-calendar-check text-warning me-1"></i>Задачи на сегодня
+          {% else %}
+            <i class="bi bi-clock text-secondary me-1"></i>Ближайшие задачи
+          {% endif %}
+        </span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body p-0" style="max-height:300px;overflow-y:auto">
+        {% if today_tasks %}
+          <ul class="list-group list-group-flush">
+            {% for t in today_tasks %}
+              <li class="list-group-item d-flex justify-content-between align-items-center py-2" style="cursor:pointer" onclick="openDetailModal({{ t.id }})">
+                <div class="text-truncate me-2">
+                  {% if has_today %}<span class="badge bg-warning text-dark me-1">#{{ t.id }}</span>{% else %}<span class="badge bg-secondary me-1">#{{ t.id }}</span>{% endif %}
+                  {{ t.title }}
+                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
+                </div>
+                <small class="{% if has_today %}text-warning{% else %}text-secondary{% endif %} flex-shrink-0">{{ format_dt(t.deadline, tz) if t.deadline else '' }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-secondary text-center">Нет задач на сегодня</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="grid-item" data-widget-id="ending_contracts">
+    <div class="card h-100 dashboard-widget">
+      <div class="card-header py-2 px-3 d-flex align-items-center">
+        <span class="widget-handle me-2"><i class="bi bi-grip-vertical text-secondary"></i></span>
+        <span class="fw-semibold small flex-grow-1"><i class="bi bi-hourglass-split text-info me-1"></i>Заканчиваются договоры</span>
+        <span class="widget-toggle btn btn-sm p-0 border-0 text-secondary" title="Ширина"><i class="bi bi-arrows-angle-expand"></i></span>
+      </div>
+      <div class="card-body p-0" style="max-height:300px;overflow-y:auto">
+        {% if ending_clients_list %}
+          <ul class="list-group list-group-flush">
+            {% for c in ending_clients_list %}
+              <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                <span class="text-truncate me-2">{{ c.org_name }}</span>
+                <small class="text-warning flex-shrink-0">{{ format_dt(c.contract_end, tz) if c.contract_end else '?' }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-secondary text-center">Нет заканчивающихся договоров</div>
+        {% endif %}
       </div>
     </div>
   </div>
 </div>
 
-<div class="row g-3">
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-header"><i class="bi bi-exclamation-triangle me-1 text-danger"></i>Просроченные задачи</div>
-      <div class="card-body p-0">
-        {% if overdue_tasks %}
-          <ul class="list-group list-group-flush">
-            {% for t in overdue_tasks %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div>
-                  <span class="badge bg-danger me-1">#{{ t.id }}</span>
-                  {{ t.title }}
-                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
-                </div>
-                <small class="text-danger">{{ format_dt(t.deadline, tz) if t.deadline else '?' }}</small>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <div class="p-3 text-secondary">Нет просроченных задач</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-header"><i class="bi bi-calendar-check me-1 text-warning"></i>Задачи на сегодня</div>
-      <div class="card-body p-0">
-        {% if today_tasks %}
-          <ul class="list-group list-group-flush">
-            {% for t in today_tasks %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div>
-                  <span class="badge bg-warning text-dark me-1">#{{ t.id }}</span>
-                  {{ t.title }}
-                  {% if t.client %}<small class="text-secondary ms-1">({{ t.client.org_name }})</small>{% endif %}
-                </div>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <div class="p-3 text-secondary">Нет задач на сегодня</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+(function() {
+  const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const textColor = isDark ? '#adb5bd' : '#6c757d';
+
+  const acEl = document.getElementById('activityChart');
+  if (acEl) {
+    new Chart(acEl, {
+      type: 'bar',
+      data: {
+        labels: {{ chart_labels|tojson }},
+        datasets: [
+          { label: 'Создано', data: {{ chart_created|tojson }}, backgroundColor: 'rgba(13,110,253,0.6)', borderRadius: 4 },
+          { label: 'Выполнено', data: {{ chart_done|tojson }}, backgroundColor: 'rgba(25,135,84,0.6)', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 12 } } },
+        scales: {
+          x: { grid: { color: gridColor }, ticks: { color: textColor } },
+          y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 } }
+        }
+      }
+    });
+  }
+
+  const scEl = document.getElementById('statusChart');
+  if (scEl) {
+    new Chart(scEl, {
+      type: 'doughnut',
+      data: {
+        labels: ['К выполнению', 'В работе', 'Выполнено', 'Просрочено'],
+        datasets: [{
+          data: [{{ status_chart.todo }}, {{ status_chart.in_progress }}, {{ status_chart.done }}, {{ status_chart.overdue }}],
+          backgroundColor: ['#6c757d', '#0d6efd', '#198754', '#dc3545']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: textColor, boxWidth: 12, padding: 8 } } }
+      }
+    });
+  }
+
+  const ccEl = document.getElementById('clientChart');
+  if (ccEl) {
+    new Chart(ccEl, {
+      type: 'bar',
+      data: {
+        labels: {{ client_chart|map(attribute='name')|list|tojson }},
+        datasets: [
+          { label: 'Активные', data: {{ client_chart|map(attribute='total')|list|tojson }}, backgroundColor: 'rgba(255,193,7,0.7)', borderRadius: 4 },
+          { label: 'Выполнено', data: {{ client_chart|map(attribute='done')|list|tojson }}, backgroundColor: 'rgba(25,135,84,0.7)', borderRadius: 4 }
+        ]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 12 } } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 } },
+          y: { grid: { color: gridColor }, ticks: { color: textColor } }
+        }
+      }
+    });
+  }
+
+  // Восстановление порядка и ширины виджетов
+  const grid = document.getElementById('dashboardGrid');
+  if (grid) {
+    // Порядок
+    const savedOrder = localStorage.getItem('dashboardWidgetOrder');
+    if (savedOrder) {
+      const order = savedOrder.split(',');
+      const items = {};
+      grid.querySelectorAll('.grid-item').forEach(el => {
+        const wid = el.dataset.widgetId;
+        if (wid) items[wid] = el;
+      });
+      const fragment = document.createDocumentFragment();
+      order.forEach(id => {
+        const el = items[id];
+        if (el) fragment.appendChild(el);
+      });
+      grid.querySelectorAll('.grid-item').forEach(el => {
+        if (!fragment.contains(el)) fragment.appendChild(el);
+      });
+      grid.innerHTML = '';
+      grid.appendChild(fragment);
+    }
+
+    // Ширина
+    grid.querySelectorAll('.grid-item').forEach(el => {
+      const wid = el.dataset.widgetId;
+      if (wid && localStorage.getItem('dashboardWide_' + wid) === '1') {
+        el.classList.add('wide');
+        const icon = el.querySelector('.widget-toggle i');
+        if (icon) icon.className = 'bi bi-arrows-angle-contract';
+      }
+    });
+
+    // Toggle ширины
+    grid.addEventListener('click', function(e) {
+      const btn = e.target.closest('.widget-toggle');
+      if (!btn) return;
+      const item = btn.closest('.grid-item');
+      if (!item) return;
+      const wid = item.dataset.widgetId;
+      item.classList.toggle('wide');
+      const isWide = item.classList.contains('wide');
+      const icon = btn.querySelector('i');
+      if (icon) icon.className = isWide ? 'bi bi-arrows-angle-contract' : 'bi bi-arrows-angle-expand';
+      if (wid) localStorage.setItem('dashboardWide_' + wid, isWide ? '1' : '0');
+    });
+
+    new Sortable(grid, {
+      handle: '.widget-handle',
+      animation: 150,
+      chosenClass: 'bg-opacity-25',
+      dragClass: 'drag-ghost',
+      onEnd: function() {
+        const order = Array.from(grid.querySelectorAll('.grid-item'))
+          .map(el => el.dataset.widgetId)
+          .filter(Boolean);
+        localStorage.setItem('dashboardWidgetOrder', order.join(','));
+      }
+    });
+  }
+})();
+</script>
 {% endblock %}

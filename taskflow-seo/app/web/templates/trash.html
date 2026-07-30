@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-trash me-2"></i>Корзина</h3>
+
+<ul class="nav nav-tabs mb-3" id="trashTabs">
+  <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tasksTab">Задачи ({{ deleted_tasks|length }})</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#clientsTab">Клиенты ({{ deleted_clients|length }})</a></li>
+</ul>
+
+<div class="tab-content">
+  <div class="tab-pane fade show active" id="tasksTab">
+    {% if deleted_tasks %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead><tr><th>#</th><th>Название</th><th>Клиент</th><th>Удалён</th><th></th></tr></thead>
+          <tbody>
+            {% for t in deleted_tasks %}
+              <tr>
+                <td class="text-secondary">#{{ t.id }}</td>
+                <td>{{ t.title }}</td>
+                <td>{{ t.client.org_name if t.client else '—' }}</td>
+                <td><small class="text-secondary">{{ format_dt(t.deleted_at, tz) if t.deleted_at else '' }}</small></td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-outline-success restore-task" data-id="{{ t.id }}"><i class="bi bi-arrow-counterclockwise"></i></button>
+                  <button class="btn btn-sm btn-outline-danger hard-delete-task" data-id="{{ t.id }}"><i class="bi bi-x-lg"></i></button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary text-center py-5">Корзина задач пуста</div>
+    {% endif %}
+  </div>
+  <div class="tab-pane fade" id="clientsTab">
+    {% if deleted_clients %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead><tr><th>#</th><th>Организация</th><th>Домен</th><th>Удалён</th><th></th></tr></thead>
+          <tbody>
+            {% for c in deleted_clients %}
+              <tr>
+                <td class="text-secondary">#{{ c.id }}</td>
+                <td>{{ c.org_name }}</td>
+                <td>{{ c.domain or '—' }}</td>
+                <td><small class="text-secondary">{{ format_dt(c.deleted_at, tz) if c.deleted_at else '' }}</small></td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-outline-success restore-client" data-id="{{ c.id }}"><i class="bi bi-arrow-counterclockwise"></i></button>
+                  <button class="btn btn-sm btn-outline-danger hard-delete-client" data-id="{{ c.id }}"><i class="bi bi-x-lg"></i></button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary text-center py-5">Корзина клиентов пуста</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.restore-task').forEach(b => b.addEventListener('click', function() {
+  fetch('/api/tasks/' + this.dataset.id + '/restore', {method:'POST'}).then(() => location.reload());
+}));
+document.querySelectorAll('.restore-client').forEach(b => b.addEventListener('click', function() {
+  fetch('/api/clients/' + this.dataset.id + '/restore', {method:'POST'}).then(() => location.reload());
+}));
+document.querySelectorAll('.hard-delete-task').forEach(b => b.addEventListener('click', function() {
+  if (confirm('Удалить навсегда?'))
+    fetch('/api/tasks/' + this.dataset.id + '/hard-delete', {method:'POST'}).then(() => location.reload());
+}));
+document.querySelectorAll('.hard-delete-client').forEach(b => b.addEventListener('click', function() {
+  if (confirm('Удалить навсегда?'))
+    fetch('/api/clients/' + this.dataset.id + '/hard-delete', {method:'POST'}).then(() => location.reload());
+}));
+</script>
+{% endblock %}

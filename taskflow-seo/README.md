@@ -1,52 +1,24 @@
-# TaskFlow-SEO
+# TaskFlow Backend
 
-Личная система управления задачами, контентом и напоминаниями для SEO/веб-специалиста.
+FastAPI backend for TaskFlow Dashboard.
 
-## Быстрый старт
+Main documentation is available in the root [README.md](../README.md).
 
-### Локальный запуск
+## Includes
+
+- FastAPI REST API
+- SQLAlchemy async models and database access
+- Alembic migrations
+- APScheduler background jobs
+- Role and permission logic
+- Client, task, calendar, Kanban, report and notification APIs
+
+## Development
 
 ```bash
-cp .env.example .env
-# Отредактируйте .env — укажите BOT_TOKEN
-
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
-python app/main.py
-```
-
-### Запуск через Docker
-
-```bash
-cp .env.example .env
-# Отредактируйте .env — укажите BOT_TOKEN
-
-docker-compose up -d
-```
-
-## Команды Telegram-бота
-
-- `/start` — приветствие
-- `/help` — справка
-- `/add [текст] [#теги] [~дедлайн]` — быстрая задача
-- `/list [фильтр]` — просмотр задач
-- `/done [id]` — отметить выполненной
-- `/snooze [id] [время]` — отложить
-- `/note [id] [текст]` — добавить заметку
-- `/new_client` — новый проект
-- `/articles [домен]` — пакет статей
-- `/settings` — настройки
-
-## Структура проекта
-
-```
-app/
-├── main.py              # Точка входа
-├── core/                # Ядро: конфиг, БД, модели, утилиты
-├── services/            # Бизнес-логика
-├── bot/                 # Telegram-бот
-├── scheduler/           # Планировщик напоминаний
-├── web/                 # Веб-интерфейс (v2.0)
-templates/               # JSON-шаблоны проектов
-data/                    # SQLite БД
-logs/                    # Логи
+alembic upgrade head
+uvicorn app.web.app:app --host 0.0.0.0 --port 8080 --reload
 ```

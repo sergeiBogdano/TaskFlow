@@ -2,6 +2,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-list-task me-2"></i>Задачи</h4>
+  <div class="btn-group btn-group-sm">
+    <a href="/api/tasks/export/csv" class="btn btn-outline-secondary" title="Скачать CSV"><i class="bi bi-filetype-csv"></i></a>
+    <a href="/api/tasks/export/pdf" class="btn btn-outline-secondary" title="Открыть PDF для печати" target="_blank"><i class="bi bi-filetype-pdf"></i></a>
+  </div>
   <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#taskModal">
     <i class="bi bi-plus-lg me-1"></i>Новая задача
   </button>
@@ -9,128 +13,99 @@
 
 <div class="row mb-3">
   <div class="col">
-    <form method="GET" class="d-flex gap-2 flex-wrap">
-      <select name="status" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+    <div class="d-flex gap-2 flex-wrap align-items-center" id="filterBar">
+      <select id="filterStatus" class="form-select form-select-sm" style="width: auto;">
         <option value="">Все статусы</option>
-        <option value="todo" {% if status == 'todo' %}selected{% endif %}>К выполнению</option>
-        <option value="in_progress" {% if status == 'in_progress' %}selected{% endif %}>В работе</option>
-        <option value="done" {% if status == 'done' %}selected{% endif %}>Выполнено</option>
-        <option value="overdue" {% if status == 'overdue' %}selected{% endif %}>Просрочено</option>
+        <option value="todo">К выполнению</option>
+        <option value="in_progress">В работе</option>
+        <option value="done">Выполнено</option>
+        <option value="overdue">Просрочено</option>
       </select>
-      <input type="text" name="search" class="form-control form-control-sm" placeholder="Поиск..." value="{{ search }}" style="width: 180px;">
-      <select name="sort" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
-        <option value="deadline" {% if sort == 'deadline' %}selected{% endif %}>По сроку</option>
-        <option value="priority" {% if sort == 'priority' %}selected{% endif %}>По важности</option>
-        <option value="created" {% if sort == 'created' %}selected{% endif %}>По дате создания</option>
-        <option value="status" {% if sort == 'status' %}selected{% endif %}>По статусу</option>
+      <input type="text" id="filterSearch" class="form-control form-control-sm" placeholder="Поиск..." style="width: 160px;">
+      <input type="date" id="filterDateFrom" class="form-control form-control-sm" style="width: auto;" title="Дата с">
+      <input type="date" id="filterDateTo" class="form-control form-control-sm" style="width: auto;" title="Дата по">
+      <select id="filterType" class="form-select form-select-sm" style="width: auto;">
+        <option value="">Все типы</option>
+        <option value="article">Статья</option>
+        <option value="seo">SEO</option>
+        <option value="dev">Разработка</option>
+        <option value="custom">Обычная</option>
       </select>
-      <select name="order" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
-        <option value="asc" {% if order == 'asc' %}selected{% endif %}>По возрастанию</option>
-        <option value="desc" {% if order == 'desc' %}selected{% endif %}>По убыванию</option>
+      <select id="filterPriority" class="form-select form-select-sm" style="width: auto;">
+        <option value="">Все приоритеты</option>
+        <option value="low">Низкий</option>
+        <option value="medium">Средний</option>
+        <option value="high">Высокий</option>
       </select>
-      <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-search"></i></button>
-      {% if status or search %}
-        <a href="/tasks" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></a>
-      {% endif %}
-    </form>
+      <select id="filterTag" class="form-select form-select-sm" style="width: auto;">
+        <option value="">Все теги</option>
+      </select>
+      <select id="filterModule" class="form-select form-select-sm" style="width: auto;">
+        <option value="">Все модули</option>
+      </select>
+      <select id="filterSort" class="form-select form-select-sm" style="width: auto;">
+        <option value="created">Новые</option>
+        <option value="deadline">По сроку</option>
+        <option value="priority">По важности</option>
+        <option value="status">По статусу</option>
+      </select>
+      <select id="filterOrder" class="form-select form-select-sm" style="width: auto;">
+        <option value="desc">Сначала новые</option>
+        <option value="asc">Сначала старые</option>
+      </select>
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-bookmark"></i></button>
+        <ul class="dropdown-menu dropdown-menu-end" id="savedViewsMenu">
+          <li><a class="dropdown-item small" href="#" onclick="saveCurrentFilter(); return false;"><i class="bi bi-plus-circle me-1"></i>Сохранить фильтр</a></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><a class="dropdown-item small text-secondary" disabled>Нет сохранённых</a></li>
+        </ul>
+      </div>
+      <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()"><i class="bi bi-x-lg"></i></button>
+    </div>
   </div>
 </div>
 
 <div class="card">
   <div class="card-body p-0">
-    {% if tasks %}
-      <div class="table-responsive">
-        <table class="table table-hover mb-0">
-          <thead class="table-dark">
-            <tr>
-              <th>#</th>
-              <th>Задача</th>
-              <th>Клиент</th>
-              <th>Срок</th>
-              <th>Важность</th>
-              <th>Статус</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for t in tasks %}
-            {% set dl_aware = to_tz(t.deadline) %}
-            {% if dl_aware %}
-              {% set days_left = (dl_aware - now).days %}
-            {% else %}
-              {% set days_left = 99 %}
-            {% endif %}
-            <tr class="{% if t.status == 'overdue' %}table-danger{% elif t.status == 'done' %}table-success{% endif %}">
-              <td>{{ t.id }}</td>
-              <td>
-                <a href="#" class="text-decoration-none" onclick="showTaskDetail({{ t.id }}); return false;">
-                  <strong>{{ t.title }}</strong>
-                </a>
-                {% if t.notes %}<i class="bi bi-pin-angle-fill text-secondary ms-1" title="Есть заметка"></i>{% endif %}
-                {% if t.checklist %}<i class="bi bi-list-check text-secondary ms-1" title="Чек-лист"></i>{% endif %}
-              </td>
-              <td>{% if t.client %}{{ t.client.org_name }}{% else %}<span class="text-secondary">—</span>{% endif %}</td>
-              <td>
-                {% if dl_aware %}
-                  <span class="{% if days_left < 0 and t.status != 'done' %}text-danger fw-bold{% elif days_left <= 2 and t.status != 'done' %}text-warning fw-bold{% endif %}">
-                    {{ dl_aware.strftime('%d.%m.%Y %H:%M') }}
-                  </span>
-                {% else %}<span class="text-secondary">—</span>{% endif %}
-              </td>
-              <td>
-                {% if t.priority == 'high' %}<span class="badge bg-danger">Высокий</span>
-                {% elif t.priority == 'medium' %}<span class="badge bg-warning text-dark">Средний</span>
-                {% else %}<span class="badge bg-secondary">Низкий</span>{% endif %}
-              </td>
-              <td>
-                {% if t.status == 'todo' %}<span class="badge bg-secondary">К выполнению</span>
-                {% elif t.status == 'in_progress' %}<span class="badge bg-primary">В работе</span>
-                {% elif t.status == 'done' %}<span class="badge bg-success">Выполнено</span>
-                {% elif t.status == 'overdue' %}<span class="badge bg-danger">Просрочено</span>{% endif %}
-              </td>
-              <td>
-                <div class="d-flex gap-1">
-                  {% if t.status != 'done' %}
-                  <form method="POST" action="/tasks/{{ t.id }}/done" class="d-inline">
-                    <button class="btn btn-sm btn-outline-success" title="Выполнено"><i class="bi bi-check-lg"></i></button>
-                  </form>
-                  {% endif %}
-                  <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#snoozeModal{{ t.id }}" title="Отложить"><i class="bi bi-clock"></i></button>
-                  <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ t.id }}" title="Редактировать"><i class="bi bi-pencil"></i></button>
-                  <form method="POST" action="/tasks/{{ t.id }}/delete" class="d-inline" onsubmit="return confirm('Удалить задачу #{{ t.id }}?')">
-                    <button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-trash"></i></button>
-                  </form>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
+    <div id="tasksContainer">
       <div class="p-4 text-center text-secondary">
-        <i class="bi bi-inbox" style="font-size: 2rem;"></i>
-        <p class="mt-2">Нет задач</p>
+        <div class="spinner-border spinner-border-sm me-2" role="status"></div>Загрузка...
       </div>
-    {% endif %}
+    </div>
   </div>
 </div>
 
-{% if total_pages > 1 %}
-<nav class="mt-3">
-  <ul class="pagination pagination-sm justify-content-center">
-    {% for p in range(1, total_pages + 1) %}
-    <li class="page-item {% if p == page %}active{% endif %}">
-      <a class="page-link" href="?page={{ p }}&status={{ status }}&search={{ search }}&sort={{ sort }}&order={{ order }}">{{ p }}</a>
-    </li>
-    {% endfor %}
-  </ul>
-</nav>
-{% endif %}
+<div id="batchBar" style="display:none;" class="mt-2">
+  <div class="d-flex align-items-center gap-2 p-2 bg-dark rounded">
+    <span class="text-white small" id="batchCount">0 выбрано</span>
+    <select class="form-select form-select-sm" style="width:auto;" id="batchAction">
+      <option value="">— Действие —</option>
+      <option value="status">Изменить статус</option>
+      <option value="priority">Изменить приоритет</option>
+      <option value="delete">Удалить</option>
+    </select>
+    <select class="form-select form-select-sm" style="width:auto;display:none;" id="batchValue">
+      <option value="todo">К выполнению</option>
+      <option value="in_progress">В работе</option>
+      <option value="done">Выполнено</option>
+      <option value="overdue">Просрочено</option>
+    </select>
+    <select class="form-select form-select-sm" style="width:auto;display:none;" id="batchPriority">
+      <option value="low">Низкий</option>
+      <option value="medium">Средний</option>
+      <option value="high">Высокий</option>
+    </select>
+    <button class="btn btn-sm btn-primary" onclick="executeBatch()">Применить</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">Отмена</button>
+  </div>
+</div>
+
+<nav class="mt-3" id="paginationNav"></nav>
 
 {# Modal: просмотр задачи #}
 <div class="modal fade" id="taskDetailModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header"><h5 class="modal-title" id="detailTitle">Задача</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body" id="detailBody"></div>
@@ -172,16 +147,35 @@
             </div>
             <div class="col-md-4 mb-3">
               <label class="form-label">Клиент</label>
-              <select name="client_id" class="form-select" id="createClientSelect" onchange="onClientChange(this)">
+              <select name="client_id" class="form-select" id="createClientSelect">
                 <option value="">—</option>
-                {% for c in all_clients or [] %}
-                <option value="{{ c.id }}" data-end="{{ to_tz(c.contract_end).strftime('%Y-%m-%dT%H:%M') if c.contract_end else '' }}">{{ c.org_name }}</option>
+                {% for c in all_clients %}
+                <option value="{{ c.id }}" data-end="{{ c.end }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
             </div>
             <div class="col-md-4 mb-3">
-              <label class="form-label">Срок</label>
+              <label class="form-label">Срок (крайний)</label>
               <input type="datetime-local" name="deadline" class="form-control" id="createDeadline">
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Дата выполнения (для календаря)</label>
+              <input type="datetime-local" name="completion_date" class="form-control">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Повторение</label>
+              <select name="recurring_interval" class="form-select">
+                <option value="">Нет</option>
+                <option value="daily">Ежедневно</option>
+                <option value="weekly">Еженедельно</option>
+                <option value="monthly">Ежемесячно</option>
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Количество повторений</label>
+              <input type="number" name="recurring_count" class="form-control" placeholder="∞" min="1">
             </div>
           </div>
           <div class="mb-3">
@@ -192,11 +186,11 @@
           </div>
           <div class="mb-3">
             <label class="form-label">Заметка</label>
-            <textarea name="notes" class="form-control" rows="2" placeholder="Краткая заметка"></textarea>
+            <textarea name="notes" class="form-control" rows="2"></textarea>
           </div>
           <div class="mb-3">
             <label class="form-label">Комментарий</label>
-            <textarea name="comment" class="form-control" rows="4" placeholder="Подробное описание задачи, что и как нужно сделать"></textarea>
+            <textarea name="comment" class="form-control" rows="4"></textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -208,131 +202,273 @@
   </div>
 </div>
 
-{# Модалки: редактирование и отложить #}
-{% for t in tasks %}
-{% set dl_aware = to_tz(t.deadline) %}
-<div class="modal fade" id="editModal{{ t.id }}" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <form method="POST" action="/tasks/{{ t.id }}/edit">
-      <div class="modal-content">
-        <div class="modal-header"><h5 class="modal-title">Редактировать #{{ t.id }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <div class="row">
-            <div class="col-md-8 mb-3">
-              <label class="form-label">Название</label>
-              <input type="text" name="title" class="form-control" value="{{ t.title }}" required>
-            </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Тип</label>
-              <select name="task_type" class="form-select">
-                <option value="custom" {% if t.task_type == 'custom' %}selected{% endif %}>Обычная</option>
-                <option value="article" {% if t.task_type == 'article' %}selected{% endif %}>Статья</option>
-                <option value="seo" {% if t.task_type == 'seo' %}selected{% endif %}>SEO</option>
-                <option value="dev" {% if t.task_type == 'dev' %}selected{% endif %}>Разработка</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Важность</label>
-              <select name="priority" class="form-select">
-                <option value="low" {% if t.priority == 'low' %}selected{% endif %}>Низкий</option>
-                <option value="medium" {% if t.priority == 'medium' %}selected{% endif %}>Средний</option>
-                <option value="high" {% if t.priority == 'high' %}selected{% endif %}>Высокий</option>
-              </select>
-            </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Статус</label>
-              <select name="status" class="form-select">
-                <option value="todo" {% if t.status == 'todo' %}selected{% endif %}>К выполнению</option>
-                <option value="in_progress" {% if t.status == 'in_progress' %}selected{% endif %}>В работе</option>
-                <option value="done" {% if t.status == 'done' %}selected{% endif %}>Выполнено</option>
-                <option value="overdue" {% if t.status == 'overdue' %}selected{% endif %}>Просрочено</option>
-              </select>
-            </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Срок</label>
-              <input type="datetime-local" name="deadline" class="form-control" value="{{ dl_aware.strftime('%Y-%m-%dT%H:%M') if dl_aware else '' }}">
-            </div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Заметка</label>
-            <textarea name="notes" class="form-control" rows="2">{{ t.notes or '' }}</textarea>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Комментарий</label>
-            <textarea name="comment" class="form-control" rows="4">{{ t.comment or '' }}</textarea>
-          </div>
-          {% if t.checklist %}
-          <div class="mb-3">
-            <label class="form-label">Чек-лист ({{ t.checklist|selectattr('done')|list|length }}/{{ t.checklist|length }})</label>
-            {% for item in t.checklist %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" {{ 'checked' if item.done else '' }} disabled>
-              <label class="form-check-label {% if item.done %}text-decoration-line-through text-secondary{% endif %}">{{ item.text }}</label>
-            </div>
-            {% endfor %}
-          </div>
-          {% endif %}
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-          <button type="submit" class="btn btn-primary">Сохранить</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="modal fade" id="snoozeModal{{ t.id }}" tabindex="-1">
-  <div class="modal-dialog">
-    <form method="POST" action="/tasks/{{ t.id }}/snooze">
-      <div class="modal-content">
-        <div class="modal-header"><h5 class="modal-title">Отложить #{{ t.id }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <p class="mb-2"><strong>{{ t.title }}</strong></p>
-          <div class="mb-3">
-            <label class="form-label">Новый срок</label>
-            <input type="datetime-local" name="new_deadline" class="form-control" required>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-          <button type="submit" class="btn btn-warning">Отложить</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-{% endfor %}
-
 <script>
 const TEMPLATES = {{ checklist_templates_json|safe }};
-const tplMap = {};
-Object.keys(TEMPLATES).forEach(k => { tplMap[k] = TEMPLATES[k].map(i => i.text); });
 
-function addChecklistItem(containerId, value) {
-  const c = document.getElementById(containerId);
-  const div = document.createElement('div');
-  div.className = 'input-group mb-1';
-  div.innerHTML = '<input type="text" class="form-control form-control-sm" value="' + (value || '') + '" placeholder="Пункт"><button class="btn btn-sm btn-outline-danger" type="button" onclick="this.parentElement.remove()"><i class="bi bi-x"></i></button>';
-  c.appendChild(div);
+let allTasks = [];
+let filteredTasks = [];
+let currentPage = 1;
+let filterClientId = null;
+let allTags = [];
+let allModules = [];
+const PER_PAGE = 20;
+
+function loadTags() {
+  fetch('/api/tags').then(r => r.json()).then(tags => {
+    allTags = tags;
+    const sel = document.getElementById('filterTag');
+    if (sel) {
+      sel.innerHTML = '<option value="">Все теги</option>' + tags.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    }
+  });
 }
 
-function loadTemplate(type, prefix) {
-  const container = document.getElementById(prefix + 'Checklist');
-  container.innerHTML = '';
-  const items = tplMap[type] || [];
-  items.forEach(text => addChecklistItem(prefix + 'Checklist', text));
+function loadModules() {
+  fetch('/api/modules').then(r => r.json()).then(modules => {
+    allModules = modules;
+    const sel = document.getElementById('filterModule');
+    if (sel) {
+      sel.innerHTML = '<option value="">Все модули</option>' + modules.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+    }
+  });
 }
+
+function loadSavedViews() {
+  const saved = JSON.parse(localStorage.getItem('savedViews') || '[]');
+  const menu = document.getElementById('savedViewsMenu');
+  if (!menu) return;
+  let html = '<li><a class="dropdown-item small" href="#" onclick="saveCurrentFilter(); return false;"><i class="bi bi-plus-circle me-1"></i>Сохранить фильтр</a></li>';
+  if (saved.length) {
+    html += '<li><hr class="dropdown-divider"></li>';
+    saved.forEach((sv, i) => {
+      html += `<li><a class="dropdown-item small" href="#" onclick="applySavedView(${i}); return false;">${escHtml(sv.name)}</a></li>`;
+    });
+  } else {
+    html += '<li><hr class="dropdown-divider"></li><li><a class="dropdown-item small text-secondary" disabled>Нет сохранённых</a></li>';
+  }
+  menu.innerHTML = html;
+}
+
+function saveCurrentFilter() {
+  const name = prompt('Название фильтра:');
+  if (!name) return;
+  const filters = {
+    status: document.getElementById('filterStatus').value,
+    search: document.getElementById('filterSearch').value,
+    type: document.getElementById('filterType').value,
+    priority: document.getElementById('filterPriority').value,
+    tag: document.getElementById('filterTag').value,
+    module: document.getElementById('filterModule').value,
+    sort: document.getElementById('filterSort').value,
+    order: document.getElementById('filterOrder').value,
+  };
+  const saved = JSON.parse(localStorage.getItem('savedViews') || '[]');
+  saved.push({ name, filters });
+  localStorage.setItem('savedViews', JSON.stringify(saved));
+  loadSavedViews();
+  showToast('Фильтр сохранён');
+}
+
+function applySavedView(idx) {
+  const saved = JSON.parse(localStorage.getItem('savedViews') || '[]');
+  if (!saved[idx]) return;
+  const f = saved[idx].filters;
+  document.getElementById('filterStatus').value = f.status || '';
+  document.getElementById('filterSearch').value = f.search || '';
+  document.getElementById('filterType').value = f.type || '';
+  document.getElementById('filterPriority').value = f.priority || '';
+  document.getElementById('filterTag').value = f.tag || '';
+  document.getElementById('filterModule').value = f.module || '';
+  document.getElementById('filterSort').value = f.sort || 'created';
+  document.getElementById('filterOrder').value = f.order || 'desc';
+  applyFilters();
+  showToast('Применён: ' + saved[idx].name);
+}
+
+function loadTasks() {
+  const params = new URLSearchParams(window.location.search);
+  filterClientId = params.get('client_id') ? parseInt(params.get('client_id')) : null;
+
+  fetch('/api/tasks/all')
+    .then(r => r.json())
+    .then(tasks => {
+      allTasks = tasks;
+      applyFilters();
+    })
+    .catch(err => {
+      document.getElementById('tasksContainer').innerHTML =
+        '<div class="p-4 text-center text-danger">Ошибка загрузки задач</div>';
+    });
+}
+
+function applyFilters() {
+  const status = document.getElementById('filterStatus').value;
+  const search = document.getElementById('filterSearch').value.toLowerCase();
+  const dateFrom = document.getElementById('filterDateFrom').value;
+  const dateTo = document.getElementById('filterDateTo').value;
+  const taskType = document.getElementById('filterType').value;
+  const priority = document.getElementById('filterPriority').value;
+  const sort = document.getElementById('filterSort').value;
+  const order = document.getElementById('filterOrder').value;
+  const tagId = document.getElementById('filterTag').value;
+  const moduleId = document.getElementById('filterModule').value;
+
+  filteredTasks = allTasks.filter(t => {
+    if (status && t.status !== status) return false;
+    if (taskType && t.task_type !== taskType) return false;
+    if (priority && t.priority !== priority) return false;
+    if (search && !t.title.toLowerCase().includes(search) && !(t.client && t.client.toLowerCase().includes(search))) return false;
+    if (filterClientId && t.client_id !== filterClientId) return false;
+    if (dateFrom && t.deadline && new Date(t.deadline) < new Date(dateFrom)) return false;
+    if (dateTo && t.deadline) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59);
+      if (new Date(t.deadline) > end) return false;
+    }
+    if (tagId && (!t.tags || !t.tags.some(tg => String(tg.id) === tagId || String(tg) === tagId))) return false;
+    if (moduleId && t.module_id !== parseInt(moduleId)) return false;
+    return true;
+  });
+
+  // Sort
+  const sortFns = {
+    'deadline': t => t.deadline || '9999-12-31',
+    'priority': t => ({'high': 0, 'medium': 1, 'low': 2}[t.priority] || 1),
+    'status': t => ({'overdue': 0, 'todo': 1, 'in_progress': 2, 'done': 3}[t.status] || 4),
+    'order': t => t.sort_order || 0,
+  };
+  const sf = sortFns[sort] || (t => t.id);
+  filteredTasks.sort((a, b) => {
+    const va = sf(a), vb = sf(b);
+    if (va < vb) return order === 'asc' ? -1 : 1;
+    if (va > vb) return order === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  currentPage = 1;
+  renderPage();
+}
+
+function renderPage() {
+  const total = filteredTasks.length;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * PER_PAGE;
+  const pageTasks = filteredTasks.slice(start, start + PER_PAGE);
+
+  const container = document.getElementById('tasksContainer');
+
+  if (!pageTasks.length) {
+    container.innerHTML = '<div class="p-4 text-center text-secondary"><i class="bi bi-inbox" style="font-size: 2rem;"></i><p class="mt-2">Нет задач</p></div>';
+    document.getElementById('paginationNav').innerHTML = '';
+    document.getElementById('batchBar').style.display = 'none';
+    return;
+  }
+
+  let html = '<div class="table-responsive"><table class="table table-hover mb-0" id="taskTable"><thead class="table-dark"><tr>'
+    + '<th style="width:36px;"><input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>'
+    + '<th>#</th><th>Задача</th><th>Клиент</th><th>Срок</th><th>Важность</th><th>Статус</th><th></th>'
+    + '</tr></thead><tbody>';
+
+  for (const t of pageTasks) {
+    const dl = t.deadline ? new Date(t.deadline) : null;
+    const now = new Date();
+    const daysLeft = dl ? Math.ceil((dl - now) / (1000 * 60 * 60 * 24)) : 99;
+    const overdue = t.status === 'overdue';
+    const done = t.status === 'done';
+
+    const rec = t.recurring_interval;
+    const recLabel = rec ? (rec === 'daily' ? 'Ежедн' : rec === 'weekly' ? 'Еженед' : 'Ежемес') : '';
+    html += '<tr class="' + (overdue ? 'table-danger' : done ? 'table-success' : '') + '">'
+      + '<td><input class="form-check-input task-check" type="checkbox" value="' + t.id + '"></td>'
+      + '<td>' + t.id + '</td>'
+      + '<td><a href="#" class="text-decoration-none" onclick="showTaskDetail(' + t.id + '); return false;"><strong>' + escHtml(t.title) + '</strong></a>'
+      + (t.notes ? '<i class="bi bi-pin-angle-fill text-secondary ms-1" title="Есть заметка"></i>' : '')
+      + (t.checklist && t.checklist.length ? '<i class="bi bi-list-check text-secondary ms-1" title="Чек-лист"></i>' : '')
+      + (rec ? ' <span class="badge bg-info text-dark" title="Повтор: ' + recLabel + ' осталось: ' + (t.recurring_remaining ?? '∞') + '"><i class="bi bi-arrow-repeat"></i> ' + recLabel + '</span>' : '')
+      + '</td>'
+      + '<td>' + (t.client ? escHtml(t.client) : '<span class="text-secondary">—</span>') + (t.tags && t.tags.length ? ' <span class="d-inline-flex gap-1 ms-1">' + t.tags.map(tg => '<span class="tag-badge" style="background:' + (tg.color||'#3b82f6') + '22;color:' + (tg.color||'#3b82f6') + '">' + escHtml(tg.name||tg) + '</span>').join('') + '</span>' : '') + '</td>'
+      + '<td>' + (dl ? '<span class="' + (daysLeft < 0 && !done ? 'text-danger fw-bold' : daysLeft <= 2 && !done ? 'text-warning fw-bold' : '') + '">' + formatDate(dl) + '</span>' : '<span class="text-secondary">—</span>') + '</td>'
+      + '<td>' + getPrioBadge(t.priority) + '</td>'
+      + '<td>' + getStatusBadge(t.status) + '</td>'
+      + '<td><div class="d-flex gap-1">'
+      + (t.status !== 'done' ? '<form method="POST" action="/tasks/' + t.id + '/done" class="d-inline" onsubmit="return confirm(\'Выполнить задачу #' + t.id + '?\')"><button class="btn btn-sm btn-outline-success" title="Выполнено"><i class="bi bi-check-lg"></i></button></form>' : '')
+      + (rec && t.status === 'done' ? '<button class="btn btn-sm btn-outline-info" onclick="generateNext(' + t.id + ')" title="Создать следующую"><i class="bi bi-skip-forward"></i></button>' : '')
+      + '<button class="btn btn-sm btn-outline-primary" onclick="editTask(' + t.id + ')" title="Редактировать"><i class="bi bi-pencil"></i></button>'
+      + '<form method="POST" action="/tasks/' + t.id + '/delete" class="d-inline" onsubmit="return confirm(\'Удалить задачу #' + t.id + '?\')"><button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-trash"></i></button></form>'
+      + '</div></td>'
+      + '</tr>';
+  }
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+
+  // Pagination
+  let pagHtml = '';
+  if (totalPages > 1) {
+    pagHtml = '<ul class="pagination pagination-sm justify-content-center">';
+    for (let p = 1; p <= totalPages; p++) {
+      pagHtml += '<li class="page-item ' + (p === currentPage ? 'active' : '') + '"><a class="page-link" href="#" onclick="goPage(' + p + '); return false;">' + p + '</a></li>';
+    }
+    pagHtml += '</ul>';
+  }
+  document.getElementById('paginationNav').innerHTML = pagHtml;
+  document.getElementById('batchBar').style.display = 'none';
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatDate(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return pad(d.getDate()) + '.' + pad(d.getMonth()+1) + '.' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function getPrioBadge(p) {
+  const m = {'high': ['danger', 'Высокий'], 'medium': ['warning text-dark', 'Средний'], 'low': ['secondary', 'Низкий']};
+  const v = m[p] || m['medium'];
+  return '<span class="badge bg-' + v[0] + '">' + v[1] + '</span>';
+}
+
+function getStatusBadge(s) {
+  const m = {'todo': ['secondary', 'К выполнению'], 'in_progress': ['primary', 'В работе'], 'done': ['success', 'Выполнено'], 'overdue': ['danger', 'Просрочено']};
+  const v = m[s] || m['todo'];
+  return '<span class="badge bg-' + v[0] + '">' + v[1] + '</span>';
+}
+
+function goPage(p) {
+  currentPage = p;
+  renderPage();
+  document.getElementById('tasksContainer').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function resetFilters() {
+  document.getElementById('filterStatus').value = '';
+  document.getElementById('filterSearch').value = '';
+  document.getElementById('filterDateFrom').value = '';
+  document.getElementById('filterDateTo').value = '';
+  document.getElementById('filterType').value = '';
+  document.getElementById('filterPriority').value = '';
+  applyFilters();
+}
+
+document.querySelectorAll('#filterBar select, #filterBar input').forEach(el => {
+  el.addEventListener('change', applyFilters);
+  el.addEventListener('input', el.tagName === 'INPUT' ? applyFilters : null);
+});
 
 function onClientChange(select) {
-  const opt = select.options[select.selectedIndex];
+  const idx = select.selectedIndex;
+  const opt = select.options[idx];
   const deadline = opt ? opt.dataset.end : '';
   if (deadline) {
     document.getElementById('createDeadline').value = deadline;
   }
 }
+
+document.getElementById('createClientSelect')?.addEventListener('change', function() { onClientChange(this); });
 
 document.getElementById('createTaskForm')?.addEventListener('submit', function() {
   const items = [];
@@ -342,117 +478,160 @@ document.getElementById('createTaskForm')?.addEventListener('submit', function()
   document.getElementById('createChecklistRaw').value = JSON.stringify(items);
 });
 
-const STATUS_LABELS = {todo:'К выполнению', in_progress:'В работе', done:'Выполнено', overdue:'Просрочено'};
-const PRIO_LABELS = {high:'Высокий', medium:'Средний', low:'Низкий'};
-const TYPE_LABELS = {article:'Статья', seo:'SEO', dev:'Разработка', custom:'Обычная'};
-const STATUS_CLASS = {todo:'bg-secondary', in_progress:'bg-primary', done:'bg-success', overdue:'bg-danger'};
-
-let detailTaskId = null;
-
 function showTaskDetail(id) {
   openDetailModal(id);
 }
 
-function openDetailModal(id) {
-  fetch('/api/tasks/all').then(r => r.json()).then(all => {
-    const t = all.find(x => x.id === id);
-    if (!t) { alert('Задача не найдена'); return; }
+// Batch
+document.getElementById('batchAction')?.addEventListener('change', function() {
+  document.getElementById('batchValue').style.display = this.value === 'status' ? '' : 'none';
+  document.getElementById('batchPriority').style.display = this.value === 'priority' ? '' : 'none';
+});
 
-    detailTaskId = t.id;
-    const modal = new bootstrap.Modal(document.getElementById('taskDetailModal'));
-    document.getElementById('detailTitle').textContent = '#' + t.id + ' ' + t.title;
+function toggleAll(master) {
+  document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
+  updateBatchBar();
+}
 
-    let notesHtml = '<label class="form-label mb-0 mt-1">Заметка</label><textarea class="form-control mb-2" id="detailNotes" rows="2" style="white-space:pre-wrap">' + (t.notes || '') + '</textarea>';
-    let commentHtml = '<label class="form-label mb-0 mt-1">Комментарий</label><textarea class="form-control mb-2" id="detailComment" rows="3" style="white-space:pre-wrap">' + (t.comment || '') + '</textarea>';
+function updateBatchBar() {
+  const checked = document.querySelectorAll('.task-check:checked');
+  const bar = document.getElementById('batchBar');
+  bar.style.display = checked.length > 0 ? '' : 'none';
+  document.getElementById('batchCount').textContent = checked.length + ' выбрано';
+}
 
-    let checklistHtml = '';
-    if (t.checklist && t.checklist.length) {
-      checklistHtml = '<label class="form-label fw-semibold mt-2">Чек-лист</label><div id="detailChecklist">'
-        + t.checklist.map((ci, i) => renderChecklistItem(ci, i)).join('')
-        + '</div>';
+document.addEventListener('change', function(e) {
+  if (e.target.classList.contains('task-check')) updateBatchBar();
+});
+
+function getSelectedIds() {
+  return Array.from(document.querySelectorAll('.task-check:checked')).map(cb => parseInt(cb.value));
+}
+
+function clearSelection() {
+  document.querySelectorAll('.task-check').forEach(cb => cb.checked = false);
+  document.getElementById('selectAll').checked = false;
+  updateBatchBar();
+}
+
+function executeBatch() {
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  const action = document.getElementById('batchAction').value;
+  if (!action) { alert('Выберите действие'); return; }
+  if (action === 'delete' && !confirm('Удалить ' + ids.length + ' задач?')) return;
+
+  let value = null;
+  if (action === 'status') value = document.getElementById('batchValue').value;
+  if (action === 'priority') value = document.getElementById('batchPriority').value;
+
+  fetch('/api/tasks/batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ids: ids, action: action, value: value})
+  }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      showToast('Изменено ' + data.affected + ' задач');
+      loadTasks();
+    } else {
+      alert('Ошибка: ' + (data.error || 'неизвестная'));
     }
-
-    document.getElementById('detailBody').innerHTML = '<table class="table table-sm table-borderless mb-2">'
-      + '<tr><td class="text-secondary" style="width:120px">Тип</td><td>' + (TYPE_LABELS[t.task_type]||t.task_type) + '</td></tr>'
-      + (t.client ? '<tr><td class="text-secondary">Клиент</td><td>' + t.client + '</td></tr>' : '')
-      + '<tr><td class="text-secondary">Срок</td><td>' + (t.deadline ? new Date(t.deadline).toLocaleString('ru-RU') : '—') + '</td></tr>'
-      + '<tr><td class="text-secondary">Статус</td><td><span class="badge ' + (STATUS_CLASS[t.status]||'bg-secondary') + '">' + (STATUS_LABELS[t.status]||t.status) + '</span></td></tr>'
-      + '<tr><td class="text-secondary">Важность</td><td>' + (PRIO_LABELS[t.priority]||t.priority) + '</td></tr>'
-      + '</table>'
-      + checklistHtml;
-
-    document.getElementById('detailFooter').innerHTML = ''
-      + '<button class="btn btn-primary btn-sm" onclick="saveDetailChanges()"><i class="bi bi-check-lg"></i> Сохранить</button>'
-      + (t.status !== 'done'
-        ? '<form method="POST" action="/tasks/' + t.id + '/done" class="d-inline"><button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Выполнено</button></form>'
-        : '')
-      + '<a href="/tasks?search=%23' + t.id + '" class="btn btn-outline-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> В список задач</a>';
-
-    modal.show();
-  });
+  }).catch(() => alert('Ошибка сети'));
 }
 
-function renderChecklistItem(ci, i) {
-  const checked = ci.done ? 'checked' : '';
-  const textVal = ci.text || '';
-  const reminderVal = ci.reminder || '';
-  const reminderHtml = reminderVal
-    ? '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" value="' + reminderVal.replace('Z','').slice(0,16) + '" style="max-width:200px">'
-    : '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" style="max-width:200px">';
-  return '<div class="input-group input-group-sm mb-1">'
-    + '<div class="input-group-text">'
-    + '<input class="form-check-input mt-0" type="checkbox" ' + checked + ' onchange="onChecklistToggle(' + i + ', this.checked)">'
+function editTask(id) {
+  const t = allTasks.find(x => x.id === id);
+  if (!t) return;
+  const dl = t.deadline ? t.deadline.slice(0, 16) : '';
+  const html = '<form id="editForm" onsubmit="saveEdit(' + id + '); return false;">'
+    + '<div class="row">'
+    + '<div class="col-md-8 mb-3"><label class="form-label">Название</label><input type="text" id="editTitle" class="form-control" value="' + escHtml(t.title) + '" required></div>'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Тип</label><select id="editType" class="form-select">'
+    + '<option value="custom"' + (t.task_type === 'custom' ? ' selected' : '') + '>Обычная</option>'
+    + '<option value="article"' + (t.task_type === 'article' ? ' selected' : '') + '>Статья</option>'
+    + '<option value="seo"' + (t.task_type === 'seo' ? ' selected' : '') + '>SEO</option>'
+    + '<option value="dev"' + (t.task_type === 'dev' ? ' selected' : '') + '>Разработка</option>'
+    + '</select></div>'
     + '</div>'
-    + '<input type="text" class="form-control" id="ci_text_' + i + '" value="' + textVal.replace(/"/g,'&quot;') + '">'
-    + reminderHtml
-    + '<button class="btn btn-outline-danger" onclick="removeDetailChecklistItem(' + i + ')"><i class="bi bi-x"></i></button>'
-    + '</div>';
+    + '<div class="row">'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Важность</label><select id="editPriority" class="form-select">'
+    + '<option value="low"' + (t.priority === 'low' ? ' selected' : '') + '>Низкий</option>'
+    + '<option value="medium"' + (t.priority === 'medium' ? ' selected' : '') + '>Средний</option>'
+    + '<option value="high"' + (t.priority === 'high' ? ' selected' : '') + '>Высокий</option>'
+    + '</select></div>'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Статус</label><select id="editStatus" class="form-select">'
+    + '<option value="todo"' + (t.status === 'todo' ? ' selected' : '') + '>К выполнению</option>'
+    + '<option value="in_progress"' + (t.status === 'in_progress' ? ' selected' : '') + '>В работе</option>'
+    + '<option value="done"' + (t.status === 'done' ? ' selected' : '') + '>Выполнено</option>'
+    + '<option value="overdue"' + (t.status === 'overdue' ? ' selected' : '') + '>Просрочено</option>'
+    + '</select></div>'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Срок</label><input type="datetime-local" id="editDeadline" class="form-control" value="' + dl + '"></div>'
+    + '</div>'
+    + '<div class="row mt-2">'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Повторение</label><select id="editRecurring" class="form-select">'
+    + '<option value="">Нет</option>'
+    + '<option value="daily"' + (t.recurring_interval === 'daily' ? ' selected' : '') + '>Ежедневно</option>'
+    + '<option value="weekly"' + (t.recurring_interval === 'weekly' ? ' selected' : '') + '>Еженедельно</option>'
+    + '<option value="monthly"' + (t.recurring_interval === 'monthly' ? ' selected' : '') + '>Ежемесячно</option>'
+    + '</select></div>'
+    + '<div class="col-md-4 mb-3"><label class="form-label">Кол-во повторений</label><input type="number" id="editRecurringCount" class="form-control" value="' + (t.recurring_count || '') + '" min="1" placeholder="∞"></div></div>'
+    + '<div class="mb-3"><label class="form-label">Заметка</label><textarea id="editNotes" class="form-control" rows="2">' + escHtml(t.notes) + '</textarea></div>'
+    + '<div class="mb-3"><label class="form-label">Комментарий</label><textarea id="editComment" class="form-control" rows="4">' + escHtml(t.comment) + '</textarea></div>'
+    + '</form>';
+
+  const modal = new bootstrap.Modal(document.getElementById('taskDetailModal'));
+  document.getElementById('detailTitle').textContent = '#' + t.id + ' ' + t.title;
+  document.getElementById('detailBody').innerHTML = html;
+  document.getElementById('detailFooter').innerHTML = ''
+    + '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>'
+    + '<button type="submit" class="btn btn-primary" form="editForm">Сохранить</button>';
+  modal.show();
 }
 
-function onChecklistToggle(i, checked) {}
-
-function removeDetailChecklistItem(i) {
-  const el = document.querySelector('#detailChecklist .input-group:nth-child(' + (i+1) + ')');
-  if (el) el.remove();
-}
-
-function saveDetailChanges() {
-  const notes = document.getElementById('detailNotes')?.value || '';
-  const comment = document.getElementById('detailComment')?.value || '';
-  const checklistItems = [];
-  const container = document.getElementById('detailChecklist');
-  if (container) {
-    const groups = container.querySelectorAll('.input-group');
-    groups.forEach(g => {
-      const cb = g.querySelector('.form-check-input');
-      const textInput = g.querySelector('input[id^="ci_text_"]');
-      const remindInput = g.querySelector('input[id^="ci_remind_"]');
-      if (textInput) {
-        const text = textInput.value.trim();
-        if (text) {
-          const item = {text: text, done: cb ? cb.checked : false};
-          if (remindInput && remindInput.value) {
-            const d = new Date(remindInput.value);
-            if (!isNaN(d.getTime())) item.reminder = d.toISOString();
-          }
-          checklistItems.push(item);
-        }
-      }
-    });
-  }
-
-  fetch('/api/tasks/' + detailTaskId, {
+function saveEdit(id) {
+  const data = {
+    title: document.getElementById('editTitle').value,
+    task_type: document.getElementById('editType').value,
+    priority: document.getElementById('editPriority').value,
+    status: document.getElementById('editStatus').value,
+    deadline: document.getElementById('editDeadline').value || null,
+    notes: document.getElementById('editNotes').value,
+    comment: document.getElementById('editComment').value,
+    recurring_interval: document.getElementById('editRecurring').value || null,
+    recurring_count: document.getElementById('editRecurringCount').value || null,
+  };
+  fetch('/api/tasks/' + id, {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({notes: notes, comment: comment, checklist: checklistItems.length ? checklistItems : null})
+    body: JSON.stringify(data)
   }).then(r => {
     if (r.ok) {
-      alert('Сохранено');
-      location.reload();
+      bootstrap.Modal.getInstance(document.getElementById('taskDetailModal')).hide();
+      showToast('Сохранено');
+      loadTasks();
     } else {
       alert('Ошибка сохранения');
     }
   }).catch(() => alert('Ошибка сети'));
 }
+
+function generateNext(id) {
+  fetch('/api/tasks/' + id + '/generate-next', {method: 'POST'})
+    .then(r => r.json()).then(data => {
+      if (data.ok) {
+        showToast('Создана следующая задача #' + data.new_id);
+        loadTasks();
+      } else {
+        alert('Ошибка: ' + (data.error || 'неизвестная'));
+      }
+    }).catch(() => alert('Ошибка сети'));
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadTasks();
+  loadTags();
+  loadModules();
+  loadSavedViews();
+});
 </script>
 {% endblock %}

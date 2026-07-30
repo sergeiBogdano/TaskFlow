@@ -30,6 +30,14 @@
               {% endfor %}
             </select>
           </div>
+          <div class="mb-3">
+            <label class="form-label">Календарь — сортировка по времени</label>
+            <select name="calendar_view_mode" class="form-select">
+              <option value="time" {% if settings.calendar_view_mode == 'time' %}selected{% endif %}>Да, показывать на временной шкале</option>
+              <option value="list" {% if settings.calendar_view_mode == 'list' %}selected{% endif %}>Нет, только список задач</option>
+            </select>
+            <div class="form-text">При отключении задачи отображаются простым списком без привязки ко времени</div>
+          </div>
           <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Сохранить</button>
         </form>
       </div>
@@ -37,6 +45,23 @@
   </div>
 
   <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header">Смена пароля</div>
+      <div class="card-body">
+        <form id="changePasswordForm">
+          <div class="mb-3">
+            <label class="form-label">Текущий пароль</label>
+            <input type="password" name="current_password" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Новый пароль</label>
+            <input type="password" name="new_password" class="form-control" required minlength="4">
+          </div>
+          <button type="submit" class="btn btn-warning"><i class="bi bi-key me-1"></i>Сменить пароль</button>
+          <span id="pwStatus" class="ms-2"></span>
+        </form>
+      </div>
+    </div>
     <div class="card">
       <div class="card-header">Предустановки чек-листов</div>
       <div class="card-body">
@@ -69,6 +94,22 @@
 </div>
 
 <script>
+document.getElementById('changePasswordForm')?.addEventListener('submit', function(e) {
+  e.preventDefault();
+  const fd = new FormData(this);
+  fetch('/api/users/change-password', {method:'POST', body: fd})
+    .then(r => r.json()).then(data => {
+      const s = document.getElementById('pwStatus');
+      if (data.ok) {
+        s.innerHTML = '<span class="text-success">Пароль изменён</span>';
+        this.reset();
+      } else {
+        s.innerHTML = '<span class="text-danger">' + (data.error || 'Ошибка') + '</span>';
+      }
+      setTimeout(() => s.innerHTML = '', 5000);
+    });
+});
+
 function addTplItem(key) {
   const c = document.getElementById('tpl_' + key);
   const div = document.createElement('div');

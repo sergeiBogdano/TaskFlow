@@ -1,16 +1,27 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
-from app.core.config import settings
 import logging
+
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler(timezone=settings.tz)
+sqlite_url = settings.DATABASE_URL
+if sqlite_url.startswith('sqlite+aiosqlite:///'):
+    sqlite_url = 'sqlite:///' + sqlite_url[len('sqlite+aiosqlite:///'):]
+elif sqlite_url.startswith('postgresql+asyncpg://'):
+    sqlite_url = 'postgresql+psycopg://' + sqlite_url[len('postgresql+asyncpg://'):]
+jobstores = {
+    'default': SQLAlchemyJobStore(url=sqlite_url),
+}
+scheduler = AsyncIOScheduler(timezone=settings.tz, jobstores=jobstores)
 
 
 async def start_scheduler():
-    from app.scheduler.jobs import check_reminders, check_overdue_tasks, check_contracts_ending
+    from app.scheduler.jobs import check_contracts_ending, check_overdue_tasks, check_reminders, generate_module_tasks, generate_notifications
 
     interval = settings.OVERDUE_CHECK_INTERVAL_SECONDS
 
@@ -38,6 +49,33 @@ async def start_scheduler():
         name='Проверка окончания договоров',
     )
 
+    scheduler.add_job(
+        generate_notifications,
+        IntervalTrigger(seconds=interval),
+        id='generate_notifications',
+        replace_existing=True,
+        name='Генерация уведомлений',
+    )
+
+    scheduler.add_job(
+        generate_module_tasks,
+        CronTrigger(hour=8, minute=0, timezone=settings.tz),
+        id='generate_module_tasks',
+        replace_existing=True,
+        name='Auto module task generation',
+    )
+
+    from app.scheduler.jobs import autopurge_trash
+    scheduler.add_job(
+        autopurge_trash,
+        CronTrigger(hour=3, minute=0, timezone=settings.tz),
+        id='autopurge_trash',
+        replace_existing=True,
+        name='Очистка корзины',
+    )
+
+    # Catch up rules that were due while the application was stopped.
+    await generate_module_tasks()
     scheduler.start()
     logger.info('Планировщик запущен')
 

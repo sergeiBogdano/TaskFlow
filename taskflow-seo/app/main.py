@@ -1,20 +1,23 @@
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from app.core.config import settings
-from app.core.database import init_db, close_db
-from app.scheduler.scheduler import start_scheduler, stop_scheduler
-from app.bot.bot import UserIdMiddleware
+import uvicorn
 
-for path in ['data', 'logs', 'templates', 'backups']:
+from app.core.config import settings
+
+for path in ['data', 'logs']:
     Path(path).mkdir(exist_ok=True)
 
+log_handler = RotatingFileHandler(
+    settings.LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8',
+)
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler(settings.LOG_FILE, encoding='utf-8'),
+        log_handler,
         logging.StreamHandler(),
     ],
 )
@@ -22,37 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    logger.info(f'🚀 TaskFlow-SEO запуск (таймзона: {settings.DEFAULT_TIMEZONE})')
+    logger.info('TaskFlow-SEO запуск (таймзона: %s)', settings.DEFAULT_TIMEZONE)
 
-    await init_db()
-    logger.info('✅ База данных инициализирована')
-
-    from app.bot.bot import bot, dp
-    from app.bot.handlers.start import router as start_router
-    from app.bot.handlers.tasks import router as tasks_router
-    from app.bot.handlers.clients import router as clients_router
-    from app.bot.handlers.articles import router as articles_router
-    from app.bot.handlers.settings import router as settings_router
-
-    dp.include_router(start_router)
-    dp.include_router(tasks_router)
-    dp.include_router(clients_router)
-    dp.include_router(articles_router)
-    dp.include_router(settings_router)
-
-    dp.message.middleware(UserIdMiddleware())
-    dp.callback_query.middleware(UserIdMiddleware())
-
-    await start_scheduler()
+    config = uvicorn.Config('app.web.app:app', host='0.0.0.0', port=8000, log_level='info')
+    server = uvicorn.Server(config)
 
     try:
-        logger.info('🤖 Бот запущен')
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+        logger.info('Веб-сервер запущен на http://0.0.0.0:8000')
+        await server.serve()
     finally:
-        await stop_scheduler()
-        await close_db()
-        logger.info('👋 TaskFlow-SEO завершил работу')
+        logger.info('TaskFlow-SEO завершил работу')
 
 
 if __name__ == '__main__':

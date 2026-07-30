@@ -1,13 +1,13 @@
 import re
-from pydantic import BaseModel, field_validator
-from typing import Optional
 from datetime import datetime
+
+from pydantic import BaseModel, field_validator
 
 
 class AddTaskInput(BaseModel):
     text: str
     tags: list[str] = []
-    deadline: Optional[str] = None
+    deadline: str | None = None
 
     @field_validator('text')
     @classmethod
@@ -21,8 +21,8 @@ class AddTaskInput(BaseModel):
 class AddTaskResult(BaseModel):
     title: str
     tags: list[str]
-    deadline_raw: Optional[str] = None
-    client_domain: Optional[str] = None
+    deadline_raw: str | None = None
+    client_domain: str | None = None
 
 
 def parse_add_command(text: str) -> AddTaskResult:
@@ -51,7 +51,7 @@ def parse_add_command(text: str) -> AddTaskResult:
     )
 
 
-def validate_date(date_str: str) -> Optional[datetime]:
+def validate_date(date_str: str) -> datetime | None:
     from dateutil import parser as dateutil_parser
     try:
         return dateutil_parser.parse(date_str, dayfirst=True, fuzzy=True)

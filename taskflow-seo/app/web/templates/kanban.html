@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-columns-gap me-2"></i>Канбан</h4>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#taskModal">
+    <i class="bi bi-plus-lg me-1"></i>Новая задача
+  </button>
+</div>
+
+<div class="row g-2 kanban-board" style="min-height: calc(100vh - 200px);">
+  {% set col_data = {
+    'overdue': {'title': 'Просрочено', 'color': 'bg-danger', 'items': overdue},
+    'todo': {'title': 'К выполнению', 'color': 'bg-secondary', 'items': todo},
+    'in_progress': {'title': 'В работе', 'color': 'bg-primary', 'items': in_progress},
+    'done': {'title': 'Выполнено', 'color': 'bg-success', 'items': done},
+  } %}
+  {% for col_key in ['overdue', 'todo', 'in_progress', 'done'] %}
+  {% set col = col_data[col_key] %}
+  <div class="col-md-3">
+    <div class="card h-100">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold small"><span class="badge {{ col.color }} me-1">{{ col.title }}</span></span>
+        <span class="badge bg-secondary" id="count-{{ col_key }}">{{ col['items']|length }}</span>
+      </div>
+        <div class="card-body p-2 kanban-column" data-status="{{ col_key }}" id="col-{{ col_key }}" style="min-height: 300px;">
+          {% for t in col['items'] %}
+          <div class="card kanban-card mb-2" draggable="true" data-id="{{ t.id }}" data-status="{{ col_key }}">
+          <div class="card-body p-2" style="cursor:grab;">
+            <div class="d-flex justify-content-between align-items-start">
+              <small class="fw-semibold" style="font-size:0.8rem;">{{ t.title[:50] }}{% if t.title|length > 50 %}…{% endif %}</small>
+            </div>
+            <div class="mt-1 d-flex gap-1 flex-wrap">
+              {% if t.deadline %}
+                {% set dl = to_tz(t.deadline) %}
+                {% set cls = 'text-danger' if col_key != 'done' and dl and dl < now else 'text-warning' if col_key != 'done' and dl and (dl - now).days <= 2 else 'text-secondary' %}
+                <small class="{{ cls }}" style="font-size:0.7rem;">{{ dl.strftime('%d.%m') if dl else '?' }}</small>
+              {% endif %}
+              {% if t.client %}
+                <small class="text-info" style="font-size:0.7rem;">{{ t.client.org_name[:12] }}</small>
+              {% endif %}
+              {% if t.checklist %}
+                <small class="text-secondary" style="font-size:0.7rem;">
+                  {{ t.checklist|selectattr('done')|list|length }}/{{ t.checklist|length }}
+                </small>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<span id="statusLabels" class="d-none">{{ {'overdue':'Просрочено','todo':'К выполнению','in_progress':'В работе','done':'Выполнено'}|tojson }}</span>
+
+<style>
+.kanban-card { transition: opacity 0.15s, box-shadow 0.15s; }
+.kanban-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.kanban-card.dragging { opacity: 0.4; }
+.kanban-column.drag-over { background: rgba(13,110,253,0.08); border-radius: 0.5rem; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+document.querySelectorAll('.kanban-column').forEach(col => {
+  new Sortable(col, {
+    group: 'kanban',
+    animation: 150,
+    ghostClass: 'bg-primary bg-opacity-10',
+    dragClass: 'dragging',
+    handle: '.kanban-card',
+    onEnd: function(evt) {
+      const card = evt.item;
+      const taskId = card.dataset.id;
+      const newStatus = evt.to.dataset.status;
+      if (evt.from.dataset.status === newStatus) return;
+
+      const fromCount = document.getElementById('count-' + evt.from.dataset.status);
+      const toCount = document.getElementById('count-' + newStatus);
+      if (fromCount) fromCount.textContent = parseInt(fromCount.textContent) - 1;
+      if (toCount) toCount.textContent = parseInt(toCount.textContent) + 1;
+
+      card.dataset.status = newStatus;
+
+      fetch('/api/tasks/' + taskId + '/move', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: newStatus})
+      }).then(r => {
+        if (!r.ok) showToast('Ошибка сохранения');
+      }).catch(() => showToast('Ошибка сети'));
+    }
+  });
+});
+
+document.querySelectorAll('.kanban-card').forEach(card => {
+  card.addEventListener('dblclick', function() {
+    const id = this.dataset.id;
+    if (typeof openDetailModal === 'function') {
+      openDetailModal(parseInt(id));
+    } else {
+      window.location.href = '/tasks?search=%23' + id;
+    }
+  });
+});
+</script>
+
+{# Modal создания задачи — переиспользуем из tasks #}
+<div class="modal fade" id="taskModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <form method="POST" action="/tasks/create">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Новая задача</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="row">
+            <div class="col-md-8 mb-3">
+              <label class="form-label">Название</label>
+              <input type="text" name="title" class="form-control" required autofocus>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Тип</label>
+              <select name="task_type" class="form-select">
+                <option value="custom">Обычная</option>
+                <option value="article">Статья</option>
+                <option value="seo">SEO</option>
+                <option value="dev">Разработка</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Важность</label>
+              <select name="priority" class="form-select">
+                <option value="low">Низкий</option>
+                <option value="medium" selected>Средний</option>
+                <option value="high">Высокий</option>
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Клиент</label>
+              <select name="client_id" class="form-select">
+                <option value="">—</option>
+                {% for c in all_clients %}
+                <option value="{{ c.id }}">{{ c.org_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Срок</label>
+              <input type="datetime-local" name="deadline" class="form-control">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Заметка</label>
+            <textarea name="notes" class="form-control" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

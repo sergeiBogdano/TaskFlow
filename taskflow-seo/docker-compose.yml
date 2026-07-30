@@ -1,21 +1,38 @@
-version: '3.8'
-
 services:
-  bot:
-    build: .
-    container_name: taskflow-seo-bot
+  postgres:
+    image: postgres:16
+    container_name: taskflow-seo-postgres
     restart: unless-stopped
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - DATABASE_URL=sqlite+aiosqlite:///./data/taskflow.db
+      - POSTGRES_DB=${POSTGRES_DB:-taskflow}
+      - POSTGRES_USER=${POSTGRES_USER:-taskflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-taskflow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - taskflow_pgdata:/var/lib/postgresql/data
+
+  web:
+    build: .
+    container_name: taskflow-seo-web
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://taskflow:taskflow@postgres:5432/taskflow}
       - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-Europe/Moscow}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WEB_APP_SECRET=${WEB_APP_SECRET}
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./templates:/app/templates
+      - taskflow_logs:/app/logs
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  taskflow_pgdata:
+  taskflow_logs:

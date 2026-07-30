@@ -1,13 +1,16 @@
 from __future__ import annotations
+
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, and_, or_
+
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.core.models import Reminder, Task, Client
-from app.core.utils.timezone import utc_now, to_user_tz, format_datetime
+
 from app.core.config import settings
-import logging
+from app.core.models import Client, Reminder, Task
+from app.core.utils.timezone import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +48,18 @@ class ReminderService:
             selectinload(Reminder.task).selectinload(Task.client),
             selectinload(Reminder.client),
         ).where(
-            and_(Reminder.trigger_at <= now, Reminder.sent == False)
+            and_(Reminder.trigger_at <= now, Reminder.sent.is_(False))
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def mark_sent(self, reminder_id: int):
-        await self.session.execute(
-            Reminder.__table__.update().where(Reminder.id == reminder_id).values(sent=True)
-        )
-        await self.session.commit()
+        reminder = await self.session.get(Reminder, reminder_id)
+        if reminder:
+            reminder.sent = True
+            await self.session.commit()
 
     async def create_contract_reminders(self, client: Client):
-        user_tz = ZoneInfo(settings.DEFAULT_TIMEZONE)
         days = settings.CONTRACT_REMINDER_DAYS
 
         for days_before in days:
@@ -93,12 +95,12 @@ class ReminderService:
     async def delete_task_reminders(self, task_id: int):
         from sqlalchemy import delete as sa_delete
         await self.session.execute(
-            sa_delete(Reminder).where(and_(Reminder.task_id == task_id, Reminder.sent == False))
+            sa_delete(Reminder).where(and_(Reminder.task_id == task_id, Reminder.sent.is_(False)))
         )
         await self.session.commit()
 
     async def get_unsent_count(self) -> int:
         result = await self.session.execute(
-            select(Reminder).where(Reminder.sent == False)
+            select(Reminder).where(Reminder.sent.is_(False))
         )
         return len(result.scalars().all())

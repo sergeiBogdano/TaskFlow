@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <a href="/clients" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
     <h4 class="mb-0 d-inline"><i class="bi bi-people me-2"></i>{{ client.org_name }}</h4>
   </div>
-  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#quickTaskModal">
-    <i class="bi bi-plus-lg me-1"></i>Добавить задачу
-  </button>
+  <div class="d-flex gap-2">
+    <a href="/clients/{{ client.id }}/print" target="_blank" class="btn btn-outline-secondary btn-sm"><i class="bi bi-printer"></i></a>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#quickTaskModal">
+      <i class="bi bi-plus-lg me-1"></i>Добавить задачу
+    </button>
+  </div>
 </div>
 
 <div class="row g-3 mb-4">
@@ -68,6 +71,30 @@
 </div>
 {% endif %}
 
+{% if client.accesses %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span><i class="bi bi-key me-1 text-warning"></i>Доступы</span>
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editClientModal"><i class="bi bi-pencil"></i></button>
+  </div>
+  <div class="card-body p-2">
+    {% for acc in client.accesses %}
+    <div class="border rounded p-2 mb-1" style="background:var(--bs-tertiary-bg)">
+      <div class="fw-semibold small mb-1">{{ acc.title }}</div>
+      <div class="row g-1 small">
+        {% if acc.url %}<div class="col-12"><a href="{{ acc.url }}" target="_blank" class="text-decoration-none"><i class="bi bi-link-45deg"></i> {{ acc.url }}</a></div>{% endif %}
+        <div class="col-6"><span class="text-secondary">Логин:</span> {{ acc.login }}</div>
+        <div class="col-6"><span class="text-secondary">Пароль:</span>
+          <span class="password-mask" onclick="this.innerHTML=this.dataset.pw;this.style.cursor='default'" data-pw="{{ acc.password }}" style="cursor:pointer;border-bottom:1px dashed var(--bs-secondary-color)">••••••</span>
+        </div>
+        {% if acc.notes %}<div class="col-12"><span class="text-secondary">Прим.:</span> {{ acc.notes }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if upcoming_tasks %}
 <div class="card mb-3">
   <div class="card-header"><i class="bi bi-calendar3 me-1"></i>Ближайшие задачи (7 дней)</div>
@@ -87,6 +114,21 @@
   </div>
 </div>
 {% endif %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-pie-chart me-1"></i>Статусы задач</div>
+      <div class="card-body"><canvas id="clientStatusChart" height="180"></canvas></div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-graph-up me-1"></i>Задачи по месяцам</div>
+      <div class="card-body"><canvas id="clientMonthlyChart" height="180"></canvas></div>
+    </div>
+  </div>
+</div>
 
 <div class="card">
   <div class="card-header"><i class="bi bi-list-task me-1"></i>Все задачи</div>
@@ -194,8 +236,12 @@
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Срок</label>
+            <label class="form-label">Срок (крайний)</label>
             <input type="datetime-local" name="deadline" class="form-control" value="{{ to_tz(client.contract_end).strftime('%Y-%m-%dT%H:%M') if client.contract_end else '' }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Дата выполнения (для календаря)</label>
+            <input type="datetime-local" name="completion_date" class="form-control">
           </div>
           <div class="mb-3">
             <label class="form-label">Заметка</label>
@@ -215,118 +261,6 @@
   </div>
 </div>
 
-<script>
-const STATUS_LABELS = {todo:'К выполнению', in_progress:'В работе', done:'Выполнено', overdue:'Просрочено'};
-const PRIO_LABELS = {high:'Высокий', medium:'Средний', low:'Низкий'};
-const TYPE_LABELS = {article:'Статья', seo:'SEO', dev:'Разработка', custom:'Обычная'};
-const STATUS_CLASS = {todo:'bg-secondary', in_progress:'bg-primary', done:'bg-success', overdue:'bg-danger'};
-
-let detailTaskId = null;
-
-function openDetailModal(id) {
-  fetch('/api/tasks/all').then(r => r.json()).then(all => {
-    const t = all.find(x => x.id === id);
-    if (!t) { alert('Задача не найдена'); return; }
-
-    detailTaskId = t.id;
-    const modal = new bootstrap.Modal(document.getElementById('taskDetailModal'));
-    document.getElementById('detailTitle').textContent = '#' + t.id + ' ' + t.title;
-
-    let notesHtml = '<label class="form-label mb-0 mt-1">Заметка</label><textarea class="form-control mb-2" id="detailNotes" rows="2" style="white-space:pre-wrap">' + (t.notes || '') + '</textarea>';
-    let commentHtml = '<label class="form-label mb-0 mt-1">Комментарий</label><textarea class="form-control mb-2" id="detailComment" rows="3" style="white-space:pre-wrap">' + (t.comment || '') + '</textarea>';
-
-    let checklistHtml = '';
-    if (t.checklist && t.checklist.length) {
-      checklistHtml = '<label class="form-label fw-semibold mt-2">Чек-лист</label><div id="detailChecklist">'
-        + t.checklist.map((ci, i) => renderChecklistItem(ci, i)).join('')
-        + '</div>';
-    }
-
-    document.getElementById('detailBody').innerHTML = '<table class="table table-sm table-borderless mb-2">'
-      + '<tr><td class="text-secondary" style="width:120px">Тип</td><td>' + (TYPE_LABELS[t.task_type]||t.task_type) + '</td></tr>'
-      + (t.client ? '<tr><td class="text-secondary">Клиент</td><td>' + t.client + '</td></tr>' : '')
-      + '<tr><td class="text-secondary">Срок</td><td>' + (t.deadline ? new Date(t.deadline).toLocaleString('ru-RU') : '—') + '</td></tr>'
-      + '<tr><td class="text-secondary">Статус</td><td><span class="badge ' + (STATUS_CLASS[t.status]||'bg-secondary') + '">' + (STATUS_LABELS[t.status]||t.status) + '</span></td></tr>'
-      + '<tr><td class="text-secondary">Важность</td><td>' + (PRIO_LABELS[t.priority]||t.priority) + '</td></tr>'
-      + '</table>'
-      + notesHtml
-      + commentHtml
-      + checklistHtml;
-
-    document.getElementById('detailFooter').innerHTML = ''
-      + '<button class="btn btn-primary btn-sm" onclick="saveDetailChanges()"><i class="bi bi-check-lg"></i> Сохранить</button>'
-      + (t.status !== 'done'
-        ? '<form method="POST" action="/tasks/' + t.id + '/done" class="d-inline"><button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Выполнено</button></form>'
-        : '')
-      + '<a href="/tasks?search=%23' + t.id + '" class="btn btn-outline-primary btn-sm"><i class="bi bi-box-arrow-up-right"></i> В список задач</a>';
-
-    modal.show();
-  });
-}
-
-function renderChecklistItem(ci, i) {
-  const checked = ci.done ? 'checked' : '';
-  const textVal = ci.text || '';
-  const reminderVal = ci.reminder || '';
-  const reminderHtml = reminderVal
-    ? '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" value="' + reminderVal.replace('Z','').slice(0,16) + '" style="max-width:200px">'
-    : '<input type="datetime-local" class="form-control form-control-sm" id="ci_remind_' + i + '" style="max-width:200px">';
-  return '<div class="input-group input-group-sm mb-1">'
-    + '<div class="input-group-text">'
-    + '<input class="form-check-input mt-0" type="checkbox" ' + checked + ' onchange="onChecklistToggle(' + i + ', this.checked)">'
-    + '</div>'
-    + '<input type="text" class="form-control" id="ci_text_' + i + '" value="' + textVal.replace(/"/g,'&quot;') + '">'
-    + reminderHtml
-    + '<button class="btn btn-outline-danger" onclick="removeDetailChecklistItem(' + i + ')"><i class="bi bi-x"></i></button>'
-    + '</div>';
-}
-
-function onChecklistToggle(i, checked) {}
-
-function removeDetailChecklistItem(i) {
-  const el = document.querySelector('#detailChecklist .input-group:nth-child(' + (i+1) + ')');
-  if (el) el.remove();
-}
-
-function saveDetailChanges() {
-  const notes = document.getElementById('detailNotes')?.value || '';
-  const comment = document.getElementById('detailComment')?.value || '';
-  const checklistItems = [];
-  const container = document.getElementById('detailChecklist');
-  if (container) {
-    const groups = container.querySelectorAll('.input-group');
-    groups.forEach(g => {
-      const cb = g.querySelector('.form-check-input');
-      const textInput = g.querySelector('input[id^="ci_text_"]');
-      const remindInput = g.querySelector('input[id^="ci_remind_"]');
-      if (textInput) {
-        const text = textInput.value.trim();
-        if (text) {
-          const item = {text: text, done: cb ? cb.checked : false};
-          if (remindInput && remindInput.value) {
-            const d = new Date(remindInput.value);
-            if (!isNaN(d.getTime())) item.reminder = d.toISOString();
-          }
-          checklistItems.push(item);
-        }
-      }
-    });
-  }
-
-  fetch('/api/tasks/' + detailTaskId, {
-    method: 'PATCH',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({notes: notes, comment: comment, checklist: checklistItems.length ? checklistItems : null})
-  }).then(r => {
-    if (r.ok) {
-      alert('Сохранено');
-      location.reload();
-    } else {
-      alert('Ошибка сохранения');
-    }
-  }).catch(() => alert('Ошибка сети'));
-}
-
 {# Модалка редактирования клиента #}
 <div class="modal fade" id="editClientModal" tabindex="-1">
   <div class="modal-dialog">
@@ -343,6 +277,11 @@ function saveDetailChanges() {
             <input type="text" name="domain" class="form-control" value="{{ client.domain or '' }}">
           </div>
           <div class="mb-3">
+            <label class="form-label">Начало договора</label>
+            {% set start_dt = to_tz(client.contract_start) %}
+            <input type="datetime-local" name="contract_start" class="form-control" value="{{ start_dt.strftime('%Y-%m-%dT%H:%M') if start_dt else '' }}">
+          </div>
+          <div class="mb-3">
             <label class="form-label">Окончание договора</label>
             {% set end_dt = to_tz(client.contract_end) %}
             <input type="datetime-local" name="contract_end" class="form-control" value="{{ end_dt.strftime('%Y-%m-%dT%H:%M') if end_dt else '' }}" required>
@@ -350,6 +289,26 @@ function saveDetailChanges() {
           <div class="mb-3">
             <label class="form-label">Данные организации</label>
             <textarea name="org_data" class="form-control" rows="5" placeholder="Телефон, email, адрес, INN, KPP...">{{ client.org_data or '' }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Доступы <i class="bi bi-key text-warning"></i></label>
+            <div id="editClientAccesses">
+              {% for acc in client.accesses or [] %}
+              <div class="access-row border rounded p-2 mb-2 position-relative" style="background:var(--bs-tertiary-bg)">
+                <div class="row g-1">
+                  <div class="col-12"><input type="text" class="form-control form-control-sm" name="access_title" placeholder="Название сервиса" value="{{ acc.title }}"></div>
+                  <div class="col-6"><input type="text" class="form-control form-control-sm" name="access_url" placeholder="Ссылка" value="{{ acc.url }}"></div>
+                  <div class="col-6"><input type="text" class="form-control form-control-sm" name="access_login" placeholder="Логин" value="{{ acc.login }}"></div>
+                  <div class="col-6"><div class="input-group input-group-sm"><input type="password" class="form-control form-control-sm access-password" placeholder="Пароль" value="{{ acc.password }}"><button class="btn btn-outline-secondary" type="button" onclick="togglePassword(this)"><i class="bi bi-eye"></i></button></div></div>
+                  <div class="col-6"><input type="text" class="form-control form-control-sm" name="access_notes" placeholder="Примечание" value="{{ acc.notes }}"></div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-danger position-absolute" style="top:2px;right:2px;padding:0 4px;font-size:10px;line-height:1" onclick="this.closest('.access-row').remove()"><i class="bi bi-x"></i></button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm mt-1" onclick="addAccessRowTo('editClientAccesses')">
+              <i class="bi bi-plus"></i> Добавить доступ
+            </button>
           </div>
         </div>
         <div class="modal-footer">
@@ -360,5 +319,124 @@ function saveDetailChanges() {
     </form>
   </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Client status chart
+  const statusCtx = document.getElementById('clientStatusChart');
+  if (statusCtx) {
+    const counts = {todo:0, in_progress:0, done:0, overdue:0};
+    {% for t in tasks %}
+      {% if t.status == 'todo' %}counts.todo++;
+      {% elif t.status == 'in_progress' %}counts.in_progress++;
+      {% elif t.status == 'done' %}counts.done++;
+      {% elif t.status == 'overdue' %}counts.overdue++;{% endif %}
+    {% endfor %}
+    new Chart(statusCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['К выполнению', 'В работе', 'Выполнено', 'Просрочено'],
+        datasets: [{
+          data: [counts.todo, counts.in_progress, counts.done, counts.overdue],
+          backgroundColor: ['rgba(108,117,125,0.8)', 'rgba(13,110,253,0.8)', 'rgba(25,135,84,0.8)', 'rgba(220,53,69,0.8)'],
+        }]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+    });
+  }
+
+  // Client monthly chart
+  const monthlyCtx = document.getElementById('clientMonthlyChart');
+  if (monthlyCtx) {
+    const monthly = {};
+    {% for t in tasks %}
+      {% if t.created_at %}
+        {# const key = '{{ t.created_at.strftime("%Y-%m") if t.created_at else "" }}'; #}
+        (function() {
+          let dt = new Date('{{ t.created_at.isoformat() if t.created_at else "" }}');
+          let key = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0');
+          monthly[key] = monthly[key] || {created:0, done:0};
+          monthly[key].created++;
+          {% if t.status == 'done' and t.updated_at %}
+            (function() {
+              let dt2 = new Date('{{ t.updated_at.isoformat() if t.updated_at else "" }}');
+              let key2 = dt2.getFullYear() + '-' + String(dt2.getMonth()+1).padStart(2,'0');
+              monthly[key2] = monthly[key2] || {created:0, done:0};
+              monthly[key2].done++;
+            })();
+          {% endif %}
+        })();
+      {% endif %}
+    {% endfor %}
+    const labels = Object.keys(monthly).sort();
+    new Chart(monthlyCtx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Создано', data: labels.map(k => monthly[k].created), backgroundColor: 'rgba(13,202,240,0.8)', borderRadius: 3 },
+          { label: 'Выполнено', data: labels.map(k => monthly[k].done), backgroundColor: 'rgba(25,135,84,0.8)', borderRadius: 3 },
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { boxWidth: 12 } } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+  }
+});
+</script>
+<script>
+function addAccessRowTo(containerId, data) {
+  data = data || {};
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  const div = document.createElement('div');
+  div.className = 'access-row border rounded p-2 mb-2 position-relative';
+  div.style.background = 'var(--bs-tertiary-bg)';
+  div.innerHTML = '<div class="row g-1">'
+    + '<div class="col-12"><input type="text" class="form-control form-control-sm" name="access_title" placeholder="Название сервиса (Хостинг, WP, Я.Метрика...)" value="' + (data.title||'') + '"></div>'
+    + '<div class="col-6"><input type="text" class="form-control form-control-sm" name="access_url" placeholder="Ссылка" value="' + (data.url||'') + '"></div>'
+    + '<div class="col-6"><input type="text" class="form-control form-control-sm" name="access_login" placeholder="Логин" value="' + (data.login||'') + '"></div>'
+    + '<div class="col-6"><div class="input-group input-group-sm"><input type="password" class="form-control form-control-sm access-password" placeholder="Пароль" value="' + (data.password||'') + '"><button class="btn btn-outline-secondary" type="button" onclick="togglePassword(this)"><i class="bi bi-eye"></i></button></div></div>'
+    + '<div class="col-6"><input type="text" class="form-control form-control-sm" name="access_notes" placeholder="Примечание" value="' + (data.notes||'') + '"></div>'
+    + '</div>'
+    + '<button type="button" class="btn btn-sm btn-outline-danger position-absolute" style="top:2px;right:2px;padding:0 4px;font-size:10px;line-height:1" onclick="this.closest(\'.access-row\').remove()"><i class="bi bi-x"></i></button>';
+  c.appendChild(div);
+}
+
+function togglePassword(btn) {
+  const input = btn.closest('.input-group').querySelector('.access-password');
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+  } else {
+    input.type = 'password';
+    btn.innerHTML = '<i class="bi bi-eye"></i>';
+  }
+}
+
+document.getElementById('editClientModal')?.addEventListener('submit', function(e) {
+  const container = document.getElementById('editClientAccesses');
+  if (!container) return;
+  const rows = container.querySelectorAll('.access-row');
+  const accesses = [];
+  rows.forEach(row => {
+    const title = row.querySelector('[name="access_title"]')?.value?.trim();
+    if (!title) return;
+    accesses.push({
+      title: title,
+      url: row.querySelector('[name="access_url"]')?.value?.trim() || '',
+      login: row.querySelector('[name="access_login"]')?.value?.trim() || '',
+      password: row.querySelector('.access-password')?.value || '',
+      notes: row.querySelector('[name="access_notes"]')?.value?.trim() || '',
+    });
+  });
+  const form = e.target;
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden';
+  hidden.name = 'accesses_raw';
+  hidden.value = accesses.length ? JSON.stringify(accesses) : '';
+  form.appendChild(hidden);
+});
 </script>
 {% endblock %}
