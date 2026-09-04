@@ -1,10 +1,15 @@
+import os
+
 from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8')
+    model_config = SettingsConfigDict(
+        env_file='.env' if not os.environ.get('TESTING') else None,
+        env_file_encoding='utf-8',
+    )
 
     DATABASE_URL: str = 'postgresql+asyncpg://taskflow:taskflow@localhost:5432/taskflow'
     DEFAULT_TIMEZONE: str = 'Europe/Moscow'
