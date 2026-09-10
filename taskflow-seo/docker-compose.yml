@@ -1,4 +1,16 @@
 services:
+  nginx:
+    image: nginx:alpine
+    container_name: taskflow-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - web
+
   postgres:
     image: postgres:16
     container_name: taskflow-seo-postgres
@@ -7,8 +19,14 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-taskflow}
       - POSTGRES_USER=${POSTGRES_USER:-taskflow}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-taskflow}
-    ports:
-      - "5432:5432"
+#    ports:
+#      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/lib/postgresql/16/bin/pg_isready -U taskflow -d taskflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     volumes:
       - taskflow_pgdata:/var/lib/postgresql/data
 
@@ -17,9 +35,10 @@ services:
     container_name: taskflow-seo-web
     restart: unless-stopped
     depends_on:
-      - postgres
-    ports:
-      - "8000:8000"
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://taskflow:taskflow@postgres:5432/taskflow}
       - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-Europe/Moscow}
@@ -32,6 +51,17 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  frontend:
+    build: ../dashboard-ui
+    container_name: taskflow-frontend
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:3000:80"
+
+    depends_on:
+      - web
 
 volumes:
   taskflow_pgdata:
