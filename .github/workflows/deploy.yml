@@ -12,24 +12,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.VPS_SSH_KEY }}
-            ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Prepare SSH keys
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/vps_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+
+          chmod 600 ~/.ssh/vps_key ~/.ssh/deploy_key
+
+      - name: Prepare known hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+          printf '%s\n' \
+            '[127.0.0.1]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAERmK2T97K3zW4FdTIn9tfSIZjsNDPp8Gr4wWCBkxYf' \
+            >> ~/.ssh/known_hosts
 
       - name: Deploy through VPS tunnel
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          DEPLOY_COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
-
-          ssh -A \
+          ssh \
+            -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
-            "$VPS_USER@$VPS_HOST" \
-            "ssh -A -p 2222 deploy@127.0.0.1 'sudo -n /usr/local/sbin/taskflow-deploy'"
+            -o ProxyCommand="ssh -i ~/.ssh/vps_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -W %h:%p $VPS_USER@$VPS_HOST" \
+            -p 2222 \
+            deploy@127.0.0.1 \
+            "sudo -n /usr/local/sbin/taskflow-deploy $DEPLOY_COMMIT"
