@@ -7,28 +7,49 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+
 from app.core.config import settings
-from app.core.database import close_db, init_db
+from app.core.database import async_session, close_db, init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
 from app.web.templates_setup import templates
+
 
 _base = Path(__file__).parent
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.DATABASE_URL.startswith('sqlite+aiosqlite:///'):
-        db_path = Path(settings.DATABASE_URL.replace('sqlite+aiosqlite:///', ''))
+    if settings.DATABASE_URL.startswith("sqlite+aiosqlite:///"):
+        db_path = Path(
+            settings.DATABASE_URL.replace(
+                "sqlite+aiosqlite:///",
+                "",
+            )
+        )
         db_path.parent.mkdir(parents=True, exist_ok=True)
-    Path(settings.LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+
+    Path(settings.LOG_FILE).parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     log_handler = RotatingFileHandler(
-        settings.LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8',
+        settings.LOG_FILE,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
     )
+
     logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        level=getattr(
+            logging,
+            settings.LOG_LEVEL.upper(),
+            logging.INFO,
+        ),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             log_handler,
             logging.StreamHandler(),
@@ -38,24 +59,59 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     await start_scheduler()
+
     yield
+
     await stop_scheduler()
     await close_db()
 
 
-app = FastAPI(title='TaskFlow-SEO', lifespan=lifespan)
+app = FastAPI(
+    title="TaskFlow-SEO",
+    lifespan=lifespan,
+)
 
-static_dir = _base / 'static'
+
+@app.get("/health")
+async def health():
+    try:
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
+
+        return {
+            "status": "ok",
+            "database": "ok",
+        }
+
+    except Exception:
+        logging.exception("Health check failed")
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "database": "unavailable",
+            },
+        )
+
+
+static_dir = _base / "static"
 static_dir.mkdir(exist_ok=True)
-app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
+
+app.mount(
+    "/static",
+    StaticFiles(directory=str(static_dir)),
+    name="static",
+)
 
 
-if os.getenv('TASKFLOW_LEGACY_UI') == '1':
+if os.getenv("TASKFLOW_LEGACY_UI") == "1":
     from app.web.router import router
     from app.web.user_routes import router as user_router
 
     app.include_router(router)
     app.include_router(user_router)
+
 
 from app.web.api.auth import router as auth_router
 from app.web.api.users import router as users_router
@@ -70,6 +126,7 @@ from app.web.api.saved_views import router as saved_views_router
 from app.web.api.quick_tasks import router as quick_tasks_router
 from app.web.api.reports import router as reports_router
 from app.web.api.ai import router as ai_router
+
 
 app.include_router(auth_router)
 app.include_router(users_router)
