@@ -57,15 +57,15 @@ export function TaskScopeFilter({ users, scope, userId, onScopeChange, onUserCha
   };
 
   return (
-    <div className={`rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1 ${className}`}>
-      <div className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(180px,1.25fr)]">
-        <div className="grid grid-cols-3 gap-1">
+    <div className={`rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 ${className}`} style={{ boxShadow: 'var(--shadow-soft)' }}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(180px,1.25fr)]">
+        <div className="grid grid-cols-3 gap-1.5 rounded-full bg-[rgba(43,38,32,.06)] p-1.5">
           {options.map(option => (
             <button
               key={option.value}
               type="button"
               onClick={() => onScopeChange(option.value)}
-              className={`h-8 rounded-md px-2 text-xs font-bold ${normalizedScope === option.value ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-white'}`}
+              className={`h-9 whitespace-nowrap rounded-full px-3 text-[13px] font-semibold transition active:scale-[.97] ${normalizedScope === option.value ? 'bg-[var(--color-accent)] text-white shadow-[0_6px_16px_rgba(43,38,32,.3)]' : 'text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.07)] hover:text-[var(--color-text)]'}`}
             >
               {option.label}
             </button>
@@ -79,7 +79,7 @@ export function TaskScopeFilter({ users, scope, userId, onScopeChange, onUserCha
             </span>
             <span className="text-xs text-[var(--color-muted)]">▼</span>
           </summary>
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] max-h-72 overflow-auto rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-2 shadow-2xl">
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] max-h-72 overflow-auto rounded-2xl border border-white/60 bg-[#faf8f2]/90 p-2 shadow-[0_24px_60px_rgba(62,52,36,.22)] backdrop-blur-xl">
             <div className="mb-2 flex gap-2">
               <button type="button" className="tf-button h-7 px-2 text-xs" onClick={() => onUserChange(users.map(item => item.id).join(','))}>Все</button>
               <button type="button" className="tf-button h-7 px-2 text-xs" onClick={() => onUserChange('')}>Снять</button>
@@ -95,7 +95,7 @@ export function TaskScopeFilter({ users, scope, userId, onScopeChange, onUserCha
           </div>
         </details>
       ) : (
-        <div className="hidden sm:block rounded-md bg-black/10" />
+        <div className="hidden sm:block rounded-md bg-black/[.06]" />
       )}
       </div>
     </div>

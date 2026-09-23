@@ -116,13 +116,17 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
       {sourceMode ? (
         <div>
           <textarea
-            className={`w-full resize-y bg-transparent px-3 py-2 font-mono text-sm leading-6 outline-none ${minHeightClassName}`}
+            rows={14}
+            className={`w-full resize-y bg-[rgba(43,38,32,.045)] px-4 py-3 font-mono text-[13px] leading-[1.75] tracking-[.01em] text-[var(--color-text)] outline-none [tab-size:2] ${minHeightClassName}`}
             value={sourceValue}
             onChange={event => {
               setSourceValue(event.target.value);
               onChange(event.target.value);
             }}
             spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            placeholder="<p>HTML-код заметки...</p>"
           />
           <div className="flex justify-end border-t border-[var(--color-border)] px-3 py-2">
             <button type="button" onClick={applySource} className="tf-button tf-button-primary">Применить HTML</button>

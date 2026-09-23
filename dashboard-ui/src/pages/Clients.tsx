@@ -4,6 +4,8 @@ import { Activity, AlertTriangle, BarChart3, CalendarDays, CalendarRange, CheckC
 import { api } from '../api/client';
 import type { Client, ClientAnalytics, ClientFile, ClientWorkSummary, OrganizationHealth, Task, User } from '../api/client';
 import { referenceCache } from '../api/cache';
+import { SearchSelect } from '../components/SearchSelect';
+import { Select } from '../components/Select';
 import { TaskScopeFilter, type TaskScope } from '../components/TaskScopeFilter';
 import { useAuth } from '../hooks/useAuth';
 import { formatDate, statusMeta, taskTypeMeta } from '../lib/taskflow';
@@ -192,17 +194,27 @@ export function Clients() {
               ['unassigned', 'Без ответственного'],
             ].map(([key, label]) => <button key={key} type="button" onClick={() => setView(key as typeof view)} className={view === key ? 'tf-button tf-button-primary' : 'tf-button'}>{label}</button>)}
           </div>
-          <select className="tf-input" value={contractFilter} onChange={event => setContractFilter(event.target.value as typeof contractFilter)}>
-            <option value="all">Любой договор</option>
-            <option value="active">Договор действует</option>
-            <option value="expired">Договор закончился</option>
-            <option value="none">Срок не указан</option>
-          </select>
-          <select className="tf-input" value={contractSort} onChange={event => setContractSort(event.target.value as typeof contractSort)}>
-            <option value="none">По названию</option>
-            <option value="asc">Сначала ближайшее окончание</option>
-            <option value="desc">Сначала позднее окончание</option>
-          </select>
+          <SearchSelect
+            value={contractFilter}
+            options={[
+              { value: 'all', label: 'Любой договор' },
+              { value: 'active', label: 'Договор действует' },
+              { value: 'expired', label: 'Договор закончился' },
+              { value: 'none', label: 'Срок не указан' },
+            ]}
+            onChange={value => setContractFilter((value || 'all') as typeof contractFilter)}
+            searchPlaceholder="Найти фильтр..."
+          />
+          <SearchSelect
+            value={contractSort}
+            options={[
+              { value: 'none', label: 'По названию' },
+              { value: 'asc', label: 'Сначала ближайшее окончание' },
+              { value: 'desc', label: 'Сначала позднее окончание' },
+            ]}
+            onChange={value => setContractSort((value || 'none') as typeof contractSort)}
+            searchPlaceholder="Найти сортировку..."
+          />
           <button type="button" className="tf-button" onClick={() => { setView('all'); setContractFilter('all'); setContractSort('none'); }}>Сбросить</button>
         </div>}
       </section>}
@@ -699,7 +711,7 @@ function ClientModal({
   }, [activeTab, permissions, isSuperadmin]);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <form onSubmit={submit} onPaste={handlePaste} className="tf-panel flex h-[92dvh] w-full max-w-6xl flex-col overflow-hidden" onClick={event => event.stopPropagation()}>
         <div className="shrink-0 flex min-h-[74px] items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <div>
@@ -712,7 +724,7 @@ function ClientModal({
         <div className="shrink-0 border-b border-[var(--color-border)] px-5 py-3">
           <div className="flex min-h-[40px] flex-wrap items-center gap-2">
             {tabs.filter(tab => canSeeTab(tab.id) && (client || (tab.id !== 'related' && tab.id !== 'activity' && tab.id !== 'files'))).map(tab => (
-              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white' : 'rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-sm font-semibold text-[var(--color-text-secondary)] hover:text-white'}>
+              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white' : 'rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-sm font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}>
                 {tab.label}
               </button>
             ))}
@@ -727,7 +739,7 @@ function ClientModal({
                   <section className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_180px]">
                     <Field label="Название"><input className="tf-input" value={orgName} onChange={event => setOrgName(event.target.value)} required /></Field>
                     <Field label="Домен"><input className="tf-input" value={domain} onChange={event => setDomain(event.target.value)} placeholder="site.ru" /></Field>
-                    <Field label="Статус"><select className="tf-input" value={status} onChange={event => setStatus(event.target.value)}><option value="active">Активный</option><option value="paused">Пауза</option><option value="closed">Закрыт</option></select></Field>
+                    <Field label="Статус"><Select value={status} options={[{ value: 'active', label: 'Активный' }, { value: 'paused', label: 'Пауза' }, { value: 'closed', label: 'Закрыт' }]} onChange={setStatus} /></Field>
                   </section>
                 </Panel>
                 <Panel title="Памятка для задач" icon={<AlertTriangle size={16} />}>
@@ -845,7 +857,7 @@ function ClientModal({
                     <input className="tf-input" list="contract-type-options" placeholder="Тип договора" value={contract.contract_type} onChange={event => updateItem(contracts, setContracts, index, { contract_type: event.target.value })} />
                     <input className="tf-input" type="date" value={contract.start_date} onChange={event => updateItem(contracts, setContracts, index, { start_date: event.target.value })} />
                     <input className="tf-input" type="date" value={contract.end_date} onChange={event => updateItem(contracts, setContracts, index, { end_date: event.target.value })} />
-                    <select className="tf-input" value={contract.status} onChange={event => updateItem(contracts, setContracts, index, { status: event.target.value })}><option value="active">Активен</option><option value="expired">Истёк</option><option value="closed">Закрыт</option></select>
+                    <Select value={contract.status} options={[{ value: 'active', label: 'Активен' }, { value: 'expired', label: 'Истёк' }, { value: 'closed', label: 'Закрыт' }]} onChange={value => updateItem(contracts, setContracts, index, { status: value })} />
                     <RemoveButton onClick={() => setContracts(prev => prev.filter((_, i) => i !== index))} />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
@@ -912,11 +924,17 @@ function ClientModal({
             <section className="grid gap-4 xl:grid-cols-2">
               <Panel title="Модули клиента">
                 <div className="mb-3 flex gap-2">
-                  <select className="tf-input" value={moduleId} onChange={event => setModuleId(event.target.value)}>
-                    <option value="">Выбрать модуль</option>
-                    {allModules.map(module => <option key={module.id} value={module.id}>{module.name}</option>)}
-                  </select>
-                  <button type="button" onClick={attachModule} className="tf-button">Подключить</button>
+                  <div className="min-w-0 flex-1">
+                    <Select
+                      value={moduleId}
+                      options={allModules.map(module => ({ value: String(module.id), label: module.name }))}
+                      onChange={setModuleId}
+                      emptyLabel="Выбрать модуль"
+                      placeholder="Выбрать модуль"
+                      searchPlaceholder="Найти модуль..."
+                    />
+                  </div>
+                  <button type="button" onClick={attachModule} className="tf-button shrink-0">Подключить</button>
                 </div>
                 <div className="space-y-2">
                   {modules.map(module => <div key={module.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-sm"><span className="min-w-0 flex-1 truncate font-semibold">{module.name}</span><button type="button" onClick={() => removeModule(module.id)} className="text-[var(--color-muted)] hover:text-[var(--color-danger)]"><Trash2 size={14} /></button></div>)}

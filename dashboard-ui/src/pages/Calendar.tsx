@@ -282,25 +282,27 @@ export function Calendar() {
             <h2 className="text-xl font-black">Календарь</h2>
             <p className="text-sm text-[var(--color-text-secondary)]">Задачи показываются по дате выполнения. Перетаскивание меняет дату выполнения, не крайний срок.</p>
           </div>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(320px,460px)_auto_auto_auto_auto] md:items-center xl:justify-end">
+          <div className="flex flex-wrap items-center gap-2.5 xl:justify-end">
             <TaskScopeFilter
               users={users}
               scope={scope}
               userId={scopeUserId}
               onScopeChange={value => { setScope(value); if (value !== 'user') setScopeUserId(''); }}
               onUserChange={setScopeUserId}
-              className="w-full"
+              className="w-full sm:min-w-[320px] sm:flex-1 xl:max-w-[440px]"
             />
-            <div className="flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
+            <div className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-1" style={{ boxShadow: 'var(--shadow-soft)' }}>
               {(['day', 'month', 'quick'] as ViewMode[]).map(item => (
-                <button key={item} onClick={() => setView(item)} className={cn('rounded-md px-3 py-1 text-xs font-semibold', view === item ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)]')}>
+                <button key={item} onClick={() => setView(item)} className={cn('h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition active:scale-[.97]', view === item ? 'bg-[var(--color-accent)] text-white shadow-[0_6px_16px_rgba(43,38,32,.3)]' : 'text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.06)] hover:text-[var(--color-text)]')}>
                   {item === 'day' ? 'День' : item === 'month' ? 'Месяц' : 'Быстрые'}
                 </button>
               ))}
             </div>
-            <button onClick={() => navigateDate(-1)} className="tf-button w-9 px-0"><ChevronLeft size={18} /></button>
-            <span className="min-w-40 text-center text-sm font-bold capitalize">{view === 'month' ? monthName : currentDate.toLocaleDateString('ru-RU')}</span>
-            <button onClick={() => navigateDate(1)} className="tf-button w-9 px-0"><ChevronRight size={18} /></button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => navigateDate(-1)} className="tf-button w-9 shrink-0 px-0" aria-label="Назад"><ChevronLeft size={18} /></button>
+              <span className="min-w-36 shrink-0 whitespace-nowrap text-center text-sm font-bold capitalize">{view === 'month' ? monthName : currentDate.toLocaleDateString('ru-RU')}</span>
+              <button onClick={() => navigateDate(1)} className="tf-button w-9 shrink-0 px-0" aria-label="Вперёд"><ChevronRight size={18} /></button>
+            </div>
           </div>
         </div>
         {calendarError && <div className="rounded-lg border border-[var(--color-danger)]/45 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{calendarError}</div>}
