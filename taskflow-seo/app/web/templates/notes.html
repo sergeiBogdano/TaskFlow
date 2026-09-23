@@ -1,0 +1,702 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+.notes-layout { display: grid; grid-template-columns: 240px 1fr; gap: 1rem; align-items: start; }
+.notes-folders { background: var(--tg-card); border-radius: 12px; padding: .75rem; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+.notes-folders h6 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #8b8d92; margin: 0 0 .5rem; }
+.folder-tree, .folder-tree ul { list-style: none; margin: 0; padding-left: .9rem; }
+.folder-tree > li { padding-left: 0; }
+.folder-tree ul { display: block; }
+.folder-item { display: flex; align-items: center; gap: .25rem; padding: .3rem .4rem; border-radius: 8px; font-size: .85rem; color: #c5c7cb; cursor: pointer; transition: background .15s; }
+.folder-item:hover { background: rgba(255,255,255,.06); }
+.folder-item.active { background: rgba(59,130,246,.14); color: var(--tg-accent); }
+.folder-item .f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-item .f-actions { display: none; gap: 2px; }
+.folder-item:hover .f-actions { display: inline-flex; }
+.f-actions button { background: none; border: none; color: #8b8d92; padding: 0 3px; font-size: .78rem; line-height: 1; }
+.f-actions button:hover { color: #e4e5e7; }
+.folder-item.drop-target { outline: 2px dashed var(--tg-accent); background: rgba(59,130,246,.1); }
+.notes-main { min-width: 0; }
+.notes-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+.notes-toolbar .form-control, .notes-toolbar .form-select { width: auto; }
+#notesSearch { min-width: 200px; flex: 1; }
+.notes-tags { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .75rem; }
+.note-tag { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.06); color: #9ca3af; cursor: pointer; border: 1px solid transparent; }
+.note-tag:hover { color: #e4e5e7; }
+.note-tag.active { background: rgba(59,130,246,.18); color: var(--tg-accent); border-color: rgba(59,130,246,.4); }
+#notesGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .85rem; }
+.note-card { background: var(--tg-card); border-radius: 12px; padding: .85rem; display: flex; flex-direction: column; gap: .45rem; cursor: pointer; transition: box-shadow .15s, transform .15s; border: 1px solid rgba(255,255,255,.04); min-height: 130px; }
+.note-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.3); transform: translateY(-1px); }
+.note-card.dragging { opacity: .5; }
+.note-card h6 { font-size: .92rem; margin: 0; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.note-preview { font-size: .78rem; color: #8b8d92; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; white-space: pre-wrap; word-break: break-word; flex: 1; }
+.note-preview.code { font-family: ui-monospace, Consolas, monospace; font-size: .72rem; background: rgba(0,0,0,.25); border-radius: 6px; padding: .4rem; }
+.note-meta { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; font-size: .68rem; color: #6b6d72; }
+.note-meta .badge { font-size: .65rem; }
+.note-card .note-tags-row { display: flex; flex-wrap: wrap; gap: .25rem; }
+.notes-empty { grid-column: 1 / -1; text-align: center; color: #6b6d72; padding: 3rem 1rem; }
+.notes-empty i { font-size: 2rem; display: block; margin-bottom: .5rem; opacity: .5; }
+.note-view-body { font-size: .92rem; line-height: 1.6; word-break: break-word; }
+.note-view-body pre { background: rgba(0,0,0,.35); border-radius: 8px; padding: .75rem; overflow-x: auto; }
+.note-view-body code { font-size: .85rem; }
+.note-view-body img { max-width: 100%; }
+.note-view-body a.wikilink { color: var(--tg-accent); text-decoration: underline dotted; }
+.note-view-body blockquote { border-left: 3px solid var(--tg-accent); margin: .5rem 0; padding-left: .75rem; color: #9ca3af; }
+.note-view-body table { width: 100%; border-collapse: collapse; }
+.note-view-body th, .note-view-body td { border: 1px solid rgba(255,255,255,.1); padding: .35rem .5rem; }
+#noteHtmlFrame { width: 100%; min-height: 320px; border: none; border-radius: 8px; background: #fff; }
+#noteEditorPreview { min-height: 180px; background: rgba(0,0,0,.2); border-radius: 8px; padding: .75rem; overflow: auto; }
+#noteEditor { font-family: ui-monospace, Consolas, monospace; min-height: 180px; }
+.notes-tabs .nav-link { font-size: .85rem; padding: .35rem .75rem; color: #8b8d92; }
+.notes-tabs .nav-link.active { color: var(--tg-accent); background: rgba(59,130,246,.12); }
+.note-link-list { display: flex; flex-direction: column; gap: .35rem; }
+.note-link-list a { color: var(--tg-accent); text-decoration: none; font-size: .85rem; }
+@media (max-width: 900px) { .notes-layout { grid-template-columns: 1fr; } .notes-folders { position: static; max-height: 220px; } }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0"><i class="bi bi-card-list me-2"></i>Доска заметок</h3>
+  <button class="btn btn-primary btn-sm" id="btnNewNote"><i class="bi bi-plus-lg me-1"></i>Новая заметка</button>
+</div>
+
+<div class="notes-layout">
+  <!-- Папки -->
+  <aside class="notes-folders">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="mb-0"><i class="bi bi-folder me-1"></i>Папки</h6>
+      <button class="btn btn-link btn-sm p-0 text-secondary" id="btnNewRootFolder" title="Новая папка"><i class="bi bi-folder-plus"></i></button>
+    </div>
+    <ul class="folder-tree" id="folderTree">
+      <li>
+        <div class="folder-item" data-folder="root">
+          <i class="bi bi-house-door"></i>
+          <span class="f-name">Без папки</span>
+        </div>
+      </li>
+    </ul>
+    <div class="small text-secondary mt-2" style="font-size:.7rem;">Перетащите заметку на папку, чтобы переместить</div>
+  </aside>
+
+  <!-- Основная часть -->
+  <section class="notes-main">
+    <ul class="nav nav-tabs notes-tabs mb-3" id="notesTabs">
+      <li class="nav-item"><a class="nav-link active" data-scope="all" href="#">Все</a></li>
+      <li class="nav-item"><a class="nav-link" data-scope="mine" href="#">Мои</a></li>
+      <li class="nav-item"><a class="nav-link" data-scope="shared" href="#">Общие</a></li>
+      <li class="nav-item"><a class="nav-link" data-scope="archive" href="#">Архив</a></li>
+    </ul>
+
+    <div class="notes-toolbar">
+      <input type="text" class="form-control form-control-sm" id="notesSearch" placeholder="Поиск по заметкам...">
+      <select class="form-select form-select-sm" id="formatFilter" style="max-width:150px;">
+        <option value="">Все форматы</option>
+        <option value="markdown">Markdown</option>
+        <option value="text">Текст</option>
+        <option value="code">Код</option>
+        <option value="html">HTML/CSS/JS</option>
+      </select>
+      <span class="small text-secondary" id="notesCount"></span>
+    </div>
+
+    <div class="notes-tags" id="tagCloud"></div>
+
+    <div id="notesGrid"></div>
+  </section>
+</div>
+
+<!-- Модалка просмотра -->
+<div class="modal fade" id="noteViewModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="noteViewTitle">Заметка</h5>
+          <div class="small text-secondary" id="noteViewMeta"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="noteViewTags" class="mb-2"></div>
+        <div class="note-view-body" id="noteViewBody"></div>
+        <div id="noteViewBacklinks" class="mt-3 pt-2 border-top border-secondary border-opacity-25"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-outline-secondary" id="btnDuplicateNote"><i class="bi bi-copy me-1"></i>Копия</button>
+        <button class="btn btn-sm btn-outline-danger" id="btnArchiveNote"><i class="bi bi-archive me-1"></i>В архив</button>
+        <button class="btn btn-sm btn-primary" id="btnEditNote"><i class="bi bi-pencil me-1"></i>Редактировать</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка создания/редактирования -->
+<div class="modal fade" id="noteEditModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="noteEditTitle">Новая заметка</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="noteId">
+        <div class="mb-2">
+          <input type="text" class="form-control" id="noteTitle" placeholder="Заголовок" maxlength="200">
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col">
+            <select class="form-select form-select-sm" id="noteFormat">
+              <option value="markdown">Markdown</option>
+              <option value="text">Текст</option>
+              <option value="code">Код</option>
+              <option value="html">HTML/CSS/JS</option>
+            </select>
+          </div>
+          <div class="col">
+            <select class="form-select form-select-sm" id="noteFolder"><option value="">Без папки</option></select>
+          </div>
+          <div class="col-auto d-flex align-items-center">
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" id="notePublic">
+              <label class="form-check-label small" for="notePublic">Общая</label>
+            </div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <input type="text" class="form-control form-control-sm" id="noteTags" placeholder="Теги через запятую: seo, идея, клиент">
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="small text-secondary mb-0">Содержимое</label>
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-secondary active" id="btnModeEdit"><i class="bi bi-pencil-square"></i></button>
+            <button type="button" class="btn btn-outline-secondary" id="btnModePreview"><i class="bi bi-eye"></i></button>
+          </div>
+        </div>
+        <textarea class="form-control" id="noteEditor" rows="12" placeholder="Текст заметки..."></textarea>
+        <div id="noteEditorPreview" style="display:none;"></div>
+        <div class="form-text" id="editorHint">Поддерживается Markdown: **жирный**, *курсив*, # Заголовок, ```код``, > цитата, [[Связанная заметка]]</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btnSaveNote"><i class="bi bi-check-lg me-1"></i>Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+<script>
+(function() {
+  const state = {
+    notes: [],
+    folders: [],
+    tags: [],
+    scope: 'all',
+    folderId: '',
+    q: '',
+    tag: '',
+    fmt: '',
+    viewing: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => (s == null ? '' : String(s))
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+  const FORMAT_LABELS = { markdown: 'MD', text: 'TXT', code: 'CODE', html: 'HTML' };
+
+  function api(url, opts) {
+    return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}))
+      .then(r => r.json().then(data => {
+        if (!r.ok) throw new Error((data && data.detail) ? data.detail : 'Ошибка запроса');
+        return data;
+      }));
+  }
+
+  // ── Рендер Markdown / форматов ──────────────────────────
+  function renderMarkdown(src) {
+    if (window.marked && marked.parse) {
+      const html = marked.parse(src || '', { breaks: true, gfm: true });
+      return window.DOMPurify ? DOMPurify.sanitize(html) : html;
+    }
+    return esc(src).replace(/\n/g, '<br>');
+  }
+
+  function linkifyWikilinks(html) {
+    return html.replace(/\[\[([^\]]+)\]\]/g, function(_, title) {
+      return '<a href="#" class="wikilink" data-title="' + esc(title.trim()) + '">[[ ' + esc(title.trim()) + ' ]]</a>';
+    });
+  }
+
+  function renderNoteContent(note) {
+    const content = note.content || '';
+    if (note.format === 'html') {
+      return '<iframe sandbox srcdoc="' + esc(content) + '" id="noteHtmlFrame" style="min-height:320px;"></iframe>';
+    }
+    if (note.format === 'code') {
+      let out;
+      try {
+        const div = document.createElement('div');
+        div.textContent = content;
+        out = (window.hljs) ? hljs.highlightAuto(content).value : div.innerHTML;
+      } catch (e) { out = esc(content); }
+      return '<pre><code class="hljs">' + out + '</code></pre>';
+    }
+    if (note.format === 'text') {
+      return linkifyWikilinks(esc(content)
+        .replace(/\[\[([^\]]+)\]\]/g, '<a href="#" class="wikilink" data-title="$1">[[ $1 ]]</a>')
+        .replace(/\n/g, '<br>')
+        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>'));
+    }
+    return linkifyWikilinks(renderMarkdown(content));
+  }
+
+  function notePreview(note) {
+    let text = note.content || '';
+    if (note.format === 'html') {
+      text = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    } else if (note.format === 'markdown') {
+      text = text.replace(/```[\s\S]*?```/g, ' [код] ')
+        .replace(/[#>*_`\[\]()!-]/g, '')
+        .replace(/\s+/g, ' ').trim();
+    }
+    return text.slice(0, 300);
+  }
+
+  // ── Папки ───────────────────────────────────────────────
+  function folderById(id) {
+    return state.folders.find(f => f.id === id);
+  }
+
+  function renderFolders() {
+    const tree = $('folderTree');
+    tree.querySelectorAll('li.dynamic').forEach(el => el.remove());
+
+    const roots = state.folders.filter(f => !f.parent_id);
+    const active = state.folderId;
+
+    function build(list, container) {
+      list.forEach(f => {
+        const li = document.createElement('li');
+        li.className = 'dynamic';
+        const hasChildren = state.folders.some(c => c.parent_id === f.id);
+        li.innerHTML =
+          '<div class="folder-item' + (String(state.folderId) === String(f.id) ? ' active' : '') + '" data-folder="' + f.id + '" draggable="false">' +
+            '<i class="bi bi-chevron-right" style="font-size:.65rem;visibility:' + (hasChildren ? 'visible' : 'hidden') + ';" data-toggle="1"></i>' +
+            '<i class="bi bi-folder' + (hasChildren ? '' : '') + '"></i>' +
+            '<span class="f-name">' + esc(f.name) + '</span>' +
+            '<span class="f-actions">' +
+              '<button data-act="add" title="Подпапка"><i class="bi bi-plus"></i></button>' +
+              '<button data-act="rename" title="Переименовать"><i class="bi bi-pencil"></i></button>' +
+              '<button data-act="delete" title="Удалить"><i class="bi bi-x"></i></button>' +
+            '</span>' +
+          '</div><ul class="children" style="display:none;"></ul>';
+        container.appendChild(li);
+
+        const item = li.querySelector('.folder-item');
+        const sub = li.querySelector('ul.children');
+        const chevron = item.querySelector('[data-toggle]');
+
+        item.addEventListener('click', function(e) {
+          const actBtn = e.target.closest('button[data-act]');
+          if (actBtn) {
+            e.stopPropagation();
+            folderAction(actBtn.dataset.act, f);
+            return;
+          }
+          if (e.target === chevron) {
+            const open = sub.style.display !== 'none';
+            sub.style.display = open ? 'none' : 'block';
+            chevron.className = 'bi ' + (open ? 'bi-chevron-right' : 'bi-chevron-down');
+            return;
+          }
+          selectFolder(state.folderId === String(f.id) ? '' : String(f.id));
+        });
+
+        const children = state.folders.filter(c => c.parent_id === f.id);
+        if (children.length) {
+          sub.style.display = 'block';
+          chevron.className = 'bi bi-chevron-down';
+          build(children, sub);
+        }
+
+        item.addEventListener('dragover', e => { e.preventDefault(); item.classList.add('drop-target'); });
+        item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+        item.addEventListener('drop', e => {
+          e.preventDefault();
+          item.classList.remove('drop-target');
+          const noteId = e.dataTransfer.getData('text/note-id');
+          if (noteId) moveNoteToFolder(noteId, f.id);
+        });
+      });
+    }
+
+    build(roots, tree);
+
+    const rootItem = tree.querySelector('[data-folder="root"]');
+    rootItem.classList.toggle('active', state.folderId === 'root');
+    rootItem.onclick = () => selectFolder(state.folderId === 'root' ? '' : 'root');
+    rootItem.ondragover = e => { e.preventDefault(); rootItem.classList.add('drop-target'); };
+    rootItem.ondragleave = () => rootItem.classList.remove('drop-target');
+    rootItem.ondrop = e => {
+      e.preventDefault();
+      rootItem.classList.remove('drop-target');
+      const noteId = e.dataTransfer.getData('text/note-id');
+      if (noteId) moveNoteToFolder(noteId, null);
+    };
+  }
+
+  function folderFlatOptions(selected) {
+    const opts = ['<option value="">Без папки</option>'];
+    function walk(parentId, depth) {
+      state.folders.filter(f => (f.parent_id || null) === parentId).forEach(f => {
+        const sel = String(selected) === String(f.id) ? ' selected' : '';
+        opts.push('<option value="' + f.id + '"' + sel + '>' + '  '.repeat(depth) + esc(f.name) + '</option>');
+        walk(f.id, depth + 1);
+      });
+    }
+    walk(null, 0);
+    return opts.join('');
+  }
+
+  async function folderAction(act, folder) {
+    if (act === 'add') {
+      const name = prompt('Название подпапки:');
+      if (!name) return;
+      try {
+        await api('/api/notes/folders', { method: 'POST', body: JSON.stringify({ name: name, parent_id: folder.id }) });
+        await loadFolders();
+      } catch (e) { alert(e.message); }
+    } else if (act === 'rename') {
+      const name = prompt('Новое название:', folder.name);
+      if (!name || name === folder.name) return;
+      try {
+        await api('/api/notes/folders/' + folder.id, { method: 'PUT', body: JSON.stringify({ name: name }) });
+        await loadFolders();
+        await loadNotes();
+      } catch (e) { alert(e.message); }
+    } else if (act === 'delete') {
+      if (!confirm('Удалить папку "' + folder.name + '"? Заметки переместятся в "Без папки".')) return;
+      try {
+        await api('/api/notes/folders/' + folder.id, { method: 'DELETE' });
+        if (state.folderId === String(folder.id)) state.folderId = '';
+        await loadFolders();
+        await loadNotes();
+      } catch (e) { alert(e.message); }
+    }
+  }
+
+  function selectFolder(id) {
+    state.folderId = id;
+    renderFolders();
+    loadNotes();
+  }
+
+  async function loadFolders() {
+    try {
+      state.folders = await api('/api/notes/folders');
+      renderFolders();
+      const sel = $('noteFolder');
+      const current = sel.value;
+      sel.innerHTML = folderFlatOptions(current);
+    } catch (e) { console.error(e); }
+  }
+
+  // ── Заметки ─────────────────────────────────────────────
+  function noteCard(note) {
+    const preview = notePreview(note);
+    const isCode = note.format === 'code';
+    const tags = (note.tags || []).slice(0, 4).map(t =>
+      '<span class="note-tag" data-tag="' + esc(t) + '">' + esc(t) + '</span>'
+    ).join('');
+    const date = note.updated_at || note.created_at;
+    const dateStr = date ? new Date(date).toLocaleDateString('ru-RU') : '';
+    return '<article class="note-card" data-id="' + note.id + '" draggable="true">' +
+      '<h6>' + esc(note.title) + '</h6>' +
+      '<div class="note-preview' + (isCode ? ' code' : '') + '">' + esc(preview) + '</div>' +
+      '<div class="note-tags-row">' + tags + '</div>' +
+      '<div class="note-meta">' +
+        '<span class="badge bg-secondary">' + (FORMAT_LABELS[note.format] || 'MD') + '</span>' +
+        (note.is_public
+          ? '<span class="badge bg-success bg-opacity-25 text-success"><i class="bi bi-people"></i> общая</span>'
+          : '<span class="badge bg-secondary bg-opacity-25"><i class="bi bi-lock"></i> личная</span>') +
+        (!note.is_owner ? '<span class="badge bg-info bg-opacity-20 text-info">' + esc(note.username || '') + '</span>' : '') +
+        (note.folder_name ? '<span><i class="bi bi-folder2"></i> ' + esc(note.folder_name) + '</span>' : '') +
+        '<span class="ms-auto">' + dateStr + '</span>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function renderNotes() {
+    const grid = $('notesGrid');
+    if (!state.notes.length) {
+      const archived = state.scope === 'archive';
+      grid.innerHTML = '<div class="notes-empty"><i class="bi bi-journal-text"></i>' +
+        (archived ? 'Архив пуст' : (state.q || state.tag ? 'Ничего не найдено' : 'Пока нет заметок. Нажмите «Новая заметка».')) +
+        '</div>';
+    } else {
+      grid.innerHTML = state.notes.map(noteCard).join('');
+    }
+    $('notesCount').textContent = state.notes.length + ' шт.';
+
+    grid.querySelectorAll('.note-card').forEach(card => {
+      card.addEventListener('click', e => {
+        if (e.target.closest('.note-tag')) {
+          const tag = e.target.closest('.note-tag').dataset.tag;
+          state.tag = state.tag === tag ? '' : tag;
+          renderTags();
+          loadNotes();
+          return;
+        }
+        openNote(parseInt(card.dataset.id, 10));
+      });
+      card.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/note-id', card.dataset.id);
+        card.classList.add('dragging');
+      });
+      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    });
+  }
+
+  function renderTags() {
+    const cloud = $('tagCloud');
+    if (!state.tags.length && !state.tag) { cloud.innerHTML = ''; return; }
+    const all = state.tags.slice();
+    if (state.tag && !all.includes(state.tag)) all.unshift(state.tag);
+    cloud.innerHTML = all.map(t =>
+      '<span class="note-tag' + (state.tag === t ? ' active' : '') + '" data-tag="' + esc(t) + '">#' + esc(t) + '</span>'
+    ).join('');
+    cloud.querySelectorAll('.note-tag').forEach(el => el.addEventListener('click', () => {
+      state.tag = state.tag === el.dataset.tag ? '' : el.dataset.tag;
+      renderTags();
+      loadNotes();
+    }));
+  }
+
+  async function loadNotes() {
+    const params = new URLSearchParams();
+    if (state.q) params.set('q', state.q);
+    if (state.fmt) params.set('fmt', state.fmt);
+    if (state.tag) params.set('tag', state.tag);
+    if (state.folderId) params.set('folder_id', state.folderId);
+    if (state.scope === 'archive') {
+      params.set('archived', 'true');
+    } else {
+      params.set('scope', state.scope);
+    }
+    try {
+      const data = await api('/api/notes?' + params.toString());
+      state.notes = data.notes || [];
+      if (state.tag && !data.tags.includes(state.tag)) data.tags.unshift(state.tag);
+      state.tags = data.tags || [];
+      renderNotes();
+      renderTags();
+    } catch (e) {
+      $('notesGrid').innerHTML = '<div class="notes-empty"><i class="bi bi-exclamation-triangle"></i>' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function moveNoteToFolder(noteId, folderId) {
+    try {
+      await api('/api/notes/' + noteId, { method: 'PUT', body: JSON.stringify({ folder_id: folderId }) });
+      await loadNotes();
+    } catch (e) { alert(e.message); }
+  }
+
+  // ── Просмотр ────────────────────────────────────────────
+  function openNote(id) {
+    const note = state.notes.find(n => n.id === id);
+    if (!note) return;
+    state.viewing = note;
+    $('noteViewTitle').textContent = note.title;
+    $('noteViewMeta').innerHTML =
+      (FORMAT_LABELS[note.format] || 'MD') + ' · ' +
+      (note.is_public ? '<span class="text-success">общая</span>' : 'личная') +
+      (!note.is_owner ? ' · ' + esc(note.username || '') : '') +
+      (note.folder_name ? ' · <i class="bi bi-folder2"></i> ' + esc(note.folder_name) : '') +
+      (note.updated_at ? ' · изменено ' + new Date(note.updated_at).toLocaleString('ru-RU') : '');
+    $('noteViewTags').innerHTML = (note.tags || []).map(t =>
+      '<span class="note-tag" data-tag="' + esc(t) + '">#' + esc(t) + '</span>'
+    ).join('');
+    $('noteViewBody').innerHTML = renderNoteContent(note);
+
+    // [[wikilinks]] → ссылки на другие заметки
+    $('noteViewBody').querySelectorAll('a.wikilink').forEach(a => {
+      a.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        const title = a.dataset.title.toLowerCase();
+        const target = state.notes.find(n => n.title.toLowerCase() === title);
+        if (target) { bootstrap.Modal.getOrCreateInstance($('noteViewModal')).hide(); setTimeout(() => openNote(target.id), 200); }
+        else { state.q = a.dataset.title; $('notesSearch').value = state.q; loadNotes(); }
+      });
+    });
+
+    // Бэклинки: заметки, ссылающиеся на текущую
+    const backlinks = state.notes.filter(n =>
+      n.id !== note.id && (n.content || '').toLowerCase().includes('[[' + note.title.toLowerCase() + ']]')
+    );
+    $('noteViewBacklinks').innerHTML = backlinks.length
+      ? '<div class="small text-secondary mb-1"><i class="bi bi-links me-1"></i>Ссылки на заметку</div><div class="note-link-list">' +
+        backlinks.map(b => '<a href="#" data-id="' + b.id + '">' + esc(b.title) + '</a>').join('') + '</div>'
+      : '';
+    $('noteViewBacklinks').querySelectorAll('a[data-id]').forEach(a => a.addEventListener('click', e => {
+      e.preventDefault();
+      openNote(parseInt(a.dataset.id, 10));
+    }));
+
+    // Подсветка кода
+    $('noteViewBody').querySelectorAll('pre code').forEach(block => {
+      if (window.hljs) hljs.highlightElement(block);
+    });
+
+    $('btnArchiveNote').style.display = note.is_owner ? '' : 'none';
+    $('btnEditNote').style.display = note.is_owner ? '' : 'none';
+    if (state.scope === 'archive' && note.is_owner) {
+      $('btnArchiveNote').innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Восстановить';
+      $('btnArchiveNote').dataset.mode = 'restore';
+    } else {
+      $('btnArchiveNote').innerHTML = '<i class="bi bi-archive me-1"></i>В архив';
+      $('btnArchiveNote').dataset.mode = 'archive';
+    }
+    bootstrap.Modal.getOrCreateInstance($('noteViewModal')).show();
+  }
+
+  // ── Редактор ────────────────────────────────────────────
+  function openEditor(note) {
+    $('noteEditTitle').textContent = note ? 'Редактирование заметки' : 'Новая заметка';
+    $('noteId').value = note ? note.id : '';
+    $('noteTitle').value = note ? note.title : '';
+    $('noteFormat').value = note ? note.format : 'markdown';
+    $('noteTags').value = note ? (note.tags || []).join(', ') : '';
+    $('notePublic').checked = note ? !!note.is_public : false;
+    $('noteFolder').innerHTML = folderFlatOptions(note ? note.folder_id : (state.folderId !== '' && state.folderId !== 'root' ? state.folderId : ''));
+    $('noteEditor').value = note ? (note.content || '') : '';
+    setEditorMode(true);
+    updateEditorHint();
+    new bootstrap.Modal($('noteEditModal')).show();
+    setTimeout(() => $('noteTitle').focus(), 300);
+  }
+
+  function setEditorMode(editMode) {
+    $('noteEditor').style.display = editMode ? '' : 'none';
+    $('noteEditorPreview').style.display = editMode ? 'none' : '';
+    $('btnModeEdit').classList.toggle('active', editMode);
+    $('btnModePreview').classList.toggle('active', !editMode);
+    if (!editMode) {
+      const fmt = $('noteFormat').value;
+      const content = $('noteEditor').value;
+      if (fmt === 'html') {
+        $('noteEditorPreview').innerHTML = '<iframe sandbox srcdoc="' + esc(content) + '" style="width:100%;min-height:200px;border:none;background:#fff;border-radius:6px;"></iframe>';
+      } else if (fmt === 'code') {
+        $('noteEditorPreview').innerHTML = '<pre style="margin:0;"><code>' + esc(content) + '</code></pre>';
+        if (window.hljs) { const el = $('noteEditorPreview').querySelector('code'); try { el.innerHTML = hljs.highlightAuto(content).value; } catch(e){} }
+      } else if (fmt === 'text') {
+        $('noteEditorPreview').innerHTML = '<div style="white-space:pre-wrap;">' + esc(content) + '</div>';
+      } else {
+        $('noteEditorPreview').innerHTML = linkifyWikilinks(renderMarkdown(content));
+      }
+    }
+  }
+
+  function updateEditorHint() {
+    const fmt = $('noteFormat').value;
+    const hints = {
+      markdown: 'Поддерживается Markdown: **жирный**, # Заголовок, ```код```, > цитата, [[Связанная заметка]]',
+      text: 'Обычный текст, переносы строк сохраняются',
+      code: 'Блок кода с подсветкой синтаксиса (auto-detect)',
+      html: 'HTML/CSS/JS — рендерится в песочнице (sandbox iframe)',
+    };
+    $('editorHint').textContent = hints[fmt] || '';
+  }
+
+  async function saveNote() {
+    const id = $('noteId').value;
+    const payload = {
+      title: $('noteTitle').value.trim(),
+      content: $('noteEditor').value,
+      format: $('noteFormat').value,
+      tags: $('noteTags').value.split(',').map(s => s.trim()).filter(Boolean),
+      is_public: $('notePublic').checked,
+      folder_id: $('noteFolder').value ? parseInt($('noteFolder').value, 10) : null,
+    };
+    if (!payload.title) { alert('Укажите заголовок'); return; }
+    try {
+      if (id) {
+        await api('/api/notes/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
+      }
+      bootstrap.Modal.getOrCreateInstance($('noteEditModal')).hide();
+      await loadNotes();
+    } catch (e) { alert(e.message); }
+  }
+
+  // ── Инициализация ───────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function() {
+    loadFolders().then(loadNotes);
+
+    $('btnNewNote').addEventListener('click', () => openEditor(null));
+    $('btnNewRootFolder').addEventListener('click', async () => {
+      const name = prompt('Название папки:');
+      if (!name) return;
+      try {
+        await api('/api/notes/folders', { method: 'POST', body: JSON.stringify({ name: name }) });
+        await loadFolders();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('notesTabs').addEventListener('click', function(e) {
+      const link = e.target.closest('.nav-link');
+      if (!link) return;
+      e.preventDefault();
+      this.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+      link.classList.add('active');
+      state.scope = link.dataset.scope;
+      loadNotes();
+    });
+
+    let searchTimer;
+    $('notesSearch').addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      const v = this.value.trim();
+      searchTimer = setTimeout(() => { state.q = v; loadNotes(); }, 300);
+    });
+
+    $('formatFilter').addEventListener('change', function() { state.fmt = this.value; loadNotes(); });
+
+    $('btnModeEdit').addEventListener('click', () => setEditorMode(true));
+    $('btnModePreview').addEventListener('click', () => setEditorMode(false));
+    $('noteFormat').addEventListener('change', updateEditorHint);
+    $('btnSaveNote').addEventListener('click', saveNote);
+
+    $('btnEditNote').addEventListener('click', function() {
+      if (!state.viewing) return;
+      bootstrap.Modal.getOrCreateInstance($('noteViewModal')).hide();
+      setTimeout(() => openEditor(state.viewing), 200);
+    });
+
+    $('btnDuplicateNote').addEventListener('click', async function() {
+      if (!state.viewing) return;
+      try {
+        await api('/api/notes/' + state.viewing.id + '/duplicate', { method: 'POST' });
+        bootstrap.Modal.getOrCreateInstance($('noteViewModal')).hide();
+        await loadNotes();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('btnArchiveNote').addEventListener('click', async function() {
+      if (!state.viewing) return;
+      const mode = this.dataset.mode || 'archive';
+      try {
+        await api('/api/notes/' + state.viewing.id + '/' + (mode === 'restore' ? 'restore' : 'archive'), { method: 'POST' });
+        bootstrap.Modal.getOrCreateInstance($('noteViewModal')).hide();
+        await loadNotes();
+      } catch (e) { alert(e.message); }
+    });
+  });
+})();
+</script>
+{% endblock %}
