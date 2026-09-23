@@ -297,6 +297,37 @@ export type VoiceTaskParseResult = {
   users: { id: number; username: string }[];
 };
 
+export type Note = {
+  id: number;
+  title: string;
+  content: string;
+  format: string;
+  tags: string[];
+  is_public: boolean;
+  folder_id: number | null;
+  folder_name: string | null;
+  user_id: number;
+  username: string | null;
+  is_owner: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type NoteFolder = {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  user_id: number;
+  created_at: string;
+};
+
+export type NotesListResponse = {
+  notes: Note[];
+  tags: string[];
+  total: number;
+};
+
 export const api = {
   // Auth
   login: (username: string, password: string) =>
@@ -538,4 +569,27 @@ export const api = {
     request<{ ok: boolean }>(`/api/reports/${id}/restore`, { method: 'POST' }),
   emptyReportTrash: () => request<{ ok: boolean; count: number }>('/api/reports/trash/empty', { method: 'DELETE' }),
   getOllamaModels: () => request<{ models: string[] }>('/api/reports/ollama-models'),
+
+  // Notes
+  getNotes: (params?: string) => request<NotesListResponse>(`/api/notes${params ? `?${params}` : ''}`),
+  getNote: (id: number) => request<Note>(`/api/notes/${id}`),
+  createNote: (data: Record<string, any>) =>
+    request<Note>('/api/notes', { method: 'POST', body: JSON.stringify(data) }),
+  updateNote: (id: number, data: Record<string, any>) =>
+    request<Note>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteNote: (id: number, permanent?: boolean) =>
+    request<{ ok: boolean; permanent: boolean }>(`/api/notes/${id}${permanent ? '?permanent=true' : ''}`, { method: 'DELETE' }),
+  archiveNote: (id: number) =>
+    request<{ ok: boolean }>(`/api/notes/${id}/archive`, { method: 'POST' }),
+  restoreNote: (id: number) =>
+    request<Note>(`/api/notes/${id}/restore`, { method: 'POST' }),
+  duplicateNote: (id: number) =>
+    request<Note>(`/api/notes/${id}/duplicate`, { method: 'POST' }),
+  getNoteFolders: () => request<NoteFolder[]>('/api/notes/folders'),
+  createNoteFolder: (data: Record<string, any>) =>
+    request<NoteFolder>('/api/notes/folders', { method: 'POST', body: JSON.stringify(data) }),
+  updateNoteFolder: (id: number, data: Record<string, any>) =>
+    request<NoteFolder>(`/api/notes/folders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteNoteFolder: (id: number) =>
+    request<{ ok: boolean; moved_notes: number }>(`/api/notes/folders/${id}`, { method: 'DELETE' }),
 };

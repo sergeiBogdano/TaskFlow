@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   LogOut,
   Mic,
+  NotebookPen,
   Puzzle,
   Send,
   Settings,
@@ -40,6 +41,7 @@ const nav = [
       { to: '/kanban', icon: Columns3, label: 'Канбан', hint: 'Поток работы', permission: 'kanban' },
       { to: '/calendar', icon: CalendarDays, label: 'Календарь', hint: 'План выполнения', permission: 'calendar' },
       { to: '/notifications', icon: Bell, label: 'Уведомления', hint: 'События', permission: 'notifications' },
+      { to: '/notes', icon: NotebookPen, label: 'Заметки', hint: 'Идеи и черновики', permission: 'tasks' },
       { to: '/trash', icon: Trash2, label: 'Корзина', hint: 'Удалённые задачи', permission: 'tasks' },
     ],
   },
@@ -68,6 +70,7 @@ const titles: Record<string, string> = {
   '/modules': 'Модули',
   '/calendar': 'Календарь',
   '/notifications': 'Уведомления',
+  '/notes': 'Заметки',
   '/users': 'Пользователи',
   '/reports': 'Отчёты',
   '/trash': 'Корзина',
@@ -83,24 +86,47 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
       ref={setNodeRef}
       to={item.to}
       end={item.to === '/'}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.35 : 1 }}
       className={({ isActive }) => cn(
-        'group flex min-w-[74px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center text-xs lg:min-w-0 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:py-2.5 lg:text-left lg:text-sm',
+        'group flex min-w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center text-xs lg:min-w-0 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:py-2.5 lg:text-left lg:text-sm',
         compact && 'lg:justify-center lg:px-2',
-        isActive
-          ? 'bg-[var(--color-accent)]/16 text-white shadow-[0_1px_0_rgba(255,255,255,.07)_inset]'
-          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-white',
+        !isActive && 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]',
       )}
+      style={({ isActive }) => ({
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.35 : 1,
+        ...(isActive
+          ? { background: 'var(--color-accent)', color: '#f5f1ea', boxShadow: '0 8px 20px rgba(43,38,32,.3)' }
+          : undefined),
+      })}
     >
-      <item.icon size={17} />
-      <span className={cn('min-w-0 lg:flex-1', compact && 'lg:hidden')}>
-        <span className="block truncate font-medium">{item.label}</span>
-        <span className="hidden truncate text-[11px] text-[var(--color-muted)] lg:block">{item.hint}</span>
-      </span>
-      {item.to === '/notifications' && unreadCount > 0 && <span className="rounded-full bg-[var(--color-danger)] px-1.5 py-0.5 text-[10px] font-bold text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
-      <button type="button" {...attributes} {...listeners} onClick={event => { event.preventDefault(); event.stopPropagation(); }} className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] opacity-70 hover:bg-[var(--color-surface-3)] hover:text-white lg:opacity-0 lg:group-hover:opacity-100', compact && 'lg:hidden')} aria-label={`Перетащить ${item.label}`} title={`Перетащить ${item.label}`}>
-        <GripVertical size={14} />
-      </button>
+      {({ isActive: active }) => (
+        <>
+          <item.icon size={19} />
+          <span className={cn('min-w-0 lg:flex-1', compact && 'lg:hidden')}>
+            <span className="block truncate font-medium">{item.label}</span>
+            <span
+              className="hidden truncate text-[11px] lg:block"
+              style={{ color: active ? 'rgba(245,241,234,.68)' : 'var(--color-muted)' }}
+            >
+              {item.hint}
+            </span>
+          </span>
+          {item.to === '/notifications' && unreadCount > 0 && <span className="rounded-full bg-[var(--color-danger)] px-1.5 py-0.5 text-[10px] font-bold text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            onClick={event => { event.preventDefault(); event.stopPropagation(); }}
+            className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md opacity-70 lg:opacity-0 lg:group-hover:opacity-100', compact && 'lg:hidden', !active && 'text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]')}
+            style={active ? { color: 'rgba(245,241,234,.65)' } : undefined}
+            aria-label={`Перетащить ${item.label}`}
+            title={`Перетащить ${item.label}`}
+          >
+            <GripVertical size={14} />
+          </button>
+        </>
+      )}
     </NavLink>
   );
 }
@@ -197,7 +223,7 @@ export function Layout() {
     <div className="min-h-screen">
       <aside className={cn('z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
         <div className="mb-2 flex items-center gap-3 px-2 py-2 lg:mb-4">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-white">TF</div>
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[#241300]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
             <div className="text-xs text-[var(--color-text-secondary)]">SEO / dev workspace</div>
@@ -224,7 +250,7 @@ export function Layout() {
             );
           })}
         </nav>
-        <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-white shadow-xl">{nav.flatMap(group => group.items).find(item => item.to === activeNavRoute)?.label}</div> : null}</DragOverlay>
+        <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-[var(--color-text)] shadow-xl">{nav.flatMap(group => group.items).find(item => item.to === activeNavRoute)?.label}</div> : null}</DragOverlay>
         </DndContext>
 
         <div className={cn('mt-auto hidden space-y-3 lg:block', sidebarCollapsed && 'lg:hidden')}>
@@ -250,9 +276,9 @@ export function Layout() {
       </aside>
 
       <div className={cn(sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[264px]')}>
-        <header className="sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-6">
+        <header className="sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold">{pageTitle}</h1>
+            <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
             <p className="text-xs text-[var(--color-text-secondary)]">Быстрая работа команды, задач и клиентов</p>
           </div>
           <button onClick={() => setVoiceOpen(true)} className="tf-button ml-auto w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
@@ -267,7 +293,7 @@ export function Layout() {
           </button>
         </header>
 
-        <main className="min-h-[calc(100vh-64px)] p-3 sm:p-6">
+        <main className="min-h-[calc(100vh-64px)] p-4 sm:p-8">
           {showIntro && (
             <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
               <div className="flex items-start gap-3">
@@ -277,13 +303,15 @@ export function Layout() {
                     Задачи планируются по дате выполнения, дедлайн ограничивает крайний срок, а доступ к клиентам определяет, кто видит связанные задачи и данные.
                   </p>
                 </div>
-                <button type="button" onClick={closeIntro} className="grid h-8 w-8 place-items-center rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-white" aria-label="Закрыть">
+                <button type="button" onClick={closeIntro} className="grid h-8 w-8 place-items-center rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)]" aria-label="Закрыть">
                   <X size={15} />
                 </button>
               </div>
             </section>
           )}
-          <Outlet />
+          <div key={location.pathname} className="anim-page">
+            <Outlet />
+          </div>
         </main>
       </div>
       {voiceOpen && <VoiceTaskAssistant onClose={() => setVoiceOpen(false)} />}
@@ -436,6 +464,11 @@ function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
+  const requestClose = () => {
+    const dirty = text.trim() !== '' || Object.keys(draft).length > 0;
+    if (!dirty || confirm('Есть несохранённый текст команды. Закрыть без сохранения?')) onClose();
+  };
+
   const summary = [
     ['Задача', draft.title],
     ['Клиент', draft.client_name],
@@ -448,14 +481,14 @@ function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={requestClose} />
       <section className="fixed right-4 top-20 z-50 w-[min(460px,calc(100vw-32px))] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <div>
             <h2 className="text-sm font-black">Голосовая задача</h2>
             <p className="text-xs text-[var(--color-text-secondary)]">Скажите команду, затем Enter или OK.</p>
           </div>
-          <button type="button" onClick={onClose} className="tf-button w-9 px-0"><X size={15} /></button>
+          <button type="button" onClick={requestClose} className="tf-button w-9 px-0"><X size={15} /></button>
         </div>
         <div className="space-y-3 p-4">
           <textarea
