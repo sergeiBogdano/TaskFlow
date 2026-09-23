@@ -1,11 +1,36 @@
-import { Bell, Info, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Bell, FolderOpen, HardDrive, Info, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
+import { disconnectNotesDirectory, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
 
 export function Settings() {
   const { user } = useAuth();
   const roleName = user?.roles?.[0]?.name || 'executor';
   const role = roleMeta[roleName] || roleMeta.executor;
+  const [storage, setStorage] = useState<LocalStorageInfo | null>(null);
+  const [storageMsg, setStorageMsg] = useState('');
+
+  useEffect(() => {
+    storageInfo().then(setStorage).catch(() => {});
+  }, []);
+
+  const chooseFolder = async () => {
+    setStorageMsg('');
+    try {
+      const name = await pickNotesDirectory();
+      setStorage(await storageInfo());
+      setStorageMsg(`Папка подключена: ${name}. Новые личные заметки будут файлами именно там.`);
+    } catch (err) {
+      setStorageMsg(err instanceof Error ? err.message : 'Не удалось выбрать папку.');
+    }
+  };
+
+  const dropFolder = async () => {
+    await disconnectNotesDirectory();
+    setStorage(await storageInfo());
+    setStorageMsg('Папка отключена. Личные заметки хранятся во встроенном хранилище браузера на этом ПК.');
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -29,6 +54,29 @@ export function Settings() {
       </section>
 
       <section className="tf-panel-flat p-5">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><HardDrive size={16} />Личные заметки на этом ПК</h3>
+        <p className="text-sm text-[var(--color-text-secondary)]">Личные заметки никогда не отправляются на сервер. Они лежат только здесь: файлами в выбранной папке или во встроенном хранилище браузера. Общие заметки всегда хранятся на сервере.</p>
+        <div className="mt-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-sm">
+          {storage == null ? (
+            <span className="text-[var(--color-text-secondary)]">Проверяем хранилище...</span>
+          ) : storage.mode === 'dir' ? (
+            <span>Папка подключена: <span className="font-semibold text-[var(--color-text)]">{storage.dirName}</span></span>
+          ) : (
+            <span>Встроенное хранилище браузера{storage.supported ? '' : ' (выбор папки не поддерживается этим браузером)'}</span>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {storage?.supported !== false && (
+            <button type="button" onClick={chooseFolder} className="tf-button"><FolderOpen size={15} />Выбрать папку</button>
+          )}
+          {storage?.mode === 'dir' && (
+            <button type="button" onClick={dropFolder} className="tf-button">Отключить папку</button>
+          )}
+        </div>
+        {storageMsg && <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{storageMsg}</p>}
+      </section>
+
+      <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Info size={16} />TaskFlow</h3>
         <p className="text-sm text-[var(--color-text-secondary)]">Рабочее пространство для задач, клиентов, календаря, модулей и отчётов команды.</p>
       </section>
@@ -37,10 +85,18 @@ export function Settings() {
 }
 
 function InfoRow({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
+  if (wide) {
+    return (
+      <div className="md:col-span-2">
+        <div className="text-xs text-[var(--color-muted)]">{label}</div>
+        <div className="mt-1 text-sm font-semibold">{value}</div>
+      </div>
+    );
+  }
   return (
-    <div className={wide ? 'md:col-span-2' : ''}>
-      <div className="text-xs text-[var(--color-muted)]">{label}</div>
-      <div className="mt-1 text-sm font-semibold">{value}</div>
+    <div className="flex items-baseline justify-between gap-4">
+      <div className="shrink-0 text-[13px] text-[var(--color-muted)]">{label}</div>
+      <div className="min-w-0 truncate text-right text-sm font-semibold">{value}</div>
     </div>
   );
 }

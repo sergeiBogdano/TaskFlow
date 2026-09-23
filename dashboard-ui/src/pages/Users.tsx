@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
 import { api } from '../api/client';
 import type { Role, User } from '../api/client';
+import { SearchSelect } from '../components/SearchSelect';
 import { useAuth } from '../hooks/useAuth';
 
 type PermissionItem = { key: string; label: string; hint: string; level?: 'basic' | 'advanced' | 'sensitive' };
@@ -192,11 +193,11 @@ export function Users() {
       <div className="grid gap-5 xl:grid-cols-[minmax(520px,.9fr)_minmax(0,1.35fr)]">
       <section className="tf-panel-flat overflow-hidden">
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-3">
-          <UsersRound size={17} className="text-[var(--color-accent)]" />
+          <UsersRound size={19} className="text-[var(--color-accent)]" />
           <h3 className="text-sm font-black">Команда</h3>
         </div>
-        <div className="overflow-x-auto">
-        <div className="grid min-w-[680px] grid-cols-[1fr_220px_90px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-semibold text-[var(--color-text-secondary)]">
+        <div>
+        <div className="grid grid-cols-[minmax(0,1fr)_170px_52px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-semibold text-[var(--color-text-secondary)]">
           <span>Пользователь</span>
           <span>Роль</span>
           <span />
@@ -205,7 +206,7 @@ export function Users() {
           const protectedUser = isProtectedSuperadmin(user, users);
           const hasSuperadmin = isSuperadmin(user);
           return (
-            <div key={user.id} className="grid min-w-[680px] grid-cols-[1fr_220px_90px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
+            <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_52px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="truncate text-sm font-semibold">{user.username}</span>
@@ -216,10 +217,14 @@ export function Users() {
               {protectedUser ? (
                 <div className="text-sm font-semibold text-[var(--color-text-secondary)]">superadmin</div>
               ) : (
-                <select value={user.roles?.[0]?.id || ''} onChange={event => handleSetRole(user.id, Number(event.target.value))} className="tf-input h-9 text-sm">
-                  <option value="">Без роли</option>
-                  {roles.filter(role => role.name !== 'superadmin').map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
-                </select>
+                <SearchSelect
+                  value={user.roles?.[0]?.id ? String(user.roles[0].id) : ''}
+                  options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: role.name }))}
+                  onChange={value => handleSetRole(user.id, Number(value))}
+                  emptyLabel="Без роли"
+                  placeholder="Роль"
+                  searchPlaceholder="Найти роль..."
+                />
               )}
               <div className="flex justify-end">
                 {currentUser?.id !== user.id && !protectedUser && (
@@ -234,10 +239,13 @@ export function Users() {
 
       <section className="tf-panel-flat p-4">
         <div className="mb-4 grid gap-3 lg:grid-cols-[220px_minmax(180px,1fr)_auto_auto]">
-          <select className="tf-input" value={selectedRoleId || ''} onChange={event => selectRole(Number(event.target.value))}>
-            <option value="">Выберите роль</option>
-            {roles.filter(role => role.name !== 'superadmin').map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
-          </select>
+          <SearchSelect
+            value={selectedRoleId ? String(selectedRoleId) : ''}
+            options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: role.name }))}
+            onChange={value => selectRole(Number(value))}
+            placeholder="Выберите роль"
+            searchPlaceholder="Найти роль..."
+          />
           <input className="tf-input" value={roleName} onChange={event => setRoleName(event.target.value)} placeholder="Название роли" disabled={!selectedRole || selectedRole.name === 'superadmin'} />
           <button onClick={saveRolePermissions} disabled={!selectedRole || selectedRole.name === 'superadmin'} className="tf-button tf-button-primary"><Save size={15} />Сохранить</button>
           <button onClick={deleteSelectedRole} disabled={!selectedRole || selectedRole.name === 'superadmin'} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
@@ -323,6 +331,11 @@ function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate:
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const requestClose = () => {
+    const dirty = username.trim() !== '' || password !== '';
+    if (!dirty || confirm('Есть несохранённые данные. Закрыть без сохранения?')) onClose();
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
@@ -331,11 +344,11 @@ function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate:
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={onClose}>
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={requestClose}>
       <form onSubmit={submit} className="tf-panel w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-black">Новый пользователь</h2>
-          <button type="button" onClick={onClose} className="tf-button"><X size={16} /></button>
+          <button type="button" onClick={requestClose} className="tf-button"><X size={16} /></button>
         </div>
         <div className="space-y-3">
           <label><span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Логин</span><input className="tf-input" value={username} onChange={event => setUsername(event.target.value)} required minLength={2} /></label>

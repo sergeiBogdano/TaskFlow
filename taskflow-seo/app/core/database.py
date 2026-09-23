@@ -64,6 +64,8 @@ async def _migrate():
             'ALTER TABLE client_contacts ADD COLUMN contact_role VARCHAR(50)',
             'ALTER TABLE generated_reports ADD COLUMN deleted_at DATETIME',
             'ALTER TABLE file_attachments ADD COLUMN contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
+            'ALTER TABLE file_attachments ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
+            'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
         ]:
             try:
                 await conn.execute(text(col))

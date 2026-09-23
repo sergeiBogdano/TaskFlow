@@ -1,7 +1,18 @@
-import json
-from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Table, Text, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Table,
+    Text,
+    func,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -382,3 +393,39 @@ class QuickTaskTemplate(Base):
     task_type = Column(String(50), default='custom')
     priority = Column(String(20), default='medium')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NoteFolder(Base):
+    __tablename__ = 'notes_folders'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    parent_id = Column(Integer, ForeignKey('notes_folders.id', ondelete='CASCADE'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    parent = relationship('NoteFolder', remote_side='NoteFolder.id', backref='children')
+    user = relationship('User', backref='note_folders')
+
+
+class Note(Base):
+    __tablename__ = 'notes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False, default='Новая заметка')
+    content = Column(Text, nullable=True)
+    format = Column(String(20), nullable=False, default='markdown')
+    tags = Column(Text, nullable=False, default='[]')
+    is_public = Column(Boolean, default=False, index=True)
+    folder_id = Column(Integer, ForeignKey('notes_folders.id', ondelete='SET NULL'), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    user = relationship('User', backref='notes', lazy='selectin')
+    folder = relationship('NoteFolder', backref='notes', lazy='selectin')
+
+    __table_args__ = (
+        Index('ix_notes_owner_deleted', 'user_id', 'deleted_at'),
+    )

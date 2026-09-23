@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import type { Client, SavedView, Task, TaskComment, TaskFile, User } from '../api/client';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { SearchSelect } from '../components/SearchSelect';
+import { Select } from '../components/Select';
 import { TaskScopeFilter, taskMatchesScope, type TaskScope } from '../components/TaskScopeFilter';
 import { useAuth } from '../hooks/useAuth';
 import { cn, formatDate, formatFullDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
@@ -42,6 +43,14 @@ export function Tasks() {
   const [viewName, setViewName] = useState('');
   const [selectedViewId, setSelectedViewId] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [pins, setPins] = useState<number[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('taskflow:pins') || '[]');
+      return Array.isArray(raw) ? raw.filter(id => typeof id === 'number') : [];
+    } catch {
+      return [];
+    }
+  });
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkPriority, setBulkPriority] = useState('');
   const [bulkAssignee, setBulkAssignee] = useState('');
@@ -239,6 +248,20 @@ export function Tasks() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
+  const togglePin = (id: number) => {
+    setPins(prev => {
+      const next = prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
+      try {
+        localStorage.setItem('taskflow:pins', JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const pinnedTasks = useMemo(() => tasks.filter(task => pins.includes(task.id)), [tasks, pins]);
+
   const toggleAllFiltered = () => {
     const filteredIds = tasks.map(task => task.id);
     const allSelected = filteredIds.length > 0 && filteredIds.every(id => selectedIds.includes(id));
@@ -307,13 +330,15 @@ export function Tasks() {
         </div>
       </div>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
         {statusOptions.map(status => {
           const meta = statusMeta[status as keyof typeof statusMeta] || statusMeta.todo;
+          const active = filters.status.includes(status);
           return (
-            <button key={status} onClick={() => setFilters(prev => ({ ...prev, status: prev.status.length === 1 && prev.status[0] === status ? [] : [status] }))} className={cn('tf-panel-flat p-3 text-left hover:border-[var(--color-border-strong)]', filters.status.includes(status) && 'border-[var(--color-accent)]')}>
-              <div className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="h-4 w-4 rounded-full" style={{ background: meta.color }} />{meta.label}</div>
-              <div className="mt-2 text-2xl font-black">{counts[status] || 0}</div>
+            <button key={status} onClick={() => setFilters(prev => ({ ...prev, status: prev.status.length === 1 && prev.status[0] === status ? [] : [status] }))} className={cn('tf-panel-flat flex items-center gap-2.5 px-3.5 py-2.5 text-left transition hover:border-[var(--color-border-strong)] active:scale-[.98]', active && 'border-[var(--color-accent)]')}>
+              <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: meta.color }} />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--color-text-secondary)]">{meta.label}</span>
+              <span className="text-xl font-semibold tracking-tight" style={{ color: active ? meta.color : 'var(--color-text)' }}>{counts[status] || 0}</span>
             </button>
           );
         })}
@@ -322,10 +347,13 @@ export function Tasks() {
       {filtersOpen && <section className="tf-panel-flat space-y-3 p-4">
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
           <div className="grid grid-cols-1 gap-2 md:grid-cols-[220px_minmax(0,1fr)]">
-            <select className="tf-input" value={selectedViewId} onChange={event => applySavedView(event.target.value)}>
-              <option value="">Сохранённые представления</option>
-              {savedViews.map(view => <option key={view.id} value={view.id}>{view.name}</option>)}
-            </select>
+            <SearchSelect
+              value={selectedViewId}
+              options={savedViews.map(view => ({ value: String(view.id), label: view.name }))}
+              onChange={value => applySavedView(value)}
+              placeholder="Сохранённые представления"
+              searchPlaceholder="Найти представление..."
+            />
             <input className="tf-input" value={viewName} onChange={event => setViewName(event.target.value)} placeholder="Название нового представления" />
           </div>
           <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -341,10 +369,12 @@ export function Tasks() {
               {statusOptions.map(status => <label key={status} className="flex min-w-0 items-center gap-2 text-xs"><input type="checkbox" checked={filters.status.includes(status)} onChange={() => setFilters(prev => ({ ...prev, status: prev.status.includes(status) ? prev.status.filter(item => item !== status) : [...prev.status, status] }))} className="accent-[var(--color-accent)]" /><span className="truncate">{statusMeta[status as keyof typeof statusMeta]?.label || status}</span></label>)}
             </div>
           </div>
-          <select className="tf-input" value={filters.priority} onChange={event => setFilters(prev => ({ ...prev, priority: event.target.value }))}>
-            <option value="all">Все приоритеты</option>
-            {Object.entries(priorityMeta).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}
-          </select>
+          <SearchSelect
+            value={filters.priority}
+            options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))]}
+            onChange={value => setFilters(prev => ({ ...prev, priority: value || 'all' }))}
+            searchPlaceholder="Найти приоритет..."
+          />
           <SearchSelect value={filters.client === 'all' ? '' : filters.client} options={clientOptions} onChange={value => setFilters(prev => ({ ...prev, client: value || 'all' }))} emptyLabel="Все клиенты" searchPlaceholder="Найти клиента или домен" />
           <SearchSelect value={filters.assignee === 'all' ? '' : filters.assignee} options={userOptions} onChange={value => setFilters(prev => ({ ...prev, assignee: value || 'all' }))} emptyLabel="Все исполнители" searchPlaceholder="Найти сотрудника" />
           <button onClick={resetTaskFilters} className="tf-button"><ListFilter size={15} />Сброс</button>
@@ -365,20 +395,28 @@ export function Tasks() {
           <button onClick={() => { setSelectedIds([]); setBulkError(''); }} className="tf-button" disabled={!selectedIds.length}>Снять выбор</button>
         </div>
         {bulkOpen && <>
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[150px_150px_190px_160px_160px_auto_auto]">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Новый статус</span>
-            <select className="tf-input" value={bulkStatus} onChange={event => setBulkStatus(event.target.value)}>
-              <option value="">Не менять</option>
-              {statusOptions.map(status => <option key={status} value={status}>{statusMeta[status as keyof typeof statusMeta]?.label || status}</option>)}
-            </select>
+            <SearchSelect
+              value={bulkStatus}
+              options={statusOptions.map(status => ({ value: status, label: statusMeta[status as keyof typeof statusMeta]?.label || status }))}
+              onChange={setBulkStatus}
+              emptyLabel="Не менять"
+              placeholder="Статус"
+              searchPlaceholder="Найти статус..."
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Приоритет</span>
-            <select className="tf-input" value={bulkPriority} onChange={event => setBulkPriority(event.target.value)}>
-              <option value="">Не менять</option>
-              {Object.entries(priorityMeta).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}
-            </select>
+            <SearchSelect
+              value={bulkPriority}
+              options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))}
+              onChange={setBulkPriority}
+              emptyLabel="Не менять"
+              placeholder="Приоритет"
+              searchPlaceholder="Найти приоритет..."
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Исполнитель</span>
@@ -407,11 +445,17 @@ export function Tasks() {
 
       <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-secondary)]">
         <span className="font-semibold text-[var(--color-text)]">Показано {totalTasks ? pageStart + 1 : 0}-{pageEnd} из {totalTasks}</span>
-        <select className="tf-input w-auto py-1.5 text-xs" value={pageSize} onChange={event => setPageSize(Number(event.target.value))}>
-          <option value={25}>25 на странице</option>
-          <option value={50}>50 на странице</option>
-          <option value={100}>100 на странице</option>
-        </select>
+        <Select
+          size="sm"
+          value={String(pageSize)}
+          options={[
+            { value: '25', label: '25 на странице' },
+            { value: '50', label: '50 на странице' },
+            { value: '100', label: '100 на странице' },
+          ]}
+          onChange={value => setPageSize(Number(value))}
+          className="w-auto min-w-[150px]"
+        />
         <form onSubmit={event => { event.preventDefault(); applyTaskSearch(); }} className="flex min-w-[280px] flex-1 items-center gap-2">
           <label className="relative min-w-[220px] flex-1">
             <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
@@ -423,6 +467,31 @@ export function Tasks() {
         <span className="text-xs font-semibold">Страница {currentPage} из {pageCount}</span>
         <button className="tf-button" type="button" disabled={currentPage >= pageCount} onClick={() => setPage(prev => Math.min(pageCount, prev + 1))}>Вперёд</button>
       </div>
+
+      {pinnedTasks.length > 0 && (
+        <section className="tf-panel-flat overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)]">
+            <Pin size={13} /> Закреплённые · {pinnedTasks.length}
+          </div>
+          <div className="divide-y divide-[var(--color-border)]/60">
+            {pinnedTasks.map(task => {
+              const pstatus = statusMeta[task.status as keyof typeof statusMeta] || statusMeta.todo;
+              return (
+                <div key={task.id} className="anim-rise flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--color-surface-2)]">
+                  <span className="h-2.5 w-1.5 shrink-0 rounded-full" style={{ background: pstatus.color }} />
+                  <button type="button" onClick={() => openEdit(task)} className="min-w-0 flex-1 truncate text-left text-sm font-semibold">
+                    {task.title}
+                  </button>
+                  <span className="hidden shrink-0 truncate text-xs text-[var(--color-text-secondary)] sm:block">{task.client || 'Без клиента'}</span>
+                  <button type="button" onClick={() => togglePin(task.id)} title="Открепить" aria-label={`Открепить ${task.title}`} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] transition hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]">
+                    <PinOff size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="tf-panel-flat overflow-hidden">
         <div className="hidden min-w-[1180px] grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)] md:grid">
@@ -437,21 +506,31 @@ export function Tasks() {
         </div>
         {pagedTasks.map(task => {
           const priority = priorityMeta[task.priority as keyof typeof priorityMeta] || priorityMeta.medium;
-          const status = statusMeta[task.status as keyof typeof statusMeta] || statusMeta.todo;
           const assignee = users.find(user => user.id === task.assignee_id);
+          const pinned = pins.includes(task.id);
           return (
             <div key={task.id} className="grid gap-3 border-b border-[var(--color-border)]/60 px-4 py-4 last:border-b-0 hover:bg-[var(--color-surface-2)] md:min-w-[1180px] md:grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] md:items-center md:py-3">
               <input type="checkbox" checked={selectedIds.includes(task.id)} onChange={() => toggleSelected(task.id)} />
-              <button type="button" onClick={() => openEdit(task)} className="min-w-0 text-left">
+              <div className="flex min-w-0 items-start gap-1.5">
+              <button type="button" onClick={event => { event.stopPropagation(); togglePin(task.id); }} title={pinned ? 'Открепить' : 'Закрепить'} aria-label={pinned ? `Открепить ${task.title}` : `Закрепить ${task.title}`} className={cn('mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md transition', pinned ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-muted)] opacity-40 hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] hover:opacity-100')}>
+                {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+              </button>
+              <button type="button" onClick={() => openEdit(task)} className="min-w-0 flex-1 text-left">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-semibold">{task.title}</span>
                   {task.client_warning && <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-warning)]/50 bg-[var(--color-warning)]/15 px-2 py-0.5 text-[11px] font-bold text-[var(--color-warning)]"><AlertCircle size={12} />Важно</span>}
                 </div>
                 <div className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">#{task.id} · {taskTypeMeta[task.task_type] || task.task_type}{task.notes ? ` · ${plainText(task.notes)}` : ''}</div>
               </button>
-              <select value={task.status} onClick={event => event.stopPropagation()} onChange={event => changeStatus(task, event.target.value)} className="tf-input py-1.5 text-xs md:w-full" style={{ color: status.color }}>
-                {statusOptions.map(item => <option key={item} value={item}>{statusMeta[item as keyof typeof statusMeta]?.label || item}</option>)}
-              </select>
+              </div>
+              <Select
+                size="sm"
+                stopPropagation
+                value={task.status}
+                options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))}
+                onChange={value => changeStatus(task, value)}
+                className="md:w-full"
+              />
               <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">Клиент: </span>{task.client || 'Без клиента'}</span>
               <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">Исполнитель: </span>{assignee?.username || 'Не назначен'}</span>
               <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{formatDate(task.completion_date)}</span>
@@ -510,6 +589,47 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [activeTab, setActiveTab] = useState<'main' | 'accesses' | 'comments' | 'files' | 'history'>('main');
   const [collapsedSections, setCollapsedSections] = useState({ params: true, people: true, dates: true });
   const [coExecutorSearch, setCoExecutorSearch] = useState('');
+
+  // Снапшот начальных значений — чтобы спросить перед закрытием при несохранённых изменениях
+  const initialSnapshot = useMemo(() => ({
+    title: source.title || '',
+    status: source.status || 'todo',
+    priority: source.priority || 'medium',
+    taskType: source.task_type || 'custom',
+    clientId: source.client_id ? String(source.client_id) : '',
+    assigneeId: source.assignee_id ? String(source.assignee_id) : '',
+    coExecutorIds: [...(source.co_executor_ids?.length ? source.co_executor_ids : (source.co_executor_id ? [source.co_executor_id] : []))].sort((a, b) => a - b).join(','),
+    completionDate: source.completion_date ? source.completion_date.slice(0, 10) : '',
+    deadline: source.deadline ? source.deadline.slice(0, 10) : '',
+    visibility: source.visibility || 'public',
+    noContract: Boolean(source.no_contract),
+    notes: source.notes || '',
+    comment: source.comment || '',
+    accessIds: ((task?.client_access_ids || []).map(Number)).sort((a, b) => a - b).join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
+  const isDirty =
+    title !== initialSnapshot.title ||
+    status !== initialSnapshot.status ||
+    priority !== initialSnapshot.priority ||
+    taskType !== initialSnapshot.taskType ||
+    clientId !== initialSnapshot.clientId ||
+    assigneeId !== initialSnapshot.assigneeId ||
+    [...coExecutorIds].sort((a, b) => a - b).join(',') !== initialSnapshot.coExecutorIds ||
+    completionDate !== initialSnapshot.completionDate ||
+    deadline !== initialSnapshot.deadline ||
+    visibility !== initialSnapshot.visibility ||
+    noContract !== initialSnapshot.noContract ||
+    notes !== initialSnapshot.notes ||
+    comment !== initialSnapshot.comment ||
+    [...selectedAccessIds].sort((a, b) => a - b).join(',') !== initialSnapshot.accessIds ||
+    commentText.trim() !== '' ||
+    commentDate !== '';
+
+  const requestClose = () => {
+    if (!isDirty || confirm('Есть несохранённые изменения. Закрыть без сохранения?')) onClose();
+  };
   const clientOptions = useMemo(() => clients.map(client => ({
     value: String(client.id),
     label: client.org_name,
@@ -721,20 +841,20 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/68 p-0 sm:p-4" onClick={onClose}>
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/68 p-0 sm:p-4" onClick={requestClose}>
       <form onSubmit={submit} onPaste={pasteFile} className="tf-modal-shell flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden rounded-none sm:h-[calc(100dvh-32px)] sm:rounded-lg" onClick={event => event.stopPropagation()}>
         <div className="shrink-0 flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <div>
             <h2 className="text-base font-black">{task ? 'Редактировать задачу' : 'Новая задача'}</h2>
             {task && <p className="text-xs text-[var(--color-text-secondary)]">#{task.id} · дата постановки: {formatFullDate(task.created_at)}</p>}
           </div>
-          <button type="button" onClick={onClose} className="tf-button w-9 px-0"><X size={16} /></button>
+          <button type="button" onClick={requestClose} className="tf-button w-9 px-0"><X size={16} /></button>
         </div>
 
         <div className="shrink-0 border-b border-[var(--color-border)] px-4 py-3">
           <div className="flex flex-wrap gap-2">
             {tabs.map(tab => (
-              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={cn('rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors', activeTab === tab.id ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-white')}>
+              <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={cn('rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors', activeTab === tab.id ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]')}>
                 {tab.label}
                 {tab.id === 'comments' && commentCount > 0 && <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] leading-4 text-white" aria-label={`Комментариев: ${commentCount}`}>{commentCount}</span>}
                 {tab.id === 'files' && fileCount > 0 && <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--color-warning)] px-1 text-[10px] leading-4 text-black" aria-label={`Файлов: ${fileCount}`}>{fileCount}</span>}
@@ -777,9 +897,9 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
 
                 <CollapsiblePanel title="Параметры" collapsed={collapsedSections.params} onToggle={() => toggleSection('params')} summary={`${statusMeta[status as keyof typeof statusMeta]?.label || status} · ${priorityMeta[priority as keyof typeof priorityMeta]?.label || priority}`}>
                   <div className="grid gap-3">
-                    <Field label="Статус"><select className="tf-input" value={status} onChange={event => setStatus(event.target.value)}>{statusOptions.map(item => <option key={item} value={item}>{statusMeta[item as keyof typeof statusMeta]?.label || item}</option>)}</select></Field>
-                    <Field label="Приоритет"><select className="tf-input" value={priority} onChange={event => setPriority(event.target.value)}>{Object.entries(priorityMeta).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}</select></Field>
-                    <Field label="Тип"><select className="tf-input" value={taskType} onChange={event => setTaskType(event.target.value)}>{Object.entries(taskTypeMeta).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></Field>
+                    <Field label="Статус"><Select value={status} options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))} onChange={setStatus} searchPlaceholder="Найти статус..." /></Field>
+                    <Field label="Приоритет"><Select value={priority} options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))} onChange={setPriority} searchPlaceholder="Найти приоритет..." /></Field>
+                    <Field label="Тип"><Select value={taskType} options={Object.entries(taskTypeMeta).map(([key, label]) => ({ value: key, label }))} onChange={setTaskType} searchPlaceholder="Найти тип..." /></Field>
                   </div>
                 </CollapsiblePanel>
 
@@ -810,7 +930,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                   <div className="grid gap-3">
                     <Field label="Дата выполнения"><input className="tf-input" type="date" value={completionDate} max={deadline || undefined} onChange={event => setCompletionDate(event.target.value)} /></Field>
                     <Field label="Крайний срок"><input className="tf-input" type="date" value={deadline} min={completionDate || undefined} onChange={event => setDeadline(event.target.value)} /></Field>
-                    <Field label="Видимость"><select className="tf-input" value={visibility} onChange={event => setVisibility(event.target.value as 'public' | 'private')}><option value="public">Публичная</option><option value="private">Приватная</option></select></Field>
+                    <Field label="Видимость"><Select value={visibility} options={[{ value: 'public', label: 'Публичная' }, { value: 'private', label: 'Приватная' }]} onChange={value => setVisibility(value as 'public' | 'private')} /></Field>
                     <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"><input type="checkbox" checked={noContract} onChange={event => setNoContract(event.target.checked)} className="accent-[var(--color-accent)]" />Нет договора</label>
                   </div>
                 </CollapsiblePanel>
@@ -859,7 +979,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                     {comments.map(commentItem => (
                       <div key={commentItem.id} className="rounded-lg bg-[var(--color-surface-2)] p-2 text-sm">
                         <div className="text-xs text-[var(--color-muted)]">{commentItem.created_at ? new Date(commentItem.created_at).toLocaleString('ru-RU') : 'только что'}</div>
-                        <div className="prose prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: commentItem.content }} />
+                        <div className="prose max-w-none text-sm" dangerouslySetInnerHTML={{ __html: commentItem.content }} />
                       </div>
                     ))}
                     {comments.length === 0 && <div className="text-sm text-[var(--color-text-secondary)]">Комментариев пока нет.</div>}
@@ -925,7 +1045,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
           )}
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:items-center">
             {task && onDelete && <button type="button" onClick={onDelete} className="tf-button col-span-2 justify-center text-[var(--color-danger)] sm:col-span-1 sm:mr-auto"><Trash2 size={15} />В корзину</button>}
-            <button type="button" onClick={onClose} className="tf-button justify-center sm:ml-auto">Отмена</button>
+            <button type="button" onClick={requestClose} className="tf-button justify-center sm:ml-auto">Отмена</button>
             <button type="submit" disabled={saving} className="tf-button tf-button-primary justify-center">{saving ? 'Сохраняю...' : 'Сохранить'}</button>
           </div>
         </div>

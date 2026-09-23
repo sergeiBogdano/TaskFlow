@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { SearchSelect } from '../components/SearchSelect';
+import { Select } from '../components/Select';
 import type { Client, User } from '../api/client';
 import { taskTypeMeta } from '../lib/taskflow';
 import { useAuth } from '../hooks/useAuth';
@@ -219,7 +220,7 @@ function ModuleModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <form onSubmit={submit} className="tf-panel max-h-[92vh] w-full max-w-4xl overflow-y-auto p-5" onClick={event => event.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -234,14 +235,25 @@ function ModuleModal({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Field label="Название правила"><input className="tf-input" value={name} onChange={event => setName(event.target.value)} required placeholder="Ежемесячный отчёт" /></Field>
               <Field label="Тип задачи">
-                <select className="tf-input" value={taskType} onChange={event => setTaskType(event.target.value)}>
-                  {Object.entries(taskTypeMeta).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                </select>
+                <SearchSelect
+                  value={taskType}
+                  options={Object.entries(taskTypeMeta).map(([key, label]) => ({ value: key, label }))}
+                  onChange={setTaskType}
+                  searchPlaceholder="Найти тип..."
+                />
               </Field>
               <Field label="Приоритет">
-                <select className="tf-input" value={taskPriority} onChange={event => setTaskPriority(event.target.value)}>
-                  <option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option><option value="urgent">Срочный</option>
-                </select>
+                <SearchSelect
+                  value={taskPriority}
+                  options={[
+                    { value: 'low', label: 'Низкий' },
+                    { value: 'medium', label: 'Средний' },
+                    { value: 'high', label: 'Высокий' },
+                    { value: 'urgent', label: 'Срочный' },
+                  ]}
+                  onChange={setTaskPriority}
+                  searchPlaceholder="Найти приоритет..."
+                />
               </Field>
               <Field label="Статус правила">
                 <label className="flex h-10 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm">
@@ -280,17 +292,24 @@ function ModuleModal({
                 <SearchSelect value={assigneeId} options={users.map(user => ({ value: String(user.id), label: user.username }))} onChange={setAssigneeId} emptyLabel="Не назначать" searchPlaceholder="Найти сотрудника" />
               </Field>
               <Field label="Периодичность">
-                <select className="tf-input" value={interval || 'monthly'} onChange={event => setInterval(event.target.value as ModuleRule['recurring_interval'])}>
-                  <option value="daily">Каждый день</option>
-                  <option value="weekly">Каждую неделю</option>
-                  <option value="monthly">Каждый месяц</option>
-                </select>
+                <SearchSelect
+                  value={interval || 'monthly'}
+                  options={[
+                    { value: 'daily', label: 'Каждый день' },
+                    { value: 'weekly', label: 'Каждую неделю' },
+                    { value: 'monthly', label: 'Каждый месяц' },
+                  ]}
+                  onChange={value => setInterval(value as ModuleRule['recurring_interval'])}
+                  searchPlaceholder="Найти..."
+                />
               </Field>
               <Field label={interval === 'weekly' ? 'День недели' : 'Число месяца'}>
                 {interval === 'weekly' ? (
-                  <select className="tf-input" value={day} onChange={event => setDay(Number(event.target.value))}>
-                    {weekdays.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
-                  </select>
+                  <Select
+                    value={String(day)}
+                    options={weekdays.map((label, index) => ({ value: String(index + 1), label }))}
+                    onChange={value => setDay(Number(value))}
+                  />
                 ) : (
                   <input className="tf-input" type="number" min={1} max={31} value={day} onChange={event => setDay(Number(event.target.value))} disabled={interval === 'daily'} />
                 )}

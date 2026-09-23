@@ -25,13 +25,13 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
       style={style}
       onClick={onClick}
       className={cn(
-        'relative overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 pl-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-3)]',
-        isDragging && 'opacity-45',
+        'relative overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 pl-4 transition-[transform,box-shadow,opacity,border-color,background-color] duration-200 ease-out hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-3)]',
+        isDragging && 'scale-[1.04] rotate-1 opacity-90 shadow-2xl',
       )}
     >
       <span className="absolute bottom-3 left-0 top-3 w-1.5 rounded-r-full" style={{ background: priority.color }} />
       <div className="mb-2 flex items-start gap-2">
-        <button {...listeners} {...attributes} onClick={event => event.stopPropagation()} className="mt-0.5 text-[var(--color-muted)] hover:text-white" aria-label="Перетащить">
+        <button {...listeners} {...attributes} onClick={event => event.stopPropagation()} className="mt-0.5 text-[var(--color-muted)] hover:text-[var(--color-text)]" aria-label="Перетащить">
           <GripVertical size={15} />
         </button>
         <div className="min-w-0 flex-1">
@@ -67,12 +67,12 @@ function Column({ status, tasks, collapsed, onToggle, onTaskClick }: {
 
   return (
     <section ref={setNodeRef} className={cn('flex w-[230px] shrink-0 flex-col rounded-lg border bg-[var(--color-surface)]/92 xl:w-[250px]', collapsed ? 'h-auto' : 'h-[clamp(520px,calc(100dvh-250px),760px)]', isOver ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/8' : 'border-[var(--color-border)]')}>
-      <header className={cn('flex items-center gap-2 bg-white/[.018] px-3 py-3', !collapsed && 'border-b border-[var(--color-border)]')}>
+      <header className={cn('flex items-center gap-2 bg-black/[.03] px-3 py-3', !collapsed && 'border-b border-[var(--color-border)]')}>
         <span className="grid h-7 w-7 place-items-center rounded-lg" style={{ background: meta.soft, color: meta.color }}>
           <Icon size={15} />
         </span>
         <div className="min-w-0 flex-1"><div className="text-sm font-bold">{meta.label}</div><div className="text-[11px] text-[var(--color-muted)]">{tasks.length} задач</div></div>
-        <button type="button" onClick={onToggle} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-white" title={collapsed ? `Развернуть «${meta.label}»` : `Свернуть «${meta.label}»`}>
+        <button type="button" onClick={onToggle} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]" title={collapsed ? `Развернуть «${meta.label}»` : `Свернуть «${meta.label}»`}>
           {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </button>
       </header>
@@ -127,6 +127,7 @@ export function Kanban() {
     }
   });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [selectedViewId, setSelectedViewId] = useState('');
   const [viewName, setViewName] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -250,14 +251,17 @@ export function Kanban() {
         </div>
         <section className="tf-panel-flat space-y-3 p-3">
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(180px,1fr)_auto]">
-            <select className="tf-input" defaultValue="" onChange={event => applySavedView(event.target.value)}>
-              <option value="">Сохранённые виды</option>
-              {savedViews.map(view => <option key={view.id} value={view.id}>{view.name}</option>)}
-            </select>
+            <SearchSelect
+              value={selectedViewId}
+              options={savedViews.map(view => ({ value: String(view.id), label: view.name }))}
+              onChange={value => { setSelectedViewId(value); applySavedView(value); }}
+              placeholder="Сохранённые виды"
+              searchPlaceholder="Найти вид..."
+            />
             <input className="tf-input" value={viewName} onChange={event => setViewName(event.target.value)} placeholder="Название вида" />
             <button onClick={saveCurrentView} className="tf-button" type="button">Сохранить вид</button>
           </div>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_240px_170px_160px_160px_250px]">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
             <form onSubmit={event => { event.preventDefault(); applySearch(); }} className="flex min-w-0 items-center gap-2">
             <label className="relative min-w-0 flex-1">
               <Search size={15} className="pointer-events-none absolute left-3 top-[12px] text-[var(--color-muted)]" />
@@ -272,10 +276,12 @@ export function Kanban() {
               emptyLabel="Все клиенты"
               searchPlaceholder="Найти клиента или домен"
             />
-            <select className="tf-input" value={priority} onChange={event => setPriority(event.target.value)}>
-              <option value="all">Все приоритеты</option>
-              {Object.entries(priorityMeta).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}
-            </select>
+            <SearchSelect
+              value={priority}
+              options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))]}
+              onChange={value => setPriority(value || 'all')}
+              searchPlaceholder="Найти приоритет..."
+            />
             <label className="relative">
               <CalendarDays size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
               <input className="tf-input tf-input-icon" type="date" value={periodStart} aria-label="Дата с" onChange={event => { const value = event.target.value; setPeriodStart(value); if (value > periodEnd) setPeriodEnd(value); setPeriodMode('custom'); }} title="Дата начала периода" />
