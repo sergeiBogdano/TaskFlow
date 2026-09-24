@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -23,6 +24,8 @@ from app.core.utils.timezone import safe_dt, utc_now
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://172.20.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 class ReportGeneratePayload(BaseModel):
     client_id: int
@@ -195,7 +198,7 @@ def _ollama_generate(model: str, prompt: str) -> str:
         },
     }).encode("utf-8")
     request = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
+        f"{OLLAMA_URL}/api/generate",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -206,7 +209,7 @@ def _ollama_generate(model: str, prompt: str) -> str:
 
 
 async def _ai_text(facts: dict[str, Any], model: str | None) -> tuple[str, str]:
-    selected_model = model or "qwen2.5:3b"
+    selected_model = model or OLLAMA_MODEL
     compact = {
         "client": facts["client"],
         "domain": facts["domain"],
@@ -976,7 +979,7 @@ async def empty_report_trash(user=Depends(get_current_user)):
 async def ollama_models(user=Depends(get_current_user)):
     await _ensure_reports_access(user)
     def load_models():
-        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=5) as response:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=5) as response:
             data = json.loads(response.read().decode("utf-8"))
         names = [item.get("name") for item in data.get("models", []) if item.get("name")]
         return sorted(names, key=lambda name: ("cloud" in name.lower(), len(name), name))
