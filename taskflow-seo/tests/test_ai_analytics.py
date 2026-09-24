@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.web.api import ai_analytics as analytics
-pytestmark = pytest.mark.skip(reason="AI analytics tests temporarily disabled")
+
 
 @pytest.fixture
 def llm_calls(monkeypatch):
