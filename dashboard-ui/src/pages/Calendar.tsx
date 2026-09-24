@@ -293,7 +293,7 @@ export function Calendar() {
             />
             <div className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-1" style={{ boxShadow: 'var(--shadow-soft)' }}>
               {(['day', 'month', 'quick'] as ViewMode[]).map(item => (
-                <button key={item} onClick={() => setView(item)} className={cn('h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition active:scale-[.97]', view === item ? 'bg-[var(--color-accent)] text-white shadow-[0_6px_16px_rgba(43,38,32,.3)]' : 'text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.06)] hover:text-[var(--color-text)]')}>
+                <button key={item} onClick={() => setView(item)} className={cn('h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition active:scale-[.97]', view === item ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-[var(--shadow-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay)] hover:text-[var(--color-text)]')}>
                   {item === 'day' ? 'День' : item === 'month' ? 'Месяц' : 'Быстрые'}
                 </button>
               ))}

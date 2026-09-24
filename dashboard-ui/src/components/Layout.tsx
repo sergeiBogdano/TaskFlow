@@ -99,7 +99,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
         transition,
         opacity: isDragging ? 0.35 : 1,
         ...(isActive
-          ? { background: 'var(--color-accent)', color: '#f5f1ea', boxShadow: '0 8px 20px rgba(43,38,32,.3)' }
+          ? { background: 'var(--color-accent)', color: 'var(--color-on-accent)', boxShadow: '0 8px 20px rgba(43,38,32,.3)' }
           : undefined),
       })}
     >
@@ -226,7 +226,7 @@ export function Layout() {
     <div className="min-h-screen">
       <aside className={cn('z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
         <div className="mb-2 flex items-center gap-3 px-2 py-2 lg:mb-4">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[#241300]">TF</div>
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
             <div className="text-xs text-[var(--color-text-secondary)]">SEO / dev workspace</div>

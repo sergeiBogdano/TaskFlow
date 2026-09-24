@@ -10,21 +10,21 @@ import {
 } from 'lucide-react';
 
 export const statusMeta = {
-  todo: { label: 'Создана', short: 'Новая', color: '#a39a8c', soft: 'rgba(163,154,140,.18)', icon: Circle },
-  in_progress: { label: 'В работе', short: 'В работе', color: '#2b2620', soft: 'rgba(43,38,32,.1)', icon: Loader2 },
-  waiting: { label: 'В ожидании', short: 'Ожидание', color: '#c9c2b4', soft: 'rgba(201,194,180,.25)', icon: PauseCircle },
-  client_check: { label: 'На проверке', short: 'Проверка', color: '#6d6355', soft: 'rgba(109,99,85,.14)', icon: Eye },
-  done: { label: 'Готово', short: 'Готово', color: '#5f8f6a', soft: 'rgba(95,143,106,.14)', icon: CheckCircle2 },
-  overdue: { label: 'Просрочено', short: 'Просрочено', color: '#bc5a48', soft: 'rgba(188,90,72,.13)', icon: AlertTriangle },
+  todo: { label: 'Создана', short: 'Новая', color: 'var(--color-st-todo)', soft: 'var(--color-st-todo-soft)', icon: Circle },
+  in_progress: { label: 'В работе', short: 'В работе', color: 'var(--color-st-progress)', soft: 'var(--color-st-progress-soft)', icon: Loader2 },
+  waiting: { label: 'В ожидании', short: 'Ожидание', color: 'var(--color-st-wait)', soft: 'var(--color-st-wait-soft)', icon: PauseCircle },
+  client_check: { label: 'На проверке', short: 'Проверка', color: 'var(--color-st-check)', soft: 'var(--color-st-check-soft)', icon: Eye },
+  done: { label: 'Готово', short: 'Готово', color: 'var(--color-st-done)', soft: 'var(--color-st-done-soft)', icon: CheckCircle2 },
+  overdue: { label: 'Просрочено', short: 'Просрочено', color: 'var(--color-st-overdue)', soft: 'var(--color-st-overdue-soft)', icon: AlertTriangle },
 } as const;
 
 export const workflowStatuses = ['todo', 'in_progress', 'waiting', 'client_check', 'overdue', 'done'] as const;
 
 export const priorityMeta = {
-  low: { label: 'Низкий', color: '#b3aa9c' },
-  medium: { label: 'Средний', color: '#6d6355' },
-  high: { label: 'Высокий', color: '#2b2620' },
-  critical: { label: 'Критический', color: '#bc5a48' },
+  low: { label: 'Низкий', color: 'var(--color-pr-low)' },
+  medium: { label: 'Средний', color: 'var(--color-pr-medium)' },
+  high: { label: 'Высокий', color: 'var(--color-pr-high)' },
+  critical: { label: 'Критический', color: 'var(--color-pr-critical)' },
 } as const;
 
 export const taskTypeMeta: Record<string, string> = {

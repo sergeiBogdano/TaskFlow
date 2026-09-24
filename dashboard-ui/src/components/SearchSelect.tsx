@@ -81,7 +81,7 @@ export function SearchSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] overflow-hidden rounded-2xl border border-white/60 bg-[#faf8f2]/90 shadow-[0_24px_60px_rgba(62,52,36,.22)] backdrop-blur-xl">
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)]/90 shadow-[var(--shadow-panel)] backdrop-blur-xl">
           <div className="relative border-b border-[var(--color-border)] p-2">
             <Search size={14} className="pointer-events-none absolute left-4 top-[21px] text-[var(--color-muted)]" />
             <input

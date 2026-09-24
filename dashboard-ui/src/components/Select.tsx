@@ -97,8 +97,8 @@ export function Select({
         onClick={() => setOpen(previous => !previous)}
         title={selected?.label || placeholder}
         className={cn(
-          'flex w-full items-center border border-[var(--color-border)] bg-[#fffdf7] text-left transition',
-          'hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-4 focus:ring-[rgba(43,38,32,.08)]',
+          'flex w-full items-center border border-[var(--color-border)] bg-[var(--color-input-bg)] text-left transition',
+          'hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-4 focus:ring-[var(--color-ring)]',
           'disabled:cursor-not-allowed disabled:opacity-60',
           triggerSize,
           !selected && 'text-[var(--color-muted)]',
@@ -110,7 +110,7 @@ export function Select({
       </button>
 
       {open && (
-        <div className="anim-modal absolute left-0 right-0 top-[calc(100%+6px)] z-[95] min-w-[180px] overflow-hidden rounded-2xl border border-white/60 bg-[#faf8f2]/92 shadow-[0_24px_60px_rgba(62,52,36,.22)] backdrop-blur-xl">
+        <div className="anim-modal absolute left-0 right-0 top-[calc(100%+6px)] z-[95] min-w-[180px] overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)]/90 shadow-[var(--shadow-panel)] backdrop-blur-xl">
           {searchPlaceholder && (
             <div className="relative border-b border-[var(--color-border)] p-2">
               <Search size={14} className="pointer-events-none absolute left-4 top-[21px] text-[var(--color-muted)]" />
@@ -125,7 +125,7 @@ export function Select({
           )}
           <div className="max-h-64 overflow-auto p-1.5">
             {emptyLabel && (
-              <button type="button" onClick={() => choose('')} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-[rgba(43,38,32,.06)]">
+              <button type="button" onClick={() => choose('')} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-[var(--color-overlay)]">
                 <span className="min-w-0 flex-1 truncate text-[var(--color-text-secondary)]">{emptyLabel}</span>
                 {value === '' && <Check size={14} className="shrink-0 text-[var(--color-text)]" />}
               </button>
@@ -140,7 +140,7 @@ export function Select({
                   title={option.label}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition',
-                    active ? 'bg-[rgba(43,38,32,.08)]' : 'hover:bg-[rgba(43,38,32,.05)]',
+                    active ? 'bg-[var(--color-overlay-strong)]' : 'hover:bg-[var(--color-overlay)]',
                   )}
                 >
                   {option.color && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: option.color }} />}

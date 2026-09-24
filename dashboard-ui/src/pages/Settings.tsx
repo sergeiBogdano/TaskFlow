@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Bell, Download, FolderOpen, HardDrive, Info, ShieldCheck } from 'lucide-react';
+import { Bell, Download, FolderOpen, HardDrive, Info, Palette, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
+import { applyTheme, getTheme, type ThemeName } from '../lib/theme';
 import { disconnectNotesDirectory, listLocalFolders, listLocalNotes, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
 
 export function Settings() {
@@ -10,6 +11,12 @@ export function Settings() {
   const role = roleMeta[roleName] || roleMeta.executor;
   const [storage, setStorage] = useState<LocalStorageInfo | null>(null);
   const [storageMsg, setStorageMsg] = useState('');
+  const [theme, setTheme] = useState<ThemeName>(() => getTheme());
+
+  const switchTheme = (next: ThemeName) => {
+    setTheme(next);
+    applyTheme(next);
+  };
 
   useEffect(() => {
     storageInfo().then(setStorage).catch(() => {});
@@ -84,6 +91,26 @@ export function Settings() {
           <InfoRow label="Пользователь" value={user?.username || 'Неизвестно'} />
           <InfoRow label="Роль" value={role.label} />
           <InfoRow label="Права" value={role.hint} wide />
+        </div>
+      </section>
+
+      <section className="tf-panel-flat p-5">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Palette size={16} />Оформление</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ['cream', 'Крем', 'Светлая, тёплая'],
+            ['graphite', 'Графит', 'Тёмная'],
+          ] as [ThemeName, string, string][]).map(([name, label, hint]) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => switchTheme(name)}
+              className={theme === name ? 'tf-button tf-button-primary h-auto flex-col gap-0.5 py-3' : 'tf-button h-auto flex-col gap-0.5 py-3'}
+            >
+              <span className="text-sm font-bold">{label}</span>
+              <span className={theme === name ? 'text-xs opacity-80' : 'text-xs text-[var(--color-text-secondary)]'}>{hint}</span>
+            </button>
+          ))}
         </div>
       </section>
 

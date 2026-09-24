@@ -21,8 +21,8 @@ import {
 } from '../lib/localNotes';
 
 const APPLE_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', Inter, 'Segoe UI', sans-serif";
-const ACCENT = '#2b2620';
-const ON_ACCENT = '#f5f1ea';
+const ACCENT = 'var(--color-accent)';
+const ON_ACCENT = 'var(--color-on-accent)';
 
 const NOTE_FORMATS: Record<string, string> = {
   markdown: 'Markdown',
@@ -356,7 +356,7 @@ export function Notes() {
                 type="button"
                 onClick={openCreate}
                 className="inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98]"
-                style={{ background: ACCENT, color: ON_ACCENT, boxShadow: '0 8px 26px rgba(43,38,32,.35)' }}
+                style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
               >
                 <Plus size={17} strokeWidth={2.5} /> Новая заметка
               </button>
@@ -377,7 +377,7 @@ export function Notes() {
           onChange={event => setSearchInput(event.target.value)}
           onKeyDown={event => { if (event.key === 'Enter') setSearch(searchInput.trim()); }}
           placeholder="Поиск по названию, тексту, тегам"
-          className="h-[52px] w-full rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] pl-[52px] pr-24 text-[16px] text-[var(--color-text)] placeholder-[var(--color-muted)] outline-none transition focus:border-[rgba(43,38,32,.4)] focus:ring-4 focus:ring-[rgba(43,38,32,.08)]"
+          className="h-[52px] w-full rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] pl-[52px] pr-24 text-[16px] text-[var(--color-text)] placeholder-[var(--color-muted)] outline-none transition focus:border-[var(--color-focus-border)] focus:ring-4 focus:ring-[var(--color-ring)]"
           style={{ boxShadow: 'var(--shadow-soft)' }}
         />
         <button
@@ -428,12 +428,12 @@ export function Notes() {
               {folders.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {folders.map(f => (
-                    <span key={f.id} className="inline-flex items-center gap-2 rounded-full bg-[rgba(43,38,32,.07)] py-1.5 pl-4 pr-2 text-[14px] text-[var(--color-text)]">
+                    <span key={f.id} className="inline-flex items-center gap-2 rounded-full bg-[var(--color-overlay)] py-1.5 pl-4 pr-2 text-[14px] text-[var(--color-text)]">
                       {f.name}
                       <button
                         type="button"
                         onClick={() => removeFolder(f.id, f.name)}
-                        className="grid h-6 w-6 place-items-center rounded-full text-[var(--color-muted)] transition hover:bg-[rgba(43,38,32,.1)] hover:text-[var(--color-text)]"
+                        className="grid h-6 w-6 place-items-center rounded-full text-[var(--color-muted)] transition hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]"
                         aria-label={`Удалить папку ${f.name}`}
                       >
                         <X size={13} />
@@ -468,13 +468,13 @@ export function Notes() {
       {loading ? (
         <div className="grid h-56 place-items-center">
           <div className="flex items-center gap-3 text-[16px] text-[var(--color-text-secondary)]">
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-[rgba(43,38,32,.2)] border-t-[var(--color-text)]" />
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-text)]" />
             Загрузка заметок...
           </div>
         </div>
       ) : notes.length === 0 ? (
         <div className="grid place-items-center rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-20 text-center" style={{ boxShadow: 'var(--shadow-soft)' }}>
-          <div className="grid h-20 w-20 place-items-center rounded-[24px] bg-[rgba(43,38,32,.07)]">
+          <div className="grid h-20 w-20 place-items-center rounded-[24px] bg-[var(--color-overlay)]">
             <StickyNote size={34} className="text-[var(--color-muted)]" strokeWidth={1.5} />
           </div>
           <p className="mt-6 text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
@@ -492,7 +492,7 @@ export function Notes() {
               type="button"
               onClick={openCreate}
               className="mt-7 inline-flex items-center gap-2 rounded-full px-7 py-3 text-[16px] font-semibold transition hover:brightness-125 active:scale-[.98]"
-              style={{ background: ACCENT, color: ON_ACCENT, boxShadow: '0 8px 26px rgba(43,38,32,.35)' }}
+              style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
             >
               <Plus size={17} strokeWidth={2.5} /> Создать заметку
             </button>
@@ -560,7 +560,7 @@ export function Notes() {
                       key={t}
                       type="button"
                       onClick={event => { event.stopPropagation(); setTag(t); }}
-                      className="inline-flex items-center gap-1 rounded-full bg-[rgba(43,38,32,.07)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)] transition hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)]"
+                      className="inline-flex items-center gap-1 rounded-full bg-[var(--color-overlay)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)] transition hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]"
                     >
                       <Tag size={11} />{t}
                     </button>
@@ -615,9 +615,9 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
       onClick={onClick}
       className={cn(
         'inline-flex items-center gap-2 rounded-full px-5 py-2 text-[14.5px] font-medium transition active:scale-[.97]',
-        active ? '' : 'bg-[rgba(43,38,32,.07)] text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)]',
+        active ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
       )}
-      style={active ? { background: ACCENT, color: ON_ACCENT, boxShadow: '0 6px 20px rgba(43,38,32,.3)' } : undefined}
+      style={active ? { background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' } : undefined}
     >
       {children}
     </button>
@@ -637,7 +637,7 @@ function CircleButton({ onClick, title, danger, children }: {
       title={title}
       aria-label={title}
       className={cn(
-        'grid h-9 w-9 place-items-center rounded-full bg-[rgba(43,38,32,.07)] text-[var(--color-text-secondary)] transition hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)] active:scale-95',
+        'grid h-9 w-9 place-items-center rounded-full bg-[var(--color-overlay)] text-[var(--color-text-secondary)] transition hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)] active:scale-95',
         danger && 'hover:bg-[var(--color-danger)]/15 hover:text-[var(--color-danger)]',
       )}
     >
@@ -720,7 +720,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
   };
 
   return (
-    <div className="anim-modal fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#2b2620]/45 p-3 backdrop-blur-sm sm:p-6" onClick={requestClose} style={{ fontFamily: APPLE_FONT }}>
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/45 p-3 backdrop-blur-sm sm:p-6" onClick={requestClose} style={{ fontFamily: APPLE_FONT }}>
       <form
         onSubmit={submit}
         className="tf-modal-shell flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden"
@@ -731,7 +731,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
             {note ? 'Заметка' : 'Новая заметка'}
           </h2>
           {note && (
-            <span className="rounded-full bg-[rgba(43,38,32,.07)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)]">
+            <span className="rounded-full bg-[var(--color-overlay)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)]">
               {note.origin === 'local' ? 'На этом ПК' : 'На сервере'}
             </span>
           )}
@@ -739,7 +739,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
             type="button"
             onClick={requestClose}
             aria-label="Закрыть"
-            className="ml-auto grid h-9 w-9 place-items-center rounded-full bg-[rgba(43,38,32,.07)] text-[var(--color-text-secondary)] transition hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)] active:scale-95"
+            className="ml-auto grid h-9 w-9 place-items-center rounded-full bg-[var(--color-overlay)] text-[var(--color-text-secondary)] transition hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)] active:scale-95"
           >
             <X size={17} />
           </button>
@@ -764,7 +764,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
                 onClick={() => setFormat(key)}
                 className={cn(
                   'rounded-full px-4 py-1.5 text-[13.5px] font-medium transition active:scale-[.97]',
-                  format === key ? '' : 'bg-[rgba(43,38,32,.07)] text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)]',
+                  format === key ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
                 )}
                 style={format === key ? { background: ACCENT, color: ON_ACCENT } : undefined}
               >
@@ -777,7 +777,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
               onClick={() => setIsPublic(prev => !prev)}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13.5px] font-medium transition active:scale-[.97]',
-                isPublic ? '' : 'bg-[rgba(43,38,32,.07)] text-[var(--color-text-secondary)] hover:bg-[rgba(43,38,32,.13)] hover:text-[var(--color-text)]',
+                isPublic ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
               )}
               style={isPublic ? { background: '#5f8f6a', color: '#fff' } : undefined}
               title={isPublic ? 'Хранится на сервере, видна всем' : 'Хранится только на этом ПК'}
@@ -819,7 +819,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
             </label>
           </div>
 
-          <div className="overflow-hidden rounded-[20px] border border-[var(--color-border)] bg-[#fffdf7] p-1">
+          <div className="overflow-hidden rounded-[20px] border border-[var(--color-border)] bg-[var(--color-input-bg)] p-1">
             <RichTextEditor value={content} onChange={setContent} minHeightClassName="min-h-64" placeholder="Начните писать..." />
           </div>
 
@@ -838,7 +838,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
             type="submit"
             disabled={saving}
             className="rounded-full px-8 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98] disabled:opacity-60"
-            style={{ background: ACCENT, color: ON_ACCENT, boxShadow: '0 8px 26px rgba(43,38,32,.35)' }}
+            style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
           >
             {saving ? 'Сохранение...' : note ? 'Готово' : 'Создать'}
           </button>
