@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Building2, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
+import { Building2, KeyRound, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
 import { api } from '../api/client';
 import type { Role, User } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
@@ -78,6 +78,9 @@ export function Users() {
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [pwdUserId, setPwdUserId] = useState<number | null>(null);
+  const [pwdValue, setPwdValue] = useState('');
+  const [pwdError, setPwdError] = useState('');
   const [newRoleName, setNewRoleName] = useState('');
   const [roleName, setRoleName] = useState('');
   const [permissionSearch, setPermissionSearch] = useState('');
@@ -111,6 +114,21 @@ export function Users() {
     setUsers(prev => prev.filter(user => user.id !== target.id));
   };
 
+  const savePassword = async (userId: number) => {
+    if (pwdValue.length < 4) {
+      setPwdError('Пароль минимум 4 символа.');
+      return;
+    }
+    setPwdError('');
+    try {
+      await api.setUserPassword(userId, pwdValue);
+      setPwdUserId(null);
+      setPwdValue('');
+    } catch (err) {
+      setPwdError(err instanceof Error ? err.message : 'Не удалось сменить пароль.');
+    }
+  };
+
   const handleSetRole = async (userId: number, roleId: number) => {
     if (!roleId) return;
     await api.setUserRole(userId, roleId);
@@ -125,8 +143,12 @@ export function Users() {
     await load();
   };
 
-  const handleCreate = async (username: string, password: string) => {
-    await api.createUser(username, password);
+  const handleCreate = async (username: string, password: string, workspaceId?: string, wsRole?: string) => {
+    await api.createUser(
+      username,
+      password,
+      workspaceId ? { workspace_id: Number(workspaceId), role: wsRole || 'member' } : undefined,
+    );
     setShowModal(false);
     await load();
   };
@@ -206,7 +228,7 @@ export function Users() {
           const protectedUser = isProtectedSuperadmin(user, users);
           const hasSuperadmin = isSuperadmin(user);
           return (
-            <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_52px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
+            <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_96px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="truncate text-sm font-semibold">{user.username}</span>
@@ -226,11 +248,27 @@ export function Users() {
                   searchPlaceholder="Найти роль..."
                 />
               )}
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-1.5">
+                <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
                 {currentUser?.id !== user.id && !protectedUser && (
-                  <button onClick={() => handleDelete(user)} className="tf-button text-[var(--color-danger)]" title="Удалить"><Trash2 size={15} /></button>
+                  <button onClick={() => handleDelete(user)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Удалить"><Trash2 size={15} /></button>
                 )}
               </div>
+              {pwdUserId === user.id && (
+                <div className="col-span-3 mt-1 flex gap-2">
+                  <input
+                    type="password"
+                    className="tf-input h-9 text-sm"
+                    value={pwdValue}
+                    onChange={event => setPwdValue(event.target.value)}
+                    placeholder="Новый пароль от 4 символов"
+                  />
+                  <button type="button" onClick={() => savePassword(user.id)} className="tf-button h-9 shrink-0 text-xs">OK</button>
+                </div>
+              )}
+              {pwdUserId === user.id && pwdError && (
+                <div className="col-span-3 text-xs font-semibold text-[var(--color-danger)]">{pwdError}</div>
+              )}
             </div>
           );
         })}
@@ -326,10 +364,18 @@ function isProtectedSuperadmin(user: User, users: User[]) {
   return users.filter(isSuperadmin).length <= 1;
 }
 
-function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (username: string, password: string) => Promise<void> }) {
+function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (username: string, password: string, workspaceId?: string, wsRole?: string) => Promise<void> }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const [workspaces, setWorkspaces] = useState<{ id: number; name: string }[]>([]);
+  const [workspaceId, setWorkspaceId] = useState('');
+  const [wsRole, setWsRole] = useState('member');
+  const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    api.getWorkspaces().then(setWorkspaces).catch(() => {});
+  }, []);
 
   const requestClose = () => {
     const dirty = username.trim() !== '' || password !== '';
@@ -339,8 +385,14 @@ function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate:
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
-    await onCreate(username, password);
-    setSaving(false);
+    setFormError('');
+    try {
+      await onCreate(username, password, workspaceId || undefined, wsRole);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Не удалось создать.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -353,6 +405,26 @@ function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate:
         <div className="space-y-3">
           <label><span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Логин</span><input className="tf-input" value={username} onChange={event => setUsername(event.target.value)} required minLength={2} /></label>
           <label><span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Пароль</span><input className="tf-input" type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={4} /></label>
+          <label>
+            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Сразу в окружение (необязательно)</span>
+            <SearchSelect
+              value={workspaceId}
+              options={workspaces.map(w => ({ value: String(w.id), label: w.name }))}
+              onChange={setWorkspaceId}
+              placeholder="Без окружения"
+              searchPlaceholder="Найти окружение..."
+            />
+          </label>
+          {workspaceId && (
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Роль в окружении</span>
+              <select className="tf-input" value={wsRole} onChange={event => setWsRole(event.target.value)}>
+                <option value="member">Участник</option>
+                <option value="admin">Админ</option>
+              </select>
+            </label>
+          )}
+          {formError && <div className="text-sm font-semibold text-[var(--color-danger)]">{formError}</div>}
           <button disabled={saving} className="tf-button tf-button-primary w-full">{saving ? 'Создание...' : 'Создать пользователя'}</button>
         </div>
       </form>

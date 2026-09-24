@@ -4,8 +4,15 @@ from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.core.database import async_session
-from app.core.models import Role, User, UserRole
-from app.core.permissions import get_current_user, require_role
+from app.core.models import Role, User, UserRole, WorkspaceMember
+from app.core.permissions import (
+    get_current_user,
+    get_user_role_names,
+    get_workspace_role,
+    require_role,
+    resolve_workspace,
+    user_is_superadmin,
+)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -29,7 +36,7 @@ async def list_users(user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_user(request: Request, user=Depends(require_role(['superadmin']))):
+async def create_user(request: Request, user=Depends(get_current_user)):
     data = await request.json()
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
@@ -37,15 +44,77 @@ async def create_user(request: Request, user=Depends(require_role(['superadmin']
         raise HTTPException(status_code=400, detail='Логин должен быть минимум 2 символа')
     if not password or len(password) < 4:
         raise HTTPException(status_code=400, detail='Пароль минимум 4 символа')
+    workspace_id = data.get('workspace_id')
+    ws_role = (data.get('role') or 'member').strip()
+    if ws_role not in ('admin', 'member'):
+        raise HTTPException(status_code=400, detail='Роль: admin или member')
     async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        actor_is_super = user_is_superadmin(role_names)
+        target_ws = None
+        if workspace_id is not None:
+            target_ws, actor_ws_role = await resolve_workspace(session, user, role_names, int(workspace_id))
+            if not actor_is_super and actor_ws_role not in ('owner', 'admin'):
+                raise HTTPException(status_code=403, detail='Forbidden')
+        elif not actor_is_super:
+            raise HTTPException(status_code=403, detail='Forbidden')
         existing = await session.execute(select(User).where(User.username == username))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=400, detail='Пользователь уже существует')
         u = User(username=username, password_hash=hash_password(password))
         session.add(u)
+        await session.flush()
+        if target_ws is not None:
+            session.add(WorkspaceMember(workspace_id=target_ws.id, user_id=u.id, role=ws_role))
+        else:
+            # Новый пользователь без явного окружения попадает в воркспейс
+            # по умолчанию участником — иначе он не увидит вообще ничего.
+            from app.core.models import Workspace
+            default_ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+            if default_ws is not None:
+                session.add(WorkspaceMember(workspace_id=default_ws.id, user_id=u.id, role="member"))
         await session.commit()
         await session.refresh(u)
     return JSONResponse({'id': u.id, 'username': u.username}, status_code=201)
+
+
+@router.put('/{user_id}/password')
+async def set_password(user_id: int, request: Request, user=Depends(get_current_user)):
+    data = await request.json()
+    password = data.get('password') or ''
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail='Пароль минимум 4 символа')
+    async with async_session() as session:
+        target = await session.get(User, user_id)
+        if not target:
+            raise HTTPException(status_code=404, detail='User not found')
+        if user.id == user_id:
+            pass  # свой пароль менять можно всегда
+        else:
+            role_names = await get_user_role_names(user.id)
+            if user_is_superadmin(role_names):
+                pass
+            else:
+                # админ воркспейса — только участникам своих воркспейсов, но не владельцу
+                allowed = False
+                memberships = (await session.execute(
+                    select(WorkspaceMember).where(WorkspaceMember.user_id == user.id)
+                )).scalars().all()
+                for membership in memberships:
+                    if membership.role not in ('owner', 'admin'):
+                        continue
+                    target_role = await get_workspace_role(session, user_id, membership.workspace_id)
+                    if target_role is None:
+                        continue
+                    if target_role == 'owner':
+                        continue
+                    allowed = True
+                    break
+                if not allowed:
+                    raise HTTPException(status_code=403, detail='Forbidden')
+        target.password_hash = hash_password(password)
+        await session.commit()
+    return JSONResponse({'ok': True})
 
 
 @router.put('/{user_id}/role')

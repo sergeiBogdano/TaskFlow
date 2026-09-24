@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.models import Client, ClientContact, ClientResponsible, Contract, FileAttachment, Module, User, UserClientAccess
-from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, require_role, task_is_visible_to_user, user_can_view_client_tab
+from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, require_role, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
 from app.core.utils.crypto import decrypt_accesses, encrypt_accesses
 from app.core.utils.timezone import format_datetime, safe_dt, to_utc, utc_now
 from app.core.config import settings
@@ -21,6 +21,11 @@ from app.services.client_service import ClientService
 from app.services.task_service import TaskService
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
+
+
+async def _assert_client_workspace(session, client: Client, user, role_names: set) -> tuple:
+    """403 если у пользователя нет доступа к воркспейсу клиента."""
+    return await resolve_workspace(session, user, role_names, client.workspace_id)
 
 
 def _normalize_domain(value: str | None) -> str:
@@ -203,13 +208,15 @@ def _parse_client_date(value, field_name: str, *, timezone_aware: bool = True):
 
 
 @router.get('')
-async def list_clients(user=Depends(get_current_user)):
+async def list_clients(workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         cs = ClientService(session)
         clients = await cs.list_clients()
         role_names = await get_user_role_names(user.id)
         permissions = await get_user_permissions(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        clients = [c for c in clients if (c.workspace_id or workspace.id) == workspace.id]
         clients = [c for c in clients if client_is_visible_to_user(c.id, role_names, accessible_client_ids)]
         client_ids = [c.id for c in clients]
         contacts_by_client: dict[int, list] = {}
@@ -245,13 +252,14 @@ async def list_clients(user=Depends(get_current_user)):
 
 
 @router.get('/trash')
-async def list_client_trash(user=Depends(require_role(['superadmin', 'admin']))):
+async def list_client_trash(workspace_id: int = Query(None), user=Depends(require_role(['superadmin', 'admin']))):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         result = await session.execute(
             select(Client)
-            .where(Client.deleted_at.is_not(None))
+            .where(Client.deleted_at.is_not(None), Client.workspace_id == workspace.id)
             .order_by(Client.deleted_at.desc())
         )
         clients = [
@@ -284,6 +292,10 @@ async def bulk_clients(data: dict, user=Depends(require_role(['superadmin', 'adm
         for c in clients:
             if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
                 continue
+            try:
+                await _assert_client_workspace(session, c, user, role_names)
+            except HTTPException:
+                continue
             if action == 'delete':
                 c.deleted_at = now
                 c.status = 'closed'
@@ -314,6 +326,7 @@ async def restore_client(client_id: int, user=Depends(require_role(['superadmin'
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, c, user, role_names)
         c.deleted_at = None
         if c.status == 'closed':
             c.status = 'active'
@@ -334,6 +347,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, c, user, role_names)
         contacts = (await session.execute(select(ClientContact).where(ClientContact.client_id == c.id))).scalars().all() if user_can_view_client_tab(role_names, permissions, 'contacts') else []
         contracts = (await session.execute(select(Contract).where(Contract.client_id == c.id))).scalars().all() if user_can_view_client_tab(role_names, permissions, 'contracts') else []
         access_rows = (await session.execute(select(UserClientAccess).where(UserClientAccess.client_id == c.id))).scalars().all() if user_can_view_client_tab(role_names, permissions, 'access') else []
@@ -351,11 +365,12 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_client(data: dict, user=Depends(require_role(['superadmin', 'admin', 'manager']))):
+async def create_client(data: dict, workspace_id: int = Query(None), user=Depends(require_role(['superadmin', 'admin', 'manager']))):
     async with async_session() as session:
         cs = ClientService(session)
         role_names = await get_user_role_names(user.id)
         permissions = await get_user_permissions(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         if 'contacts' in data and not user_can_view_client_tab(role_names, permissions, 'contacts'):
             raise HTTPException(status_code=403, detail='No access to contacts tab')
         if ('accesses' in data or 'allowed_user_ids' in data) and not user_can_view_client_tab(role_names, permissions, 'access'):
@@ -381,6 +396,7 @@ async def create_client(data: dict, user=Depends(require_role(['superadmin', 'ad
         )
         c.client_notes = data.get('client_notes') or None
         c.competitors = data.get('competitors') or None
+        c.workspace_id = workspace.id
         for item in data.get('contacts') or []:
             if not any((item.get('fio'), item.get('phone'), item.get('email'), item.get('position'))):
                 continue
@@ -451,6 +467,9 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, c, user, role_names)
+        if 'workspace_id' in data:
+            raise HTTPException(status_code=400, detail='Client workspace cannot be changed')
         if 'contacts' in data and not user_can_view_client_tab(role_names, permissions, 'contacts'):
             raise HTTPException(status_code=403, detail='No access to contacts tab')
         if ('accesses' in data or 'allowed_user_ids' in data) and not user_can_view_client_tab(role_names, permissions, 'access'):
@@ -587,6 +606,7 @@ async def delete_client(client_id: int, user=Depends(require_role(['superadmin',
             raise HTTPException(status_code=403, detail='Forbidden')
         if not (permissions.get('all') or permissions.get('client_delete') or 'superadmin' in role_names):
             raise HTTPException(status_code=403, detail='No access to delete clients')
+        await _assert_client_workspace(session, c, user, role_names)
         c.deleted_at = utc_now()
         c.status = 'closed'
         await session.commit()
@@ -604,6 +624,10 @@ async def client_activity(client_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        _activity_client = await session.get(Client, client_id)
+        if _activity_client is None:
+            raise HTTPException(status_code=404, detail='Client not found')
+        await _assert_client_workspace(session, _activity_client, user, role_names)
     logs = await list_activity(limit=100, entity_type='client', entity_id=client_id)
     return JSONResponse([{
         'id': log.id, 'action': log.action, 'field_name': log.field_name,
@@ -624,6 +648,7 @@ async def client_health(client_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
         tasks = await TaskService(session).list_tasks()
         permissions = await get_user_permissions(user.id)
         can_view_team_health = 'superadmin' in role_names or permissions.get('all') or permissions.get('dashboard_team')
@@ -698,6 +723,10 @@ async def client_modules(client_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        _modules_client = await session.get(Client, client_id)
+        if _modules_client is None:
+            raise HTTPException(status_code=404, detail='Client not found')
+        await _assert_client_workspace(session, _modules_client, user, role_names)
         r = await session.execute(
             select(Module).where(Module.client_id == client_id).order_by(Module.id)
         )
@@ -725,6 +754,10 @@ async def attach_module(client_id: int, data: dict, user=Depends(require_role(['
         m = await session.get(Module, module_id)
         if not m:
             raise HTTPException(status_code=404, detail='Module not found')
+        _attach_client = await session.get(Client, client_id)
+        if _attach_client is None:
+            raise HTTPException(status_code=404, detail='Client not found')
+        await _assert_client_workspace(session, _attach_client, user, await get_user_role_names(user.id))
         m.client_id = client_id
         await session.commit()
     return JSONResponse({'ok': True})
@@ -736,6 +769,10 @@ async def detach_module(client_id: int, module_id: int, user=Depends(require_rol
         m = await session.get(Module, module_id)
         if not m:
             raise HTTPException(status_code=404, detail='Module not found')
+        _detach_client = await session.get(Client, client_id)
+        if _detach_client is None:
+            raise HTTPException(status_code=404, detail='Client not found')
+        await _assert_client_workspace(session, _detach_client, user, await get_user_role_names(user.id))
         if m.client_id == client_id:
             m.client_id = None
             await session.commit()
@@ -752,6 +789,7 @@ async def upload_client_file(client_id: int, file: UploadFile, user=Depends(get_
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
         data = await file.read()
         if not data:
             raise HTTPException(status_code=400, detail='File is empty')
@@ -778,6 +816,7 @@ async def _ensure_client_file_access(session, client_id: int, user):
     accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
     if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
         raise HTTPException(status_code=403, detail='Forbidden')
+    await _assert_client_workspace(session, client, user, role_names)
     return client
 
 
@@ -840,6 +879,7 @@ async def list_client_files(client_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
         files = (await session.execute(
             select(FileAttachment).where(FileAttachment.client_id == client_id, FileAttachment.contract_id.is_(None)).order_by(FileAttachment.uploaded_at)
         )).scalars().all()
@@ -862,6 +902,7 @@ async def download_client_file(client_id: int, file_id: int, user=Depends(get_cu
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
         attachment = await session.get(FileAttachment, file_id)
         if not attachment or attachment.client_id != client_id:
             raise HTTPException(status_code=404, detail='File not found')
@@ -884,6 +925,7 @@ async def delete_client_file(client_id: int, file_id: int, user=Depends(get_curr
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
         attachment = await session.get(FileAttachment, file_id)
         if not attachment or attachment.client_id != client_id:
             raise HTTPException(status_code=404, detail='File not found')
@@ -902,6 +944,7 @@ async def client_contract_check(client_id: int, deadline: str = Query(''), user=
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_client_workspace(session, c, user, role_names)
         if not deadline or not c.contract_end:
             return JSONResponse({'valid': True, 'message': '', 'contract_end': _contract_date_value(c.contract_end)})
         from datetime import datetime
@@ -925,6 +968,8 @@ async def decrypt_client_accesses(client_id: int, user=Depends(require_role(['su
         c = await session.get(Client, client_id)
         if not c or not c.accesses:
             raise HTTPException(status_code=404, detail='No accesses found')
+        role_names = await get_user_role_names(user.id)
+        await _assert_client_workspace(session, c, user, role_names)
         try:
             decrypted = decrypt_accesses(c.accesses)
             return JSONResponse(decrypted)

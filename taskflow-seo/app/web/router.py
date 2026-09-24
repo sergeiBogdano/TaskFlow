@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Form, Query, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
@@ -14,6 +14,7 @@ from app.core.auth import COOKIE_NAME, make_session_token, verify_session_token
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.models import Client, FileAttachment, Reminder, Task, User, UserSettings
+from app.core.permissions import get_user_role_names, resolve_workspace
 from app.core.utils.timezone import format_datetime, to_utc, utc_now
 from app.services.activity_service import list_activity, log_activity
 from app.services.client_service import ClientService
@@ -24,6 +25,46 @@ from app.services.user_service import authenticate, get_user
 from app.web.templates_setup import templates
 
 router = APIRouter()
+
+
+async def _legacy_ws_filter(session, request: Request) -> int | None:
+    """workspace_id для фильтрации legacy-выборок. None = гость, без фильтра."""
+    user = await current_user(request)
+    if not user:
+        return None
+    role_names = await get_user_role_names(user.id)
+    raw = request.query_params.get('workspace_id')
+    wid = int(raw) if raw and raw.isdigit() else None
+    workspace, _ = await resolve_workspace(session, user, role_names, wid)
+    return workspace.id
+
+
+def _legacy_in_ws(obj_ws_id, ws_filter: int | None) -> bool:
+    return ws_filter is None or (obj_ws_id or ws_filter) == ws_filter
+
+
+async def _legacy_assert_task(session, request: Request, task: Task):
+    user = await current_user(request)
+    if not user:
+        return None
+    role_names = await get_user_role_names(user.id)
+    try:
+        await resolve_workspace(session, user, role_names, task.workspace_id)
+    except HTTPException:
+        return JSONResponse({'error': 'Нет доступа'}, status_code=403)
+    return None
+
+
+async def _legacy_assert_client(session, request: Request, client: Client):
+    user = await current_user(request)
+    if not user:
+        return None
+    role_names = await get_user_role_names(user.id)
+    try:
+        await resolve_workspace(session, user, role_names, client.workspace_id)
+    except HTTPException:
+        return JSONResponse({'error': 'Нет доступа'}, status_code=403)
+    return None
 
 
 async def current_user(request: Request) -> User | None:
@@ -601,6 +642,9 @@ async def api_task_move(task_id: int, request: Request):
         task = await session.get(Task, task_id)
         if not task:
             return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+        denied = await _legacy_assert_task(session, request, task)
+        if denied:
+            return denied
         old_status = task.status
         task.status = new_status
         await session.commit()
@@ -625,6 +669,9 @@ async def api_tasks_batch(request: Request):
             task = await session.get(Task, tid)
             if not task:
                 continue
+            denied = await _legacy_assert_task(session, request, task)
+            if denied:
+                continue
             if action == 'status' and value in ('todo', 'in_progress', 'done', 'overdue'):
                 task.status = value
             elif action == 'priority' and value in ('low', 'medium', 'high'):
@@ -641,11 +688,14 @@ async def api_tasks_batch(request: Request):
 # ─── API ──────────────────────────────────────────────────────
 
 @router.post('/api/tasks/{task_id}/start')
-async def api_task_start(task_id: int):
+async def api_task_start(task_id: int, request: Request):
     async with async_session() as session:
         task = await session.get(Task, task_id)
         if not task:
             return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+        denied = await _legacy_assert_task(session, request, task)
+        if denied:
+            return denied
         if task.status == 'todo':
             task.status = 'in_progress'
             await session.commit()
@@ -661,10 +711,13 @@ async def api_tasks(request: Request, start: str = '', end: str = ''):
     async with async_session() as session:
         ts = TaskService(session)
         all_tasks = await ts.list_tasks()
+        ws_filter = await _legacy_ws_filter(session, request)
         tz = settings.tz
         now_local = datetime.now(tz)
         events = []
         for t in all_tasks:
+            if not _legacy_in_ws(t.workspace_id, ws_filter):
+                continue
             now_user = datetime.now(tz)
             cal_date = t.completion_date or t.deadline
             if not cal_date:
@@ -762,6 +815,9 @@ async def api_task_update(task_id: str, request: Request):
         task = await session.get(Task, real_task_id)
         if not task:
             return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+        denied = await _legacy_assert_task(session, request, task)
+        if denied:
+            return denied
         if body.get('deadline'):
             dl = parse_web_deadline(body['deadline'])
             if dl:
@@ -827,9 +883,12 @@ async def api_tasks_all(request: Request):
     async with async_session() as session:
         ts = TaskService(session)
         all_tasks = await ts.list_tasks()
+        ws_filter = await _legacy_ws_filter(session, request)
         tz = settings.tz
         result = []
         for t in all_tasks:
+            if not _legacy_in_ws(t.workspace_id, ws_filter):
+                continue
             dl = safe_dt(t.deadline).astimezone(tz) if t.deadline else None
             cd = safe_dt(t.completion_date).astimezone(tz) if t.completion_date else None
             client_name = t.client.org_name if t.client else ''
@@ -856,9 +915,12 @@ async def api_tasks_export_csv(request: Request):
     async with async_session() as session:
         ts = TaskService(session)
         tasks = await ts.list_tasks()
+        ws_filter = await _legacy_ws_filter(session, request)
     tz = settings.tz
     lines = ['ID,Задача,Клиент,Статус,Приоритет,Срок,Дата выполнения,Тип,Заметка']
     for t in tasks:
+        if not _legacy_in_ws(t.workspace_id, ws_filter):
+            continue
         dl = format_datetime(t.deadline, tz) if t.deadline else ''
         cd = format_datetime(t.completion_date, tz) if t.completion_date else ''
         client = t.client.org_name if t.client else ''
@@ -879,9 +941,12 @@ async def api_tasks_export_pdf(request: Request):
     async with async_session() as session:
         ts = TaskService(session)
         tasks = await ts.list_tasks()
+        ws_filter = await _legacy_ws_filter(session, request)
     tz = settings.tz
     rows = ''
     for t in tasks:
+        if not _legacy_in_ws(t.workspace_id, ws_filter):
+            continue
         dl = format_datetime(t.deadline, tz) if t.deadline else '—'
         client = t.client.org_name if t.client else '—'
         sl = {'todo':'К выполнению','in_progress':'В работе','done':'Выполнено','overdue':'Просрочено'}.get(t.status, t.status)
@@ -900,10 +965,13 @@ h1{{font-size:18px;}}</style></head><body>
 @router.get('/api/reports/export/csv')
 async def api_reports_export_csv(request: Request):
     async with async_session() as session:
+        user = await current_user(request)
         ts = TaskService(session)
         tasks = await ts.list_tasks()
         cs = ClientService(session)
-        clients = await cs.list_clients()
+        ws_filter = await _legacy_ws_filter(session, request)
+        tasks = [t for t in tasks if _legacy_in_ws(t.workspace_id, ws_filter)]
+        clients = [c for c in await cs.list_clients() if _legacy_in_ws(c.workspace_id, ws_filter)]
     status_dist = {'todo': 0, 'in_progress': 0, 'done': 0, 'overdue': 0}
     for t in tasks:
         s = t.status if t.status in status_dist else 'other'
@@ -929,6 +997,9 @@ async def api_checklist_item_update(task_id: int, request: Request):
         task = await session.get(Task, task_id)
         if not task:
             return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
+        denied = await _legacy_assert_task(session, request, task)
+        if denied:
+            return denied
         checklist = task.checklist or []
         if idx is None or idx < 0 or idx >= len(checklist):
             return JSONResponse({'error': 'Неверный индекс'}, status_code=400)
@@ -971,11 +1042,12 @@ async def api_clients(request: Request):
     async with async_session() as session:
         cs = ClientService(session)
         clients = await cs.list_clients()
+        ws_filter = await _legacy_ws_filter(session, request)
         return JSONResponse([{
             'id': c.id, 'org_name': c.org_name, 'domain': c.domain or '',
             'accesses': c.accesses or [],
             'contract_end': format_datetime(c.contract_end, settings.tz) if c.contract_end else '',
-        } for c in clients])
+        } for c in clients if _legacy_in_ws(c.workspace_id, ws_filter)])
 
 
 @router.get('/api/templates')
@@ -1436,10 +1508,13 @@ async def trash_page(request: Request):
 
 
 @router.post('/api/tasks/{task_id}/delete')
-async def api_task_delete(task_id: int):
+async def api_task_delete(task_id: int, request: Request):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if t and not t.deleted_at:
+            denied = await _legacy_assert_task(session, request, t)
+            if denied:
+                return denied
             t.deleted_at = utc_now()
             await session.commit()
     await log_activity('task', task_id, 'deleted', summary=f'Задача #{task_id} перемещена в корзину')
@@ -1453,6 +1528,9 @@ async def task_delete(request: Request, task_id: int):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if t and not t.deleted_at:
+            denied = await _legacy_assert_task(session, request, t)
+            if denied:
+                return RedirectResponse(url='/login')
             t.deleted_at = utc_now()
             await session.commit()
     await log_activity('task', task_id, 'deleted', summary=f'Задача #{task_id} перемещена в корзину')
@@ -1461,10 +1539,13 @@ async def task_delete(request: Request, task_id: int):
 
 
 @router.post('/api/tasks/{task_id}/restore')
-async def api_task_restore(task_id: int):
+async def api_task_restore(task_id: int, request: Request):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if t and t.deleted_at:
+            denied = await _legacy_assert_task(session, request, t)
+            if denied:
+                return denied
             t.deleted_at = None
             t.status = 'todo'
             await session.commit()
@@ -1479,6 +1560,9 @@ async def task_restore(request: Request, task_id: int):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if t and t.deleted_at:
+            denied = await _legacy_assert_task(session, request, t)
+            if denied:
+                return RedirectResponse(url='/login')
             t.deleted_at = None
             t.status = 'todo'
             await session.commit()
@@ -1489,11 +1573,14 @@ async def task_restore(request: Request, task_id: int):
 
 @router.post('/api/clients/{client_id}/restore')
 @router.post('/clients/{client_id}/restore')
-async def api_client_restore(client_id: int):
+async def api_client_restore(client_id: int, request: Request):
     async with async_session() as session:
         from sqlalchemy.orm import selectinload
         c = await session.get(Client, client_id, options=[selectinload(Client.tasks)])
         if c and c.deleted_at:
+            denied = await _legacy_assert_client(session, request, c)
+            if denied:
+                return denied
             c.deleted_at = None
             c.status = 'active'
             for t in c.tasks:
@@ -1504,8 +1591,13 @@ async def api_client_restore(client_id: int):
 
 
 @router.post('/api/tasks/{task_id}/hard-delete')
-async def api_task_hard_delete(task_id: int):
+async def api_task_hard_delete(task_id: int, request: Request):
     async with async_session() as session:
+        t = await session.get(Task, task_id)
+        if t:
+            denied = await _legacy_assert_task(session, request, t)
+            if denied:
+                return denied
         await session.execute(sa_delete(FileAttachment).where(FileAttachment.task_id == task_id))
         await session.execute(sa_delete(Task).where(Task.id == task_id))
         await session.commit()
@@ -1513,11 +1605,15 @@ async def api_task_hard_delete(task_id: int):
 
 
 @router.post('/api/clients/{client_id}/hard-delete')
-async def api_client_hard_delete(client_id: int):
+async def api_client_hard_delete(client_id: int, request: Request):
     now = utc_now()
     cutoff = now - timedelta(days=30)
     async with async_session() as session:
         c = await session.get(Client, client_id)
+        if c:
+            denied = await _legacy_assert_client(session, request, c)
+            if denied:
+                return denied
         if c and c.deleted_at and c.deleted_at < cutoff:
             await session.execute(sa_delete(Task).where(Task.client_id == client_id))
             await session.execute(sa_delete(Client).where(Client.id == client_id))
@@ -1529,11 +1625,14 @@ async def api_client_hard_delete(client_id: int):
 # ─── Print / Export ────────────────────────────────────────────
 
 @router.get('/tasks/{task_id}/print')
-async def task_print(task_id: int):
+async def task_print(task_id: int, request: Request):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if not t:
             return HTMLResponse('Task not found', status_code=404)
+        denied = await _legacy_assert_task(session, request, t)
+        if denied:
+            return HTMLResponse('Нет доступа', status_code=403)
         cname = t.client.org_name if t.client else ''
         dl = safe_dt(t.deadline).astimezone(settings.tz).strftime('%d.%m.%Y %H:%M') if t.deadline else ''
         cd = safe_dt(t.completion_date).astimezone(settings.tz).strftime('%d.%m.%Y %H:%M') if t.completion_date else ''
@@ -1644,11 +1743,14 @@ from fastapi.responses import HTMLResponse
 
 
 @router.post('/api/tasks/{task_id}/upload')
-async def api_task_upload(task_id: int, file: UploadFile):
+async def api_task_upload(task_id: int, file: UploadFile, request: Request):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if not t:
             return JSONResponse({'error': 'Task not found'}, status_code=404)
+        denied = await _legacy_assert_task(session, request, t)
+        if denied:
+            return denied
         data = await file.read()
         att = FileAttachment(
             task_id=task_id,
@@ -1664,11 +1766,23 @@ async def api_task_upload(task_id: int, file: UploadFile):
 
 
 @router.get('/api/files/{file_id}/download')
-async def api_file_download(file_id: int):
+async def api_file_download(file_id: int, request: Request):
     async with async_session() as session:
         att = await session.get(FileAttachment, file_id)
         if not att:
             return JSONResponse({'error': 'File not found'}, status_code=404)
+        if att.task_id:
+            _t = await session.get(Task, att.task_id)
+            if _t:
+                denied = await _legacy_assert_task(session, request, _t)
+                if denied:
+                    return denied
+        elif att.client_id:
+            _c = await session.get(Client, att.client_id)
+            if _c:
+                denied = await _legacy_assert_client(session, request, _c)
+                if denied:
+                    return denied
         from fastapi.responses import Response
         return Response(
             content=att.data,
@@ -1678,8 +1792,13 @@ async def api_file_download(file_id: int):
 
 
 @router.get('/api/tasks/{task_id}/files')
-async def api_task_files(task_id: int):
+async def api_task_files(task_id: int, request: Request):
     async with async_session() as session:
+        _t = await session.get(Task, task_id)
+        if _t:
+            denied = await _legacy_assert_task(session, request, _t)
+            if denied:
+                return denied
         files = (await session.execute(
             select(FileAttachment).where(FileAttachment.task_id == task_id).order_by(FileAttachment.uploaded_at)
         )).scalars().all()
@@ -1691,8 +1810,22 @@ async def api_task_files(task_id: int):
 
 
 @router.delete('/api/files/{file_id}')
-async def api_file_delete(file_id: int):
+async def api_file_delete(file_id: int, request: Request):
     async with async_session() as session:
+        att = await session.get(FileAttachment, file_id)
+        if att:
+            if att.task_id:
+                _t = await session.get(Task, att.task_id)
+                if _t:
+                    denied = await _legacy_assert_task(session, request, _t)
+                    if denied:
+                        return denied
+            elif att.client_id:
+                _c = await session.get(Client, att.client_id)
+                if _c:
+                    denied = await _legacy_assert_client(session, request, _c)
+                    if denied:
+                        return denied
         await session.execute(sa_delete(FileAttachment).where(FileAttachment.id == file_id))
         await session.commit()
     return JSONResponse({'ok': True})
@@ -1721,11 +1854,14 @@ def _next_recurring_date(from_dt: datetime, interval: str) -> datetime | None:
 
 
 @router.post('/api/tasks/{task_id}/generate-next')
-async def api_generate_next(task_id: int):
+async def api_generate_next(task_id: int, request: Request):
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if not t or not t.recurring_interval or (t.recurring_remaining is not None and t.recurring_remaining <= 0):
             return JSONResponse({'ok': False, 'error': 'Not recurring or limit reached'})
+        denied = await _legacy_assert_task(session, request, t)
+        if denied:
+            return denied
         next_dl = _next_recurring_date(safe_dt(t.deadline) if t.deadline else utc_now(), t.recurring_interval)
         next_cd = _next_recurring_date(safe_dt(t.completion_date) if t.completion_date else utc_now(), t.recurring_interval) if t.completion_date else None
         nt = Task(
@@ -1743,6 +1879,7 @@ async def api_generate_next(task_id: int):
             recurring_count=t.recurring_count,
             recurring_remaining=(t.recurring_remaining - 1) if t.recurring_remaining is not None else None,
             recurring_parent_id=t.recurring_parent_id or t.id,
+            workspace_id=t.workspace_id,
         )
         session.add(nt)
         if t.recurring_remaining is not None:

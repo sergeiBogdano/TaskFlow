@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, BarChart3, Bot, CalendarClock, Send, Sparkles, Trash2, UsersRound, Wand2 } from 'lucide-react';
 import { api, type AiAnalyticsResult, type Client } from '../api/client';
 import { referenceCache } from '../api/cache';
+import { getActiveWorkspaceId } from '../lib/workspace';
 import { useAuth } from '../hooks/useAuth';
 import { cn } from '../lib/taskflow';
 
@@ -51,18 +52,22 @@ export function AiAnalytics() {
     setError('');
     setResult(null);
     setActiveKind(kind);
+    const wsId = (() => {
+      const raw = getActiveWorkspaceId();
+      return raw ? Number(raw) : null;
+    })();
     try {
-      if (kind === 'overdue') setResult(await api.aiOverdue());
-      else if (kind === 'workload') setResult(await api.aiWorkload());
-      else if (kind === 'daily') setResult(await api.aiDaily());
-      else if (kind === 'bottlenecks') setResult(await api.aiBottlenecks());
+      if (kind === 'overdue') setResult(await api.aiOverdue(undefined, wsId));
+      else if (kind === 'workload') setResult(await api.aiWorkload(undefined, wsId));
+      else if (kind === 'daily') setResult(await api.aiDaily(undefined, wsId));
+      else if (kind === 'bottlenecks') setResult(await api.aiBottlenecks(undefined, wsId));
       else {
         if (!projectId) {
           setError('Выберите проект для анализа.');
           setRunning(false);
           return;
         }
-        setResult(await api.aiProject(Number(projectId)));
+        setResult(await api.aiProject(Number(projectId), undefined, wsId));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI недоступен.');
@@ -79,7 +84,8 @@ export function AiAnalytics() {
     setChat(prev => [...prev, { role: 'user', text }]);
     setChatLoading(true);
     try {
-      const res = await api.aiChat(text);
+      const raw = getActiveWorkspaceId();
+      const res = await api.aiChat(text, undefined, raw ? Number(raw) : null);
       setChat(prev => [...prev, { role: 'ai', text: res.answer }]);
     } catch (err) {
       setChat(prev => [...prev, { role: 'ai', text: err instanceof Error ? err.message : 'AI недоступен.' }]);

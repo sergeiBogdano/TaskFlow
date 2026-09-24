@@ -82,6 +82,10 @@ async def _migrate():
             'CREATE INDEX IF NOT EXISTS ix_tasks_deleted_at ON tasks(deleted_at)',
             'CREATE INDEX IF NOT EXISTS ix_notifications_read_created ON notifications(read, created_at)',
             'CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)',
+            'CREATE INDEX IF NOT EXISTS ix_tasks_workspace_status ON tasks(workspace_id, status, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS ix_clients_workspace ON clients(workspace_id, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS ix_notes_workspace ON notes(workspace_id, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS ix_sprints_workspace ON sprints(workspace_id, status)',
         ]:
             try:
                 await conn.execute(text(idx))
@@ -118,6 +122,9 @@ async def _migrate():
             'ALTER TABLE tasks ADD COLUMN module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL',
             'ALTER TABLE tasks ADD COLUMN cycle_id INTEGER REFERENCES cycles(id) ON DELETE SET NULL',
             'ALTER TABLE tasks ADD COLUMN client_access_ids TEXT',
+            'ALTER TABLE tasks ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+            'ALTER TABLE clients ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+            'ALTER TABLE notes ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
         ]:
             try:
                 await conn.execute(text(col))
@@ -144,6 +151,9 @@ async def _ensure_indexes():
                 await conn.execute(text("ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_priority VARCHAR(20) DEFAULT 'medium'"))
                 await conn.execute(text('ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_notes_template TEXT'))
                 await conn.execute(text('ALTER TABLE modules ADD COLUMN IF NOT EXISTS client_ids TEXT'))
+                await conn.execute(text('ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
+                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
+                await conn.execute(text('ALTER TABLE notes ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
         except Exception as e:
             logger.warning('Column migration error for client_warning: %s', e)
 
@@ -167,6 +177,11 @@ async def _ensure_indexes():
         'CREATE INDEX IF NOT EXISTS ix_notifications_user_read_created ON notifications(user_id, read, created_at)',
         'CREATE INDEX IF NOT EXISTS ix_generated_reports_client_status ON generated_reports(client_id, status)',
         'CREATE INDEX IF NOT EXISTS ix_generated_reports_created_at ON generated_reports(created_at)',
+        'CREATE INDEX IF NOT EXISTS ix_tasks_workspace_status ON tasks(workspace_id, status, deleted_at)',
+        'CREATE INDEX IF NOT EXISTS ix_tasks_workspace_deadline ON tasks(workspace_id, deadline)',
+        'CREATE INDEX IF NOT EXISTS ix_clients_workspace ON clients(workspace_id, deleted_at)',
+        'CREATE INDEX IF NOT EXISTS ix_notes_workspace ON notes(workspace_id, deleted_at)',
+        'CREATE INDEX IF NOT EXISTS ix_sprints_workspace ON sprints(workspace_id, status)',
     ]
     async with engine.begin() as conn:
         for idx in indexes:
@@ -262,6 +277,66 @@ async def _ensure_admin():
             logger.info('Seed data created: clients, contracts, tasks, modules')
 
 
+async def _ensure_workspaces():
+    from sqlalchemy import update
+
+    from app.core.models import (
+        WS_ROLE_ADMIN,
+        WS_ROLE_MEMBER,
+        WS_ROLE_OWNER,
+        Client,
+        Note,
+        Task,
+        User,
+        UserRole,
+        Role,
+        Workspace,
+        WorkspaceMember,
+    )
+    async with async_session() as session:
+        ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+        if ws is None:
+            superadmin = (await session.execute(
+                select(User).join(UserRole, UserRole.user_id == User.id).join(Role, Role.id == UserRole.role_id)
+                .where(Role.name == 'superadmin')
+            )).scalars().first()
+            ws = Workspace(
+                name='SEO',
+                preset='seo',
+                theme=None,
+                dictionary='{}',
+                ai_instructions=(
+                    'Ты аналитик SEO-команды. Отвечай по-русски, коротко и по делу: '
+                    'цифры, выводы, рекомендации.'
+                ),
+                created_by=superadmin.id if superadmin else None,
+            )
+            session.add(ws)
+            await session.flush()
+        wid = ws.id
+        for model in (Task, Client, Note):
+            await session.execute(
+                update(model).where(model.workspace_id.is_(None)).values(workspace_id=wid)
+            )
+        members = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceMember))).scalars().all()}
+        users = (await session.execute(select(User))).scalars().all()
+        for user in users:
+            if (wid, user.id) in members:
+                continue
+            role_rows = (await session.execute(
+                select(Role.name).join(UserRole, UserRole.role_id == Role.id)
+                .where(UserRole.user_id == user.id)
+            )).scalars().all()
+            if 'superadmin' in role_rows:
+                role = WS_ROLE_OWNER
+            elif 'admin' in role_rows:
+                role = WS_ROLE_ADMIN
+            else:
+                role = WS_ROLE_MEMBER
+            session.add(WorkspaceMember(workspace_id=wid, user_id=user.id, role=role))
+        await session.commit()
+
+
 async def init_db():
     import app.core.models
     async with engine.begin() as conn:
@@ -269,6 +344,7 @@ async def init_db():
     await _migrate()
     await _ensure_indexes()
     await _ensure_admin()
+    await _ensure_workspaces()
 
 
 async def close_db():
