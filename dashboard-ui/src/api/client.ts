@@ -297,6 +297,30 @@ export type VoiceTaskParseResult = {
   users: { id: number; username: string }[];
 };
 
+export type AiAnalyticsResult = {
+  facts: Record<string, any>;
+  analysis: string;
+  model: string;
+};
+
+export type AiTaskDescription = {
+  description: string;
+  model: string;
+};
+
+export type AiSeoReport = {
+  report: string;
+  facts: Record<string, any>;
+  model: string;
+};
+
+export type AiChatMessage = {
+  answer: string;
+  intent: string;
+  facts: Record<string, any>;
+  model: string;
+};
+
 export const api = {
   // Auth
   login: (username: string, password: string) =>
@@ -538,4 +562,46 @@ export const api = {
     request<{ ok: boolean }>(`/api/reports/${id}/restore`, { method: 'POST' }),
   emptyReportTrash: () => request<{ ok: boolean; count: number }>('/api/reports/trash/empty', { method: 'DELETE' }),
   getOllamaModels: () => request<{ models: string[] }>('/api/reports/ollama-models'),
+
+  // AI-аналитика (Ollama)
+  aiOverdue: (model?: string) =>
+    request<AiAnalyticsResult>('/api/ai/analytics/overdue', {
+      method: 'POST',
+      body: JSON.stringify({ model: model ?? null }),
+    }),
+  aiWorkload: (model?: string) =>
+    request<AiAnalyticsResult>('/api/ai/analytics/workload', {
+      method: 'POST',
+      body: JSON.stringify({ model: model ?? null }),
+    }),
+  aiDaily: (model?: string) =>
+    request<AiAnalyticsResult>('/api/ai/analytics/daily', {
+      method: 'POST',
+      body: JSON.stringify({ model: model ?? null }),
+    }),
+  aiProject: (clientId: number, model?: string) =>
+    request<AiAnalyticsResult>('/api/ai/analytics/project', {
+      method: 'POST',
+      body: JSON.stringify({ client_id: clientId, model: model ?? null }),
+    }),
+  aiBottlenecks: (model?: string) =>
+    request<AiAnalyticsResult>('/api/ai/analytics/bottlenecks', {
+      method: 'POST',
+      body: JSON.stringify({ model: model ?? null }),
+    }),
+  describeTask: (title: string, client?: string, taskType?: string, model?: string) =>
+    request<AiTaskDescription>('/api/ai/task-description', {
+      method: 'POST',
+      body: JSON.stringify({ title, client: client || null, task_type: taskType || null, model: model ?? null }),
+    }),
+  seoReport: (data: { traffic?: string; positions: { key: string; was?: number | null; now?: number | null }[]; pages?: string; notes?: string }, model?: string) =>
+    request<AiSeoReport>('/api/ai/seo-report', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, model: model ?? null }),
+    }),
+  aiChat: (message: string, model?: string) =>
+    request<AiChatMessage>('/api/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, model: model ?? null }),
+    }),
 };
