@@ -117,7 +117,7 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
         <div>
           <textarea
             rows={14}
-            className={`w-full resize-y bg-[rgba(43,38,32,.045)] px-4 py-3 font-mono text-[13px] leading-[1.75] tracking-[.01em] text-[var(--color-text)] outline-none [tab-size:2] ${minHeightClassName}`}
+            className={`w-full resize-y bg-[var(--color-overlay)] px-4 py-3 font-mono text-[13px] leading-[1.75] tracking-[.01em] text-[var(--color-text)] outline-none [tab-size:2] ${minHeightClassName}`}
             value={sourceValue}
             onChange={event => {
               setSourceValue(event.target.value);

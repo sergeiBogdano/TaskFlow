@@ -115,7 +115,7 @@ export function Dashboard() {
       <section className="tf-panel-flat flex flex-wrap items-center gap-x-8 gap-y-2 px-5 py-3">
         {cards.map(card => (
           <button key={card.label} onClick={() => navigate(card.to)} className="group flex min-w-0 items-center gap-3 py-1 text-left">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: card.soft, color: card.color }}><card.icon size={19} /></span>
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--color-overlay)]" style={{ color: card.color }}><card.icon size={19} /></span>
             <span className="text-2xl font-semibold tracking-tight" style={{ color: card.color }}>{card.value}</span>
             <span className="text-[13px] text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">{card.label}</span>
           </button>

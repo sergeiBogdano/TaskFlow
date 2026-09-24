@@ -290,7 +290,7 @@ class TestAdditionalAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        admin = next((u for u in data if u.get('username') == 'admin'), None)
+        admin = next((u for u in data if u.get('username') == '4dmin'), None)
         assert admin is not None
 
     def test_user_create(self, sync_request, admin_cookies):

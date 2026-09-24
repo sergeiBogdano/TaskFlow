@@ -36,7 +36,7 @@ async def client(event_loop):
 async def admin_cookies(client):
     resp = await client.post(
         '/api/auth/login',
-        json={'username': 'admin', 'password': 'admin'}
+        json={'username': '4dmin', 'password': '4dmin'}
     )
     assert resp.status_code == 200, f'Login failed: {resp.status_code} {resp.text}'
     return {'taskflow_user': resp.cookies.get('taskflow_user')}

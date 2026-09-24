@@ -443,7 +443,7 @@ es.addEventListener('comment_new', function(e) { showToast('Новый комм�
 - **init_db:**
   1. `Base.metadata.create_all` — создаёт таблицы если нет
   2. `_migrate()` — добавляет новые колонки
-  3. `_ensure_admin()` — создаёт admin:admin если пользователей нет; реактивирует admin если выключен
+  3. `_ensure_admin()` — создаёт 4dmin:4dmin если пользователей нет; реактивирует 4dmin если выключен
   4. `_ensure_roles()` — создаёт 3 системные роли (admin, manager, viewer) если их нет
 
 ---
@@ -506,7 +506,7 @@ services:
 
 ### Создание и управление
 
-- **Admin** (создаётся автоматически при первом запуске) — логин `admin`, пароль `admin`
+- **Admin** (создаётся автоматически при первом запуске) — логин `4dmin`, пароль `4dmin`
 - **Обычная регистрация** (`/register`) — создаёт пользователя с ролью `manager`
 - **Через админку** (`/users`) — admin создаёт пользователей с любой ролью + per-user права
 - **Роли** (`/roles`) — admin создаёт/редактирует/удаляет кастомные роли с любым набором прав
@@ -544,7 +544,7 @@ pytest
 # Ручное тестирование через curl/PowerShell
 $s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 Invoke-WebRequest -Uri "http://127.0.0.1:8080/login" -Method POST `
-  -Body @{username='admin';password='admin'} -WebSession $s
+  -Body @{username='4dmin';password='4dmin'} -WebSession $s
 Invoke-WebRequest -Uri "http://127.0.0.1:8080/api/tasks" -WebSession $s
 ```
 
@@ -566,7 +566,7 @@ python -m uvicorn app.web.app:app --host 127.0.0.1 --port 8080
 
 # 4. Открыть браузер
 start http://127.0.0.1:8080
-# Логин: admin / пароль: admin
+# Логин: 4dmin / пароль: 4dmin
 ```
 
 ---

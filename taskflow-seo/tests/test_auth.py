@@ -9,16 +9,16 @@ class TestAuth:
 
     def test_login_success(self, sync_request, client):
         resp = sync_request('POST', '/api/auth/login',
-                            json={'username': 'admin', 'password': 'admin'})
+                            json={'username': '4dmin', 'password': '4dmin'})
         assert resp.status_code == 200
         data = resp.json()
         assert 'user' in data
         assert 'token' in data
-        assert data['user']['username'] == 'admin'
+        assert data['user']['username'] == '4dmin'
 
     def test_login_wrong_password(self, sync_request, client):
         resp = sync_request('POST', '/api/auth/login',
-                            json={'username': 'admin', 'password': 'wrong'})
+                            json={'username': '4dmin', 'password': 'wrong'})
         assert resp.status_code == 401
         assert 'error' in resp.json()
 
@@ -42,7 +42,7 @@ class TestAuth:
     def test_get_me_authenticated(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/api/auth/me', cookies=admin_cookies)
         assert resp.status_code == 200
-        assert resp.json()['user']['username'] == 'admin'
+        assert resp.json()['user']['username'] == '4dmin'
 
     def test_get_me_unauthenticated(self, sync_request, client):
         resp = sync_request('GET', '/api/auth/me')

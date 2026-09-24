@@ -36,7 +36,7 @@ export function Login() {
       />
       <div className="relative w-full max-w-[400px]">
         <div className="mb-10 text-center">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-[20px] text-[22px] font-semibold text-[#f5f1ea]" style={{ background: 'linear-gradient(180deg, #453f35, #2b2620)', boxShadow: '0 12px 32px rgba(43,38,32,.35)' }}>
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-[20px] text-[22px] font-semibold text-[var(--color-on-accent)]" style={{ background: 'var(--color-accent)', boxShadow: 'var(--shadow-accent)' }}>
             TF
           </div>
           <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-[var(--color-text)]">TaskFlow</h1>

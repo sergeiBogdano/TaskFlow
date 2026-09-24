@@ -193,14 +193,14 @@ async def _ensure_admin():
                 session.add(Role(name=name, permissions=json.dumps(perms, ensure_ascii=False)))
         await session.commit()
 
-        r = await session.execute(select(User).where(User.username == 'admin'))
+        r = await session.execute(select(User).where(User.username == '4dmin'))
         admin = r.scalar_one_or_none()
         if admin:
             return
         r = await session.execute(text('SELECT COUNT(*) FROM users'))
         count = r.scalar()
         if count == 0:
-            admin = User(username='admin', password_hash=hash_password('admin'))
+            admin = User(username='4dmin', password_hash=hash_password('4dmin'))
             session.add(admin)
             await session.commit()
             await session.refresh(admin)
@@ -210,7 +210,7 @@ async def _ensure_admin():
             if superadmin_role:
                 session.add(UserRole(user_id=admin.id, role_id=superadmin_role.id))
             await session.commit()
-            logger.info('Default superadmin user created (admin:admin)')
+            logger.info('Default superadmin user created (4dmin:4dmin)')
             return
 
             testuser = User(username='testuser', password_hash=hash_password('testpass'))

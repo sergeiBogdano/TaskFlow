@@ -18,9 +18,99 @@
   --color-success: #5f8f6a;
   --color-warning: #96702a;
   --color-danger: #bc5a48;
+  --color-on-accent: #f5f1ea;
+  --color-overlay: rgba(43, 38, 32, .07);
+  --color-overlay-strong: rgba(43, 38, 32, .13);
+  --color-input-bg: #fffdf7;
+  --color-sheen: rgba(255, 255, 255, .7);
+  --color-ring: rgba(43, 38, 32, .1);
+  --color-focus-border: rgba(43, 38, 32, .45);
+  --color-thumb: #d3c9b4;
+  --color-selection: rgba(43, 38, 32, .16);
+  --color-primary-from: #453f35;
+  --color-primary-to: #2b2620;
+  --color-hairline: rgba(62, 52, 36, .16);
+  --color-row-hover: rgba(43, 38, 32, .03);
+  --color-body-bg:
+    radial-gradient(1200px 500px at 50% -180px, rgba(255, 255, 255, .65), transparent),
+    linear-gradient(180deg, #f6f3ec, #f1ece1);
+  --color-st-todo: #a39a8c;
+  --color-st-todo-soft: rgba(163, 154, 140, .18);
+  --color-st-progress: #2b2620;
+  --color-st-progress-soft: rgba(43, 38, 32, .1);
+  --color-st-wait: #c9c2b4;
+  --color-st-wait-soft: rgba(201, 194, 180, .25);
+  --color-st-check: #6d6355;
+  --color-st-check-soft: rgba(109, 99, 85, .14);
+  --color-st-done: #5f8f6a;
+  --color-st-done-soft: rgba(95, 143, 106, .14);
+  --color-st-overdue: #bc5a48;
+  --color-st-overdue-soft: rgba(188, 90, 72, .13);
+  --color-pr-low: #b3aa9c;
+  --color-pr-medium: #6d6355;
+  --color-pr-high: #2b2620;
+  --color-pr-critical: #bc5a48;
   --shadow-panel: 0 24px 60px rgba(62, 52, 36, .12), 0 1px 0 rgba(255, 255, 255, .7) inset;
   --shadow-soft: 0 14px 36px rgba(62, 52, 36, .1);
   --shadow-lift: 0 10px 28px rgba(62, 52, 36, .14);
+  --shadow-modal: 0 40px 100px rgba(62, 52, 36, .3), 0 1px 0 rgba(255, 255, 255, .8) inset;
+  --shadow-accent: 0 8px 26px rgba(43, 38, 32, .35);
+}
+
+/* Тёмная тема «графит» — вторая, переключаемая */
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --color-bg: #07090d;
+  --color-sidebar: #080a0f;
+  --color-header: #090c12;
+  --color-surface: #10151d;
+  --color-surface-2: #151c27;
+  --color-surface-3: #202a38;
+  --color-border: #2a3443;
+  --color-border-strong: #536173;
+  --color-text: #f5f7fb;
+  --color-text-secondary: #b9c3d0;
+  --color-muted: #7e8998;
+  --color-accent: #6f8cff;
+  --color-accent-2: #7dd3c7;
+  --color-success: #57d68d;
+  --color-warning: #d8bd7b;
+  --color-danger: #ff7180;
+  --color-on-accent: #ffffff;
+  --color-overlay: rgba(255, 255, 255, .07);
+  --color-overlay-strong: rgba(255, 255, 255, .13);
+  --color-input-bg: #151c27;
+  --color-sheen: rgba(255, 255, 255, .05);
+  --color-ring: rgba(136, 168, 255, .16);
+  --color-focus-border: #6f8cff;
+  --color-thumb: #303746;
+  --color-selection: rgba(136, 168, 255, .35);
+  --color-primary-from: #6d92ff;
+  --color-primary-to: #5f86ff;
+  --color-hairline: rgba(255, 255, 255, .18);
+  --color-row-hover: rgba(255, 255, 255, .035);
+  --color-body-bg: #07090d;
+  --color-st-todo: #60a5fa;
+  --color-st-todo-soft: rgba(96, 165, 250, .14);
+  --color-st-progress: #facc15;
+  --color-st-progress-soft: rgba(250, 204, 21, .14);
+  --color-st-wait: #d1d5db;
+  --color-st-wait-soft: rgba(209, 213, 219, .12);
+  --color-st-check: #fb923c;
+  --color-st-check-soft: rgba(251, 146, 60, .14);
+  --color-st-done: #4ade80;
+  --color-st-done-soft: rgba(74, 222, 128, .14);
+  --color-st-overdue: #f87171;
+  --color-st-overdue-soft: rgba(248, 113, 113, .14);
+  --color-pr-low: #94a3b8;
+  --color-pr-medium: #facc15;
+  --color-pr-high: #fb923c;
+  --color-pr-critical: #f87171;
+  --shadow-panel: 0 14px 42px rgba(0, 0, 0, .28), 0 1px 0 rgba(255, 255, 255, .04) inset;
+  --shadow-soft: 0 8px 22px rgba(0, 0, 0, .2);
+  --shadow-lift: 0 10px 26px rgba(0, 0, 0, .22);
+  --shadow-modal: 0 18px 54px rgba(0, 0, 0, .36), 0 1px 0 rgba(255, 255, 255, .055) inset;
+  --shadow-accent: 0 8px 26px rgba(0, 0, 0, .4);
 }
 
 * {
@@ -35,9 +125,7 @@ html {
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-  background:
-    radial-gradient(1200px 500px at 50% -180px, rgba(255, 255, 255, .65), transparent),
-    linear-gradient(180deg, #f6f3ec, #f1ece1);
+  background: var(--color-body-bg);
   color: var(--color-text);
   min-height: 100vh;
   letter-spacing: 0;
@@ -73,7 +161,7 @@ a:hover {
 }
 
 ::selection {
-  background: rgba(43, 38, 32, .16);
+  background: var(--color-selection);
 }
 
 ::-webkit-scrollbar {
@@ -82,7 +170,7 @@ a:hover {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d3c9b4;
+  background: var(--color-thumb);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -94,7 +182,7 @@ a:hover {
 
 .tf-panel {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .75), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, var(--color-sheen), rgba(255, 255, 255, 0)),
     var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 18px;
@@ -103,7 +191,7 @@ a:hover {
 
 .tf-panel-flat {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, var(--color-sheen), rgba(255, 255, 255, 0)),
     var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 18px;
@@ -118,8 +206,8 @@ a:hover {
   width: 100%;
   border: 1px solid var(--color-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .6), transparent),
-    #fffdf7;
+    linear-gradient(180deg, var(--color-sheen), transparent),
+    var(--color-input-bg);
   color: var(--color-text);
   border-radius: 14px;
   padding: 10px 14px;
@@ -149,8 +237,12 @@ select.tf-input.tf-select-sm {
 }
 
 select.tf-input option {
-  background: #faf8f2;
-  color: #1e1b16;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+[data-theme="graphite"] select.tf-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23b9c3d0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .tf-input.tf-input-icon {
@@ -158,8 +250,8 @@ select.tf-input option {
 }
 
 .tf-input:focus {
-  border-color: rgba(43, 38, 32, .45);
-  box-shadow: 0 0 0 4px rgba(43, 38, 32, .1);
+  border-color: var(--color-focus-border);
+  box-shadow: 0 0 0 4px var(--color-ring);
 }
 
 .tf-button {
@@ -172,8 +264,8 @@ select.tf-input option {
   border-radius: 12px;
   border: 1px solid var(--color-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .65), rgba(255, 255, 255, 0)),
-    #fffdf7;
+    linear-gradient(180deg, var(--color-sheen), rgba(255, 255, 255, 0)),
+    var(--color-input-bg);
   color: var(--color-text);
   font-size: 13.5px;
   font-weight: 600;
@@ -188,20 +280,20 @@ select.tf-input option {
 
 .tf-button:hover {
   border-color: var(--color-border-strong);
-  background: #ffffff;
+  background: var(--color-surface-3);
   box-shadow: 0 2px 8px rgba(62, 52, 36, .1);
 }
 
 .tf-button-primary {
   border-color: transparent;
-  background: linear-gradient(180deg, #453f35, #2b2620);
-  color: #f5f1ea;
+  background: linear-gradient(180deg, var(--color-primary-from), var(--color-primary-to));
+  color: var(--color-on-accent);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .15) inset, 0 10px 26px rgba(43, 38, 32, .3);
 }
 
 .tf-button-primary:hover {
-  background: linear-gradient(180deg, #524a3e, #332d25);
   border-color: transparent;
+  filter: brightness(1.08);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 12px 30px rgba(43, 38, 32, .36);
 }
 
@@ -219,7 +311,7 @@ select.tf-input option {
   padding: 4px 12px;
   border-radius: 999px;
   border: 1px solid transparent;
-  background: rgba(43, 38, 32, .07);
+  background: var(--color-overlay);
   color: var(--color-text-secondary);
   font-size: 12.5px;
   font-weight: 500;
@@ -267,20 +359,20 @@ select.tf-input option {
   position: absolute;
   inset: auto 14px 0 14px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(62, 52, 36, .16), transparent);
+  background: linear-gradient(90deg, transparent, var(--color-hairline), transparent);
 }
 
 .tf-task-accent {
-  box-shadow: 0 0 0 1px rgba(62, 52, 36, .06) inset;
+  box-shadow: 0 0 0 1px var(--color-border) inset;
 }
 
 .tf-modal-shell {
-  background: color-mix(in srgb, #faf8f2 84%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 84%, transparent);
   -webkit-backdrop-filter: blur(22px) saturate(1.5);
   backdrop-filter: blur(22px) saturate(1.5);
-  border: 1px solid rgba(255, 255, 255, .7);
+  border: 1px solid var(--color-border-strong);
   border-radius: 24px;
-  box-shadow: 0 40px 100px rgba(62, 52, 36, .3), 0 1px 0 rgba(255, 255, 255, .8) inset;
+  box-shadow: var(--shadow-modal);
   animation: modal-pop .22s cubic-bezier(.2, .9, .3, 1.2);
 }
 
@@ -288,11 +380,11 @@ select.tf-input option {
   display: grid;
   align-items: center;
   min-height: 52px;
-  border-bottom: 1px solid rgba(62, 52, 36, .08);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .tf-table-row:hover {
-  background: rgba(43, 38, 32, .025);
+  background: var(--color-row-hover);
 }
 
 main h2.text-xl.font-black {
@@ -327,13 +419,13 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat::after {
   position: absolute;
   inset: auto 14px 0 14px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(62, 52, 36, .16), transparent);
+  background: linear-gradient(90deg, transparent, var(--color-hairline), transparent);
 }
 
 section.grid.grid-cols-2.gap-3 > .tf-panel-flat span.h-4.w-4 {
   width: 20px;
   height: 20px;
-  box-shadow: 0 0 0 1px rgba(62, 52, 36, .1) inset, 0 8px 18px rgba(62, 52, 36, .14);
+  box-shadow: 0 0 0 1px var(--color-border) inset, var(--shadow-lift);
 }
 
 section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
@@ -352,7 +444,7 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
 }
 
 .tf-panel-flat.overflow-hidden > div[class*="grid-cols-[36px"]:not(:first-child):hover {
-  background: rgba(43, 38, 32, .03);
+  background: var(--color-row-hover);
 }
 
 /* Лёгкие, дешёвые анимации: только transform и opacity */
