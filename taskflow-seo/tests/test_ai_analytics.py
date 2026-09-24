@@ -18,7 +18,7 @@ def llm_calls(monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def seed_ai_data(admin_cookies, event_loop):
+def seed_ai_data(admin_cookies, executor_cookies, event_loop):
     from sqlalchemy import select
 
     from app.core.database import async_session
@@ -26,7 +26,7 @@ def seed_ai_data(admin_cookies, event_loop):
 
     async def go():
         async with async_session() as session:
-            admin = (await session.execute(select(User).where(User.username == "admin"))).scalar_one()
+            admin = (await session.execute(select(User).where(User.username == "4dmin"))).scalar_one()
             executor = (await session.execute(select(User).where(User.username == "testexec"))).scalar_one()
             client = Client(
                 org_name="AI Test Client",
