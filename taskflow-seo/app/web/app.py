@@ -126,6 +126,7 @@ from app.web.api.saved_views import router as saved_views_router
 from app.web.api.quick_tasks import router as quick_tasks_router
 from app.web.api.reports import router as reports_router
 from app.web.api.ai import router as ai_router
+from app.web.api.ai_analytics import router as ai_analytics_router
 from app.web.api.notes import router as notes_router
 
 
@@ -142,4 +143,5 @@ app.include_router(saved_views_router)
 app.include_router(quick_tasks_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
+app.include_router(ai_analytics_router)
 app.include_router(notes_router)

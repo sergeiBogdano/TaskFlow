@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -18,6 +19,9 @@ from app.core.models import Client, User
 from app.core.permissions import get_current_user
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://172.20.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 
 class TaskCommandPayload(BaseModel):
@@ -40,7 +44,7 @@ def _ollama_json(model: str, prompt: str) -> dict[str, Any]:
         "options": {"temperature": 0.1, "num_predict": 700},
     }).encode("utf-8")
     request = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
+        f"{OLLAMA_URL}/api/generate",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -255,7 +259,7 @@ async def parse_task_command(payload: TaskCommandPayload, user=Depends(get_curre
         f"Команда: {text}"
     )
     try:
-        parsed = await asyncio.to_thread(_ollama_json, payload.model or "qwen2.5:3b", prompt)
+        parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
     except Exception:
         parsed = _fallback_parse(text)
 
@@ -304,7 +308,7 @@ async def polish_text(payload: TextPolishPayload, user=Depends(get_current_user)
         f"Текст: {text}"
     )
     try:
-        parsed = await asyncio.to_thread(_ollama_json, payload.model or "qwen2.5:3b", prompt)
+        parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
         html = _strip_code_fence(str(parsed.get("html") or "")).strip()
     except Exception as exc:
         return JSONResponse({"error": f"AI недоступен: {exc}"}, status_code=503)

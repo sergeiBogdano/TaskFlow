@@ -8,6 +8,8 @@ services:
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Moscow}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WEB_APP_SECRET: ${WEB_APP_SECRET:?WEB_APP_SECRET is required}
+      OLLAMA_URL: ${OLLAMA_URL:-http://172.20.0.1:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
 
     volumes:
       - taskflow_logs:/app/logs
