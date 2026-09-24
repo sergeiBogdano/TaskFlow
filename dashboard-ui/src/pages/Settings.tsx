@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Bell, FolderOpen, HardDrive, Info, ShieldCheck } from 'lucide-react';
+import { Bell, Download, FolderOpen, HardDrive, Info, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
-import { disconnectNotesDirectory, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
+import { disconnectNotesDirectory, listLocalFolders, listLocalNotes, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
 
 export function Settings() {
   const { user } = useAuth();
@@ -30,6 +30,45 @@ export function Settings() {
     await disconnectNotesDirectory();
     setStorage(await storageInfo());
     setStorageMsg('Папка отключена. Личные заметки хранятся во встроенном хранилище браузера на этом ПК.');
+  };
+
+  const exportNotes = async () => {
+    setStorageMsg('');
+    try {
+      const [all, folders] = await Promise.all([
+        listLocalNotes({}),
+        listLocalFolders().catch(() => []),
+      ]);
+      if (!all.notes.length) {
+        setStorageMsg('Локальных заметок пока нет — выгружать нечего.');
+        return;
+      }
+      const folderName = (id: string) => folders.find(f => f.id === id)?.name || 'Без папки';
+      const parts = all.notes.map(n => [
+        `# ${n.title}`,
+        '',
+        `- Формат: ${n.format}`,
+        `- Папка: ${folderName(n.folderId)}`,
+        `- Теги: ${n.tags.join(', ') || '—'}`,
+        `- Обновлена: ${n.updated_at}`,
+        '',
+        '---',
+        '',
+        n.content || '',
+      ].join('\n'));
+      const blob = new Blob([parts.join('\n\n')], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `taskflow-notes-${new Date().toISOString().slice(0, 10)}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setStorageMsg(`Выгружено заметок: ${all.notes.length}. Файл сохранён в загрузки.`);
+    } catch (err) {
+      setStorageMsg(err instanceof Error ? err.message : 'Не удалось выгрузить заметки.');
+    }
   };
 
   return (
@@ -72,6 +111,7 @@ export function Settings() {
           {storage?.mode === 'dir' && (
             <button type="button" onClick={dropFolder} className="tf-button">Отключить папку</button>
           )}
+          <button type="button" onClick={exportNotes} className="tf-button"><Download size={15} />Скачать все (.md)</button>
         </div>
         {storageMsg && <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{storageMsg}</p>}
       </section>

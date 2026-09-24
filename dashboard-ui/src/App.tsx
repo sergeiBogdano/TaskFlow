@@ -16,6 +16,7 @@ const Users = lazy(() => import('./pages/Users').then(module => ({ default: modu
 const Settings = lazy(() => import('./pages/Settings').then(module => ({ default: module.Settings })));
 const Modules = lazy(() => import('./pages/Modules').then(module => ({ default: module.Modules })));
 const Trash = lazy(() => import('./pages/Trash').then(module => ({ default: module.Trash })));
+const AiAnalytics = lazy(() => import('./pages/AiAnalytics').then(module => ({ default: module.AiAnalytics })));
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })));
 
 function PageLoader() {
@@ -42,6 +43,7 @@ export default function App() {
                 <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
                 <Route path="/reports" element={<PermissionRoute permission="reports"><Reports /></PermissionRoute>} />
                 <Route path="/trash" element={<PermissionRoute permission="tasks"><Trash /></PermissionRoute>} />
+                <Route path="/ai" element={<AiAnalytics />} />
                 <Route path="/notes" element={<Notes />} />
                 <Route path="/settings" element={<PermissionRoute permission="settings"><Settings /></PermissionRoute>} />
               </Route>

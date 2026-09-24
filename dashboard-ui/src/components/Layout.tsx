@@ -20,6 +20,7 @@ import {
   Puzzle,
   Send,
   Settings,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -51,6 +52,7 @@ const nav = [
       { to: '/clients', icon: Users, label: 'Клиенты', hint: 'CRM и договоры', permission: 'clients' },
       { to: '/modules', icon: Puzzle, label: 'Модули', hint: 'Автоматизация', permission: 'modules' },
       { to: '/reports', icon: BarChart3, label: 'Отчёты', hint: 'Метрики', permission: 'reports' },
+      { to: '/ai', icon: Sparkles, label: 'AI-аналитика', hint: 'Ollama', permission: 'reports' },
     ],
   },
   {
@@ -73,6 +75,7 @@ const titles: Record<string, string> = {
   '/notes': 'Заметки',
   '/users': 'Пользователи',
   '/reports': 'Отчёты',
+  '/ai': 'AI-аналитика',
   '/trash': 'Корзина',
   '/settings': 'Настройки',
 };

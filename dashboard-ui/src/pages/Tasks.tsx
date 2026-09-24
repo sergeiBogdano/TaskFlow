@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import type { Client, SavedView, Task, TaskComment, TaskFile, User } from '../api/client';
@@ -586,6 +586,32 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [files, setFiles] = useState<TaskFile[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [aiDescLoading, setAiDescLoading] = useState(false);
+  const [aiDescError, setAiDescError] = useState('');
+
+  const generateDescription = async () => {
+    if (!title.trim()) {
+      setAiDescError('Сначала введите название задачи.');
+      return;
+    }
+    setAiDescLoading(true);
+    setAiDescError('');
+    try {
+      const clientName = clients.find(client => String(client.id) === clientId)?.org_name || '';
+      const res = await api.describeTask(title.trim(), clientName, taskType);
+      const html = res.description
+        .split('\n')
+        .map(line => line.trim().replace(/^[•\-*]\s*/, ''))
+        .filter(Boolean)
+        .map(line => `<p>${line}</p>`)
+        .join('');
+      setNotes(prev => (prev ? `${prev}<br>${html}` : html));
+    } catch (err) {
+      setAiDescError(err instanceof Error ? err.message : 'AI недоступен.');
+    } finally {
+      setAiDescLoading(false);
+    }
+  };
   const [activeTab, setActiveTab] = useState<'main' | 'accesses' | 'comments' | 'files' | 'history'>('main');
   const [collapsedSections, setCollapsedSections] = useState({ params: true, people: true, dates: true });
   const [coExecutorSearch, setCoExecutorSearch] = useState('');
@@ -872,8 +898,16 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                   <input className="tf-input text-base font-semibold" value={title} onChange={event => setTitle(event.target.value)} required autoFocus />
                 </label>
 
-                <Panel title="Описание">
+                <Panel
+                  title="Описание"
+                  action={
+                    <button type="button" onClick={generateDescription} disabled={aiDescLoading} className="tf-button h-8 px-2 text-xs" title="Сгенерировать описание через AI">
+                      <Wand2 size={14} />{aiDescLoading ? 'Думаю...' : 'AI-описание'}
+                    </button>
+                  }
+                >
                   <RichTextEditor value={notes} onChange={setNotes} minHeightClassName="min-h-52" placeholder="Контекст, ссылки, требования, что считать готовым..." />
+                  {aiDescError && <div className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{aiDescError}</div>}
                 </Panel>
 
                 <Panel title="Выполненные работы">
