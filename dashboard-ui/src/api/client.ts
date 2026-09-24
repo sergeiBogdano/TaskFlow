@@ -1,7 +1,24 @@
 const API_BASE = '';
 
+const WORKSPACE_KEY = 'taskflow:workspace';
+
+function activeWorkspaceId(): string | null {
+  try {
+    return localStorage.getItem(WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${url}`, {
+  let finalUrl = url;
+  // Активный воркспейс подмешивается ко всем API-запросам (кроме auth).
+  // Бэкенд неизвестные query-параметры игнорирует, так что безопасно везде.
+  const ws = activeWorkspaceId();
+  if (ws && url.startsWith('/api/') && !url.startsWith('/api/auth')) {
+    finalUrl += (url.includes('?') ? '&' : '?') + `workspace_id=${encodeURIComponent(ws)}`;
+  }
+  const res = await fetch(`${API_BASE}${finalUrl}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
@@ -49,6 +66,7 @@ export type Task = {
   module_id: number | null;
   visibility: 'public' | 'private';
   client_access_ids: number[];
+  sprint_ids?: number[];
   deleted_at?: string | null;
 };
 
@@ -297,6 +315,44 @@ export type VoiceTaskParseResult = {
   users: { id: number; username: string }[];
 };
 
+export type Workspace = {
+  id: number;
+  name: string;
+  preset: string;
+  theme: string | null;
+  dictionary: Record<string, string>;
+  has_ai_instructions: boolean;
+  role: string;
+  created_at: string | null;
+};
+
+export type WorkspaceDetail = Workspace & {
+  ai_instructions: string;
+};
+
+export type WorkspaceMember = {
+  user_id: number;
+  username: string | null;
+  role: string;
+  created_at: string | null;
+};
+
+export type Sprint = {
+  id: number;
+  workspace_id: number;
+  name: string;
+  goal: string;
+  start_date: string | null;
+  end_date: string | null;
+  status: string;
+  progress: { total: number; done: number; percent: number };
+  created_at: string | null;
+};
+
+export type SprintDetail = Sprint & {
+  tasks: { id: number; title: string; status: string }[];
+};
+
 export type AiAnalyticsResult = {
   facts: Record<string, any>;
   analysis: string;
@@ -375,10 +431,15 @@ export const api = {
 
   // Users
   getUsers: () => request<User[]>('/api/users'),
-  createUser: (username: string, password: string) =>
+  createUser: (username: string, password: string, extra?: { workspace_id?: number; role?: string }) =>
     request<{ id: number; username: string }>('/api/users', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ...extra }),
+    }),
+  setUserPassword: (userId: number, password: string) =>
+    request<{ ok: boolean }>(`/api/users/${userId}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ password }),
     }),
   setUserRole: (userId: number, roleId: number) =>
     request<{ ok: boolean }>(`/api/users/${userId}/role`, {
@@ -595,45 +656,45 @@ export const api = {
   getOllamaModels: () => request<{ models: string[] }>('/api/reports/ollama-models'),
 
   // AI-аналитика (Ollama)
-  aiOverdue: (model?: string) =>
+  aiOverdue: (model?: string, workspaceId?: number | null) =>
     request<AiAnalyticsResult>('/api/ai/analytics/overdue', {
       method: 'POST',
-      body: JSON.stringify({ model: model ?? null }),
+      body: JSON.stringify({ model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
-  aiWorkload: (model?: string) =>
+  aiWorkload: (model?: string, workspaceId?: number | null) =>
     request<AiAnalyticsResult>('/api/ai/analytics/workload', {
       method: 'POST',
-      body: JSON.stringify({ model: model ?? null }),
+      body: JSON.stringify({ model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
-  aiDaily: (model?: string) =>
+  aiDaily: (model?: string, workspaceId?: number | null) =>
     request<AiAnalyticsResult>('/api/ai/analytics/daily', {
       method: 'POST',
-      body: JSON.stringify({ model: model ?? null }),
+      body: JSON.stringify({ model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
-  aiProject: (clientId: number, model?: string) =>
+  aiProject: (clientId: number, model?: string, workspaceId?: number | null) =>
     request<AiAnalyticsResult>('/api/ai/analytics/project', {
       method: 'POST',
-      body: JSON.stringify({ client_id: clientId, model: model ?? null }),
+      body: JSON.stringify({ client_id: clientId, model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
-  aiBottlenecks: (model?: string) =>
+  aiBottlenecks: (model?: string, workspaceId?: number | null) =>
     request<AiAnalyticsResult>('/api/ai/analytics/bottlenecks', {
       method: 'POST',
-      body: JSON.stringify({ model: model ?? null }),
+      body: JSON.stringify({ model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
-  describeTask: (title: string, client?: string, taskType?: string, model?: string) =>
+  describeTask: (title: string, client?: string, taskType?: string, model?: string, workspaceId?: number | null) =>
     request<AiTaskDescription>('/api/ai/task-description', {
       method: 'POST',
-      body: JSON.stringify({ title, client: client || null, task_type: taskType || null, model: model ?? null }),
+      body: JSON.stringify({ title, client: client || null, task_type: taskType || null, model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
   seoReport: (data: { traffic?: string; positions: { key: string; was?: number | null; now?: number | null }[]; pages?: string; notes?: string }, model?: string) =>
     request<AiSeoReport>('/api/ai/seo-report', {
       method: 'POST',
       body: JSON.stringify({ ...data, model: model ?? null }),
     }),
-  aiChat: (message: string, model?: string) =>
+  aiChat: (message: string, model?: string, workspaceId?: number | null) =>
     request<AiChatMessage>('/api/ai/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, model: model ?? null }),
+      body: JSON.stringify({ message, model: model ?? null, workspace_id: workspaceId ?? null }),
     }),
   // Notes
   getNotes: (params?: string) => request<NotesListResponse>(`/api/notes${params ? `?${params}` : ''}`),
@@ -657,4 +718,52 @@ export const api = {
     request<NoteFolder>(`/api/notes/folders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteNoteFolder: (id: number) =>
     request<{ ok: boolean; moved_notes: number }>(`/api/notes/folders/${id}`, { method: 'DELETE' }),
+
+  // Workspaces
+  getWorkspaces: () => request<Workspace[]>('/api/workspaces'),
+  createWorkspace: (name: string, preset: string) =>
+    request<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, preset }) }),
+  getWorkspace: (id: number) => request<WorkspaceDetail>(`/api/workspaces/${id}`),
+  updateWorkspace: (id: number, data: Record<string, any>) =>
+    request<Workspace>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteWorkspace: (id: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  getWsMembers: (id: number) => request<WorkspaceMember[]>(`/api/workspaces/${id}/members`),
+  addWsMember: (id: number, userId: number, role: string) =>
+    request<WorkspaceMember>(`/api/workspaces/${id}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+  updateWsMember: (id: number, userId: number, role: string) =>
+    request<WorkspaceMember>(`/api/workspaces/${id}/members/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  removeWsMember: (id: number, userId: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
+  getWsKnowledge: (id: number) => request<{ id: number; fact: string; created_at: string | null }[]>(`/api/workspaces/${id}/knowledge`),
+  addWsKnowledge: (id: number, fact: string) =>
+    request<{ id: number; fact: string }>(`/api/workspaces/${id}/knowledge`, {
+      method: 'POST',
+      body: JSON.stringify({ fact }),
+    }),
+  deleteWsKnowledge: (id: number, factId: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}/knowledge/${factId}`, { method: 'DELETE' }),
+
+  // Sprints
+  getSprints: () => request<Sprint[]>('/api/sprints'),
+  createSprint: (data: Record<string, any>) =>
+    request<Sprint>('/api/sprints', { method: 'POST', body: JSON.stringify(data) }),
+  getSprint: (id: number) => request<SprintDetail>(`/api/sprints/${id}`),
+  updateSprint: (id: number, data: Record<string, any>) =>
+    request<Sprint>(`/api/sprints/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSprint: (id: number) =>
+    request<{ ok: boolean }>(`/api/sprints/${id}`, { method: 'DELETE' }),
+  addSprintTasks: (id: number, taskIds: number[]) =>
+    request<{ ok: boolean }>(`/api/sprints/${id}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({ task_ids: taskIds }),
+    }),
+  removeSprintTask: (id: number, taskId: number) =>
+    request<{ ok: boolean }>(`/api/sprints/${id}/tasks/${taskId}`, { method: 'DELETE' }),
 };

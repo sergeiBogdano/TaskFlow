@@ -127,6 +127,8 @@ from app.web.api.quick_tasks import router as quick_tasks_router
 from app.web.api.reports import router as reports_router
 from app.web.api.ai import router as ai_router
 from app.web.api.ai_analytics import router as ai_analytics_router
+from app.web.api.workspaces import router as workspaces_router
+from app.web.api.sprints import router as sprints_router
 from app.web.api.notes import router as notes_router
 
 
@@ -144,4 +146,6 @@ app.include_router(quick_tasks_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
 app.include_router(ai_analytics_router)
+app.include_router(workspaces_router)
+app.include_router(sprints_router)
 app.include_router(notes_router)

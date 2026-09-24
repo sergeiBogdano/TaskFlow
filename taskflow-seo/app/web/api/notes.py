@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select
 
 from app.core.database import async_session
 from app.core.models import Note, NoteFolder
-from app.core.permissions import get_current_user
+from app.core.permissions import get_current_user, get_user_role_names, resolve_workspace
 from app.core.utils.timezone import utc_now
 
 router = APIRouter(prefix='/api/notes', tags=['notes'])
@@ -63,6 +63,11 @@ def _folder_to_dict(folder: NoteFolder) -> dict:
         'user_id': folder.user_id,
         'created_at': folder.created_at.isoformat() if folder.created_at else None,
     }
+
+
+async def _assert_note_workspace(session, note: Note, user) -> None:
+    role_names = await get_user_role_names(user.id)
+    await resolve_workspace(session, user, role_names, note.workspace_id)
 
 
 async def _get_owned_folder(session, folder_id: int | None, user_id: int) -> NoteFolder | None:
@@ -165,10 +170,14 @@ async def list_notes(
     scope: str = Query(default='all'),
     fmt: str | None = Query(default=None),
     archived: bool = Query(default=False),
+    workspace_id: int | None = Query(default=None),
 ):
     async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        wid = workspace.id
         stmt = select(Note)
-        conditions = []
+        conditions = [Note.workspace_id == wid]
         if archived:
             conditions.append(Note.deleted_at.isnot(None))
             conditions.append(Note.user_id == user.id)
@@ -208,6 +217,7 @@ async def list_notes(
 
         # Собираем теги по всем доступным активным заметкам
         tag_stmt = select(Note.tags).where(
+            Note.workspace_id == wid,
             Note.deleted_at.is_(None),
             or_(Note.is_public.is_(True), Note.user_id == user.id),
         )
@@ -223,7 +233,7 @@ async def list_notes(
 
 
 @router.post('', status_code=201)
-async def create_note(data: dict, user=Depends(get_current_user)):
+async def create_note(data: dict, workspace_id: int | None = Query(default=None), user=Depends(get_current_user)):
     title = (data.get('title') or '').strip() or 'Новая заметка'
     content = data.get('content') or ''
     fmt = data.get('format') or 'markdown'
@@ -235,6 +245,8 @@ async def create_note(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail='Содержимое заметки слишком большое')
 
     async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         folder = await _get_owned_folder(session, data.get('folder_id'), user.id)
         note = Note(
             title=title,
@@ -244,6 +256,7 @@ async def create_note(data: dict, user=Depends(get_current_user)):
             is_public=bool(data.get('is_public')),
             folder_id=folder.id if folder else None,
             user_id=user.id,
+            workspace_id=workspace.id,
         )
         session.add(note)
         await session.commit()
@@ -259,6 +272,7 @@ async def get_note(note_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Заметка не найдена')
         if note.user_id != user.id and not note.is_public:
             raise HTTPException(status_code=404, detail='Заметка не найдена')
+        await _assert_note_workspace(session, note, user)
     return JSONResponse(_note_to_dict(note, user.id))
 
 
@@ -270,6 +284,7 @@ async def update_note(note_id: int, data: dict, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Заметка не найдена')
         if note.user_id != user.id:
             raise HTTPException(status_code=403, detail='Можно редактировать только свои заметки')
+        await _assert_note_workspace(session, note, user)
 
         if 'title' in data:
             title = (data.get('title') or '').strip()
@@ -309,6 +324,7 @@ async def duplicate_note(note_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Заметка не найдена')
         if note.user_id != user.id and not note.is_public:
             raise HTTPException(status_code=404, detail='Заметка не найдена')
+        await _assert_note_workspace(session, note, user)
         copy = Note(
             title=f'{note.title} (копия)'[:MAX_TITLE],
             content=note.content,
@@ -317,6 +333,7 @@ async def duplicate_note(note_id: int, user=Depends(get_current_user)):
             is_public=False,
             folder_id=note.folder_id if note.folder and note.folder.user_id == user.id else None,
             user_id=user.id,
+            workspace_id=note.workspace_id,
         )
         session.add(copy)
         await session.commit()
@@ -330,6 +347,7 @@ async def archive_note(note_id: int, user=Depends(get_current_user)):
         note = await session.get(Note, note_id)
         if not note or note.user_id != user.id:
             raise HTTPException(status_code=404, detail='Заметка не найдена')
+        await _assert_note_workspace(session, note, user)
         note.deleted_at = utc_now()
         note.updated_at = utc_now()
         await session.commit()
@@ -342,6 +360,7 @@ async def restore_note(note_id: int, user=Depends(get_current_user)):
         note = await session.get(Note, note_id)
         if not note or note.user_id != user.id:
             raise HTTPException(status_code=404, detail='Заметка не найдена')
+        await _assert_note_workspace(session, note, user)
         note.deleted_at = None
         note.updated_at = utc_now()
         await session.commit()
@@ -355,6 +374,7 @@ async def delete_note(note_id: int, permanent: bool = Query(default=False), user
         note = await session.get(Note, note_id)
         if not note or note.user_id != user.id:
             raise HTTPException(status_code=404, detail='Заметка не найдена')
+        await _assert_note_workspace(session, note, user)
         if permanent:
             await session.delete(note)
         else:

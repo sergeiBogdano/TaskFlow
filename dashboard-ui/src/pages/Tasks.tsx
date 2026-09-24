@@ -4,7 +4,7 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
-import type { Client, SavedView, Task, TaskComment, TaskFile, User } from '../api/client';
+import type { Client, SavedView, Sprint, Task, TaskComment, TaskFile, User } from '../api/client';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
@@ -12,9 +12,9 @@ import { TaskScopeFilter, taskMatchesScope, type TaskScope } from '../components
 import { useAuth } from '../hooks/useAuth';
 import { cn, formatDate, formatFullDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
 
-type Filters = { search: string; status: string[]; priority: string; client: string; assignee: string; scope: TaskScope; scopeUserId: string };
+type Filters = { search: string; status: string[]; priority: string; client: string; assignee: string; scope: TaskScope; scopeUserId: string; sprint: string };
 
-const baseFilters: Filters = { search: '', status: [], priority: 'all', client: 'all', assignee: 'all', scope: 'mine', scopeUserId: '' };
+const baseFilters: Filters = { search: '', status: [], priority: 'all', client: 'all', assignee: 'all', scope: 'mine', scopeUserId: '', sprint: '' };
 const statusOptions = workflowStatuses;
 
 function plainText(value: string) {
@@ -40,6 +40,7 @@ export function Tasks() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   const [viewName, setViewName] = useState('');
   const [selectedViewId, setSelectedViewId] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -81,14 +82,16 @@ export function Tasks() {
     if (filters.priority !== 'all') params.set('priority', filters.priority);
     if (filters.client !== 'all') params.set('client_id', filters.client);
     if (filters.assignee !== 'all') params.set('assignee', filters.assignee);
+    if (filters.sprint) params.set('sprint_id', filters.sprint);
     params.set('scope', filters.scope);
     if (filters.scope === 'user' && filters.scopeUserId) params.set('scope_user_id', filters.scopeUserId);
 
-    const [taskPage, clientList, userList, views] = await Promise.all([
+    const [taskPage, clientList, userList, views, sprintList] = await Promise.all([
       api.getTasksPage(params.toString()),
       referenceCache.clients().catch(() => []),
       referenceCache.users().catch(() => []),
       referenceCache.savedViews('tasks').catch(() => []),
+      api.getSprints().catch(() => [] as Sprint[]),
     ]);
     const scopedItems = taskPage.items.filter(task => taskMatchesScope(task, currentUser, filters.scope, filters.scopeUserId));
     setTasks(scopedItems);
@@ -96,6 +99,7 @@ export function Tasks() {
     setClients(clientList);
     setUsers(userList);
     setSavedViews(views);
+    setSprints(sprintList);
   };
 
   useEffect(() => {
@@ -175,9 +179,24 @@ export function Tasks() {
     setTasks(prev => prev.map(item => item.id === task.id ? { ...item, status } : item));
   };
 
-  const saveTask = async (data: Partial<Task>) => {
-    if (editingTask) await api.updateTask(editingTask.id, data);
-    else await api.createTask(data);
+  const saveTask = async (data: Partial<Task> & { sprint_id?: string | null }) => {
+    const { sprint_id: sprintRef, ...rest } = data;
+    let id = editingTask?.id;
+    if (editingTask) await api.updateTask(editingTask.id, rest);
+    else {
+      const created = await api.createTask(rest);
+      id = created.id;
+    }
+    if (id != null) {
+      const current: number[] = editingTask?.sprint_ids || [];
+      const want = sprintRef ? [Number(sprintRef)] : [];
+      for (const sid of current.filter(s => !want.includes(s))) {
+        await api.removeSprintTask(sid, id).catch(() => {});
+      }
+      for (const sid of want.filter(s => !current.includes(s))) {
+        await api.addSprintTasks(sid, [id]).catch(() => {});
+      }
+    }
     setShowModal(false);
     setEditingTask(null);
     await load();
@@ -377,6 +396,7 @@ export function Tasks() {
           />
           <SearchSelect value={filters.client === 'all' ? '' : filters.client} options={clientOptions} onChange={value => setFilters(prev => ({ ...prev, client: value || 'all' }))} emptyLabel="Все клиенты" searchPlaceholder="Найти клиента или домен" />
           <SearchSelect value={filters.assignee === 'all' ? '' : filters.assignee} options={userOptions} onChange={value => setFilters(prev => ({ ...prev, assignee: value || 'all' }))} emptyLabel="Все исполнители" searchPlaceholder="Найти сотрудника" />
+          <SearchSelect value={filters.sprint} options={sprints.map(s => ({ value: String(s.id), label: s.name }))} onChange={value => setFilters(prev => ({ ...prev, sprint: value }))} emptyLabel="Все спринты" placeholder="Спринт" searchPlaceholder="Найти спринт..." />
           <button onClick={resetTaskFilters} className="tf-button"><ListFilter size={15} />Сброс</button>
         </div>
       </section>}
@@ -553,7 +573,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   clients: Client[];
   users: User[];
   onClose: () => void;
-  onSave: (data: Partial<Task>) => Promise<void>;
+  onSave: (data: Partial<Task> & { sprint_id?: string | null }) => Promise<void>;
   onDelete?: () => Promise<void>;
   onAfterChange?: () => void | Promise<void>;
 }) {
@@ -586,6 +606,8 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [files, setFiles] = useState<TaskFile[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [sprintId, setSprintId] = useState(task?.sprint_ids?.[0] != null ? String(task.sprint_ids[0]) : '');
+  const [sprintOptions, setSprintOptions] = useState<{ value: string; label: string }[]>([]);
   const [aiDescLoading, setAiDescLoading] = useState(false);
   const [aiDescError, setAiDescError] = useState('');
 
@@ -597,8 +619,15 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
     setAiDescLoading(true);
     setAiDescError('');
     try {
-      const clientName = clients.find(client => String(client.id) === clientId)?.org_name || '';
-      const res = await api.describeTask(title.trim(), clientName, taskType);
+      const clientName = clients.find(c => String(c.id) === clientId)?.org_name || '';
+      const wsRaw = (() => {
+        try {
+          return localStorage.getItem('taskflow:workspace');
+        } catch {
+          return null;
+        }
+      })();
+      const res = await api.describeTask(title.trim(), clientName, taskType, undefined, wsRaw ? Number(wsRaw) : null);
       const html = res.description
         .split('\n')
         .map(line => line.trim().replace(/^[•\-*]\s*/, ''))
@@ -616,6 +645,12 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [collapsedSections, setCollapsedSections] = useState({ params: true, people: true, dates: true });
   const [coExecutorSearch, setCoExecutorSearch] = useState('');
 
+  useEffect(() => {
+    api.getSprints()
+      .then(list => setSprintOptions(list.filter(s => s.status === 'active').map(s => ({ value: String(s.id), label: s.name }))))
+      .catch(() => {});
+  }, []);
+
   // Снапшот начальных значений — чтобы спросить перед закрытием при несохранённых изменениях
   const initialSnapshot = useMemo(() => ({
     title: source.title || '',
@@ -632,6 +667,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
     notes: source.notes || '',
     comment: source.comment || '',
     accessIds: ((task?.client_access_ids || []).map(Number)).sort((a, b) => a - b).join(','),
+    sprintId: task?.sprint_ids?.[0] != null ? String(task.sprint_ids[0]) : '',
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
@@ -650,6 +686,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
     notes !== initialSnapshot.notes ||
     comment !== initialSnapshot.comment ||
     [...selectedAccessIds].sort((a, b) => a - b).join(',') !== initialSnapshot.accessIds ||
+    sprintId !== initialSnapshot.sprintId ||
     commentText.trim() !== '' ||
     commentDate !== '';
 
@@ -779,6 +816,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
         notes,
         comment,
         client_access_ids: selectedAccessIds,
+        sprint_id: sprintId || null,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить задачу');
@@ -934,6 +972,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                     <Field label="Статус"><Select value={status} options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))} onChange={setStatus} searchPlaceholder="Найти статус..." /></Field>
                     <Field label="Приоритет"><Select value={priority} options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))} onChange={setPriority} searchPlaceholder="Найти приоритет..." /></Field>
                     <Field label="Тип"><Select value={taskType} options={Object.entries(taskTypeMeta).map(([key, label]) => ({ value: key, label }))} onChange={setTaskType} searchPlaceholder="Найти тип..." /></Field>
+                    <Field label="Спринт"><Select value={sprintId} options={sprintOptions} onChange={setSprintId} emptyLabel="Без спринта" placeholder="Без спринта" searchPlaceholder="Найти спринт..." /></Field>
                   </div>
                 </CollapsiblePanel>
 

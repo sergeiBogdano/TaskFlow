@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 
+from app.core.ai_lock import ollama_lock
 from app.core.database import async_session
 from app.core.models import Client, Task, User
 from app.core.permissions import get_current_user, require_role
@@ -38,11 +39,13 @@ WAIT_STATUSES = {"waiting", "client_check"}
 
 class AnalyticsPayload(BaseModel):
     model: str | None = None
+    workspace_id: int | None = None
 
 
 class ProjectPayload(BaseModel):
     client_id: int
     model: str | None = None
+    workspace_id: int | None = None
 
 
 class TaskDescriptionPayload(BaseModel):
@@ -50,6 +53,7 @@ class TaskDescriptionPayload(BaseModel):
     client: str | None = None
     task_type: str | None = None
     model: str | None = None
+    workspace_id: int | None = None
 
 
 class PositionChange(BaseModel):
@@ -69,6 +73,7 @@ class SeoReportPayload(BaseModel):
 class ChatPayload(BaseModel):
     message: str
     model: str | None = None
+    workspace_id: int | None = None
 
 
 def _model_name(explicit: str | None) -> str:
@@ -98,7 +103,20 @@ def _ollama_text(model: str, prompt: str, num_predict: int = 600) -> str:
 
 
 async def _ask_llm(model: str, prompt: str, num_predict: int = 600) -> str:
-    return await asyncio.to_thread(_ollama_text, model, prompt, num_predict)
+    async with ollama_lock:
+        return await asyncio.to_thread(_ollama_text, model, prompt, num_predict)
+
+
+async def _workspace_prompt_additions(session, user, workspace_id: int | None) -> str:
+    """Инструкции + память воркспейса для промптов. Пусто если нечего добавить."""
+    from app.web.api.workspaces import workspace_context, workspace_fact_block
+    if workspace_id is None:
+        return ""
+    ws, knowledge = await workspace_context(session, workspace_id)
+    if ws is None:
+        return ""
+    block = workspace_fact_block(ws, knowledge)
+    return f"\n{block}" if block else ""
 
 
 def _now() -> datetime:
@@ -122,17 +140,19 @@ def _days_ago(moment, now) -> int | None:
         return None
 
 
-async def _maps(session) -> tuple[dict[int, str], dict[int, str]]:
+async def _maps(session, workspace_id: int | None = None) -> tuple[dict[int, str], dict[int, str]]:
     users = {u.id: u.username for u in (await session.execute(select(User))).scalars().all()}
-    clients = {
-        c.id: c.org_name
-        for c in (await session.execute(select(Client).where(Client.deleted_at.is_(None)))).scalars().all()
-    }
+    client_stmt = select(Client).where(Client.deleted_at.is_(None))
+    if workspace_id is not None:
+        client_stmt = client_stmt.where(Client.workspace_id == workspace_id)
+    clients = {c.id: c.org_name for c in (await session.execute(client_stmt)).scalars().all()}
     return users, clients
 
 
-async def _active_tasks(session):
+async def _active_tasks(session, workspace_id: int | None = None):
     stmt = select(Task).where(Task.deleted_at.is_(None), Task.status.notin_(DONE_STATUSES))
+    if workspace_id is not None:
+        stmt = stmt.where(Task.workspace_id == workspace_id)
     return (await session.execute(stmt)).scalars().all()
 
 
@@ -140,10 +160,10 @@ def _task_days(task, now) -> int | None:
     return _days_ago(task.deadline, now)
 
 
-async def collect_overdue(session) -> dict[str, Any]:
+async def collect_overdue(session, workspace_id: int | None = None) -> dict[str, Any]:
     now = _now()
-    users, clients = await _maps(session)
-    tasks = await _active_tasks(session)
+    users, clients = await _maps(session, workspace_id)
+    tasks = await _active_tasks(session, workspace_id)
     overdue = [t for t in tasks if _naive(t.deadline) is not None and _naive(t.deadline) < now]
     by_assignee: dict[str, int] = {}
     by_client: dict[str, int] = {}
@@ -174,10 +194,10 @@ async def collect_overdue(session) -> dict[str, Any]:
     }
 
 
-async def collect_workload(session) -> dict[str, Any]:
+async def collect_workload(session, workspace_id: int | None = None) -> dict[str, Any]:
     now = _now()
-    users, clients = await _maps(session)
-    tasks = await _active_tasks(session)
+    users, clients = await _maps(session, workspace_id)
+    tasks = await _active_tasks(session, workspace_id)
     per_user: dict[int, dict[str, Any]] = {}
     for task in tasks:
         uid = task.assignee_id
@@ -212,17 +232,21 @@ async def collect_workload(session) -> dict[str, Any]:
     return {"users": ranking[:12], "total_active": sum(row["active"] for row in ranking), "date": now.date().isoformat()}
 
 
-async def collect_daily(session) -> dict[str, Any]:
+async def collect_daily(session, workspace_id: int | None = None) -> dict[str, Any]:
     now = _now()
     since = now - timedelta(hours=24)
-    users, clients = await _maps(session)
+    users, clients = await _maps(session, workspace_id)
     created_stmt = select(Task).where(Task.deleted_at.is_(None), Task.created_at >= since)
+    if workspace_id is not None:
+        created_stmt = created_stmt.where(Task.workspace_id == workspace_id)
     created = (await session.execute(created_stmt)).scalars().all()
     closed_stmt = select(Task).where(
         Task.deleted_at.is_(None),
         Task.status.in_(DONE_STATUSES),
         or_(Task.updated_at >= since, Task.completion_date >= since),
     )
+    if workspace_id is not None:
+        closed_stmt = closed_stmt.where(Task.workspace_id == workspace_id)
     closed = (await session.execute(closed_stmt)).scalars().all()
     overdue_stmt = select(func.count(Task.id)).where(
         Task.deleted_at.is_(None),
@@ -230,10 +254,13 @@ async def collect_daily(session) -> dict[str, Any]:
         Task.deadline.isnot(None),
         Task.deadline < now,
     )
+    if workspace_id is not None:
+        overdue_stmt = overdue_stmt.where(Task.workspace_id == workspace_id)
     overdue_total = (await session.execute(overdue_stmt)).scalar() or 0
-    new_clients = (await session.execute(
-        select(Client).where(Client.deleted_at.is_(None), Client.created_at >= since)
-    )).scalars().all()
+    new_clients_stmt = select(Client).where(Client.deleted_at.is_(None), Client.created_at >= since)
+    if workspace_id is not None:
+        new_clients_stmt = new_clients_stmt.where(Client.workspace_id == workspace_id)
+    new_clients = (await session.execute(new_clients_stmt)).scalars().all()
     closers: dict[str, int] = {}
     for task in closed:
         name = users.get(task.assignee_id or -1, "Не назначен")
@@ -252,9 +279,9 @@ async def collect_daily(session) -> dict[str, Any]:
     }
 
 
-async def collect_project(session, client_id: int) -> dict[str, Any] | None:
+async def collect_project(session, client_id: int, workspace_id: int | None = None) -> dict[str, Any] | None:
     now = _now()
-    users, clients = await _maps(session)
+    users, clients = await _maps(session, workspace_id)
     client_name = clients.get(client_id)
     if client_name is None:
         return None
@@ -294,9 +321,9 @@ async def collect_project(session, client_id: int) -> dict[str, Any] | None:
     }
 
 
-async def collect_bottlenecks(session) -> dict[str, Any]:
-    users, _ = await _maps(session)
-    tasks = await _active_tasks(session)
+async def collect_bottlenecks(session, workspace_id: int | None = None) -> dict[str, Any]:
+    users, _ = await _maps(session, workspace_id)
+    tasks = await _active_tasks(session, workspace_id)
     total = len(tasks)
     by_status: dict[str, int] = {}
     waiting_holders: dict[str, int] = {}
@@ -331,50 +358,68 @@ def _analysis_prompt(title: str, facts: dict[str, Any]) -> str:
     )
 
 
-async def _analyze(title: str, facts: dict[str, Any], model: str | None, user) -> JSONResponse:
+async def _analyze(
+    title: str, facts: dict[str, Any], model: str | None, user, workspace_id: int | None = None
+) -> JSONResponse:
     name = _model_name(model)
+    prompt = _analysis_prompt(title, facts)
+    async with async_session() as session:
+        prompt += await _workspace_prompt_additions(session, user, workspace_id)
     try:
-        analysis = await _ask_llm(name, _analysis_prompt(title, facts))
+        analysis = await _ask_llm(name, prompt)
     except Exception as exc:
         return JSONResponse({"error": f"AI недоступен: {exc}", "facts": facts, "model": name}, status_code=503)
     return JSONResponse({"facts": facts, "analysis": analysis, "model": name})
 
 
+async def _resolve_analytics_workspace(payload_workspace_id: int | None, user) -> int | None:
+    from app.core.permissions import get_user_role_names, resolve_workspace
+    async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, payload_workspace_id)
+        return workspace.id
+
+
 @router.post("/analytics/overdue")
 async def analytics_overdue(payload: AnalyticsPayload, user=Depends(admin_user)):
+    wid = await _resolve_analytics_workspace(payload.workspace_id, user)
     async with async_session() as session:
-        facts = await collect_overdue(session)
-    return await _analyze("анализ просроченных задач", facts, payload.model, user)
+        facts = await collect_overdue(session, wid)
+    return await _analyze("анализ просроченных задач", facts, payload.model, user, wid)
 
 
 @router.post("/analytics/workload")
 async def analytics_workload(payload: AnalyticsPayload, user=Depends(admin_user)):
+    wid = await _resolve_analytics_workspace(payload.workspace_id, user)
     async with async_session() as session:
-        facts = await collect_workload(session)
-    return await _analyze("анализ загрузки сотрудников", facts, payload.model, user)
+        facts = await collect_workload(session, wid)
+    return await _analyze("анализ загрузки сотрудников", facts, payload.model, user, wid)
 
 
 @router.post("/analytics/daily")
 async def analytics_daily(payload: AnalyticsPayload, user=Depends(admin_user)):
+    wid = await _resolve_analytics_workspace(payload.workspace_id, user)
     async with async_session() as session:
-        facts = await collect_daily(session)
-    return await _analyze("сводка работы за последние сутки", facts, payload.model, user)
+        facts = await collect_daily(session, wid)
+    return await _analyze("сводка работы за последние сутки", facts, payload.model, user, wid)
 
 
 @router.post("/analytics/project")
 async def analytics_project(payload: ProjectPayload, user=Depends(admin_user)):
+    wid = await _resolve_analytics_workspace(payload.workspace_id, user)
     async with async_session() as session:
-        facts = await collect_project(session, payload.client_id)
+        facts = await collect_project(session, payload.client_id, wid)
     if facts is None:
         return JSONResponse({"error": "Проект не найден"}, status_code=404)
-    return await _analyze("анализ конкретного проекта", facts, payload.model, user)
+    return await _analyze("анализ конкретного проекта", facts, payload.model, user, wid)
 
 
 @router.post("/analytics/bottlenecks")
 async def analytics_bottlenecks(payload: AnalyticsPayload, user=Depends(admin_user)):
+    wid = await _resolve_analytics_workspace(payload.workspace_id, user)
     async with async_session() as session:
-        facts = await collect_bottlenecks(session)
-    return await _analyze("поиск проблемных мест в потоке задач", facts, payload.model, user)
+        facts = await collect_bottlenecks(session, wid)
+    return await _analyze("поиск проблемных мест в потоке задач", facts, payload.model, user, wid)
 
 
 @router.post("/task-description")
@@ -392,6 +437,8 @@ async def task_description(payload: TaskDescriptionPayload, user=Depends(get_cur
         f"Клиент: {(payload.client or '').strip() or 'не указан'}. "
         f"Тип: {(payload.task_type or 'custom').strip()}."
     )
+    async with async_session() as session:
+        prompt += await _workspace_prompt_additions(session, user, payload.workspace_id)
     try:
         description = await _ask_llm(name, prompt, num_predict=500)
     except Exception as exc:
@@ -443,17 +490,40 @@ def _find_client(message: str, clients: list[dict[str, Any]]) -> dict[str, Any] 
 
 @router.post("/chat")
 async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
+    from app.core.models import WorkspaceKnowledge
+    from app.core.permissions import get_user_role_names, resolve_workspace
+
     message = (payload.message or "").strip()
     if not message:
         return JSONResponse({"error": "Пустое сообщение"}, status_code=400)
     name = _model_name(payload.model)
     lowered = message.lower()
     async with async_session() as session:
-        users, clients = await _maps(session)
+        role_names = await get_user_role_names(user.id)
+        workspace, ws_role = await resolve_workspace(session, user, role_names, payload.workspace_id)
+        wid = workspace.id
+        ws_extra = await _workspace_prompt_additions(session, user, wid)
+
+        remember = re.match(r"^запомни\s*[:\-]?\s*(.+)$", message, re.I | re.S)
+        if remember and ws_role in ("owner", "admin"):
+            fact = remember.group(1).strip()[:2000]
+            if fact:
+                session.add(WorkspaceKnowledge(workspace_id=wid, fact=fact, created_by=user.id))
+                await session.commit()
+                return JSONResponse({
+                    "answer": f"Запомнил в воркспейсе «{workspace.name}»: {fact}",
+                    "intent": "remember",
+                    "facts": {"fact": fact},
+                    "model": name,
+                })
+
+        users, clients = await _maps(session, wid)
         now = _now()
         client_list = [
             {"id": item.id, "name": item.org_name, "domain": item.domain or ""}
-            for item in (await session.execute(select(Client).where(Client.deleted_at.is_(None)))).scalars().all()
+            for item in (await session.execute(
+                select(Client).where(Client.deleted_at.is_(None), Client.workspace_id == wid)
+            )).scalars().all()
         ]
 
         intent = "help"
@@ -463,6 +533,7 @@ async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
                 Task.deleted_at.is_(None),
                 Task.status.notin_(DONE_STATUSES),
                 Task.assignee_id == user.id,
+                Task.workspace_id == wid,
                 Task.deadline.isnot(None),
                 Task.deadline < now,
             )
@@ -477,7 +548,7 @@ async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
                 ],
             }
         elif "просроч" in lowered:
-            facts = await collect_overdue(session)
+            facts = await collect_overdue(session, wid)
             intent = "overdue"
         elif ("открыт" in lowered or "задач" in lowered or "проект" in lowered) and _find_client(
             message, client_list
@@ -488,6 +559,7 @@ async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
                 select(Task).where(
                     Task.deleted_at.is_(None),
                     Task.status.notin_(DONE_STATUSES),
+                    Task.workspace_id == wid,
                     Task.client_id == client["id"],
                 ).order_by(Task.deadline.asc().nullslast())
             )).scalars().all()
@@ -502,14 +574,14 @@ async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
                 ],
             }
         elif "загруз" in lowered or "перегруж" in lowered:
-            facts = await collect_workload(session)
+            facts = await collect_workload(session, wid)
             intent = "workload"
         elif "сколько" in lowered and "задач" in lowered:
             total = (await session.execute(
-                select(func.count(Task.id)).where(Task.deleted_at.is_(None))
+                select(func.count(Task.id)).where(Task.deleted_at.is_(None), Task.workspace_id == wid)
             )).scalar() or 0
             active = (await session.execute(
-                select(func.count(Task.id)).where(Task.deleted_at.is_(None), Task.status.notin_(DONE_STATUSES))
+                select(func.count(Task.id)).where(Task.deleted_at.is_(None), Task.status.notin_(DONE_STATUSES), Task.workspace_id == wid)
             )).scalar() or 0
             intent = "totals"
             facts = {"total": total, "active": active}
@@ -529,6 +601,7 @@ async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
         "1-4 предложения, используя только приведённые факты. Ничего не выдумывай. "
         f"Вопрос: {message}. "
         f"Факты: {json.dumps(facts, ensure_ascii=False)}"
+        f"{ws_extra}"
     )
     try:
         answer = await _ask_llm(name, prompt, num_predict=300)

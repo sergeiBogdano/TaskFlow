@@ -21,12 +21,15 @@ import {
   Send,
   Settings,
   Sparkles,
+  Timer,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { workspaceClientsLabel, WORKSPACE_EVENT } from '../lib/workspace';
 import type { Client, Task, User, VoiceTaskDraft } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { cn, roleMeta } from '../lib/taskflow';
@@ -39,6 +42,7 @@ const nav = [
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Дашборд', hint: 'Обзор команды', permission: 'dashboard' },
       { to: '/tasks', icon: CheckSquare, label: 'Задачи', hint: 'Список и фильтры', permission: 'tasks' },
+      { to: '/sprints', icon: Timer, label: 'Спринты', hint: 'Отрезки и прогресс', permission: 'tasks' },
       { to: '/kanban', icon: Columns3, label: 'Канбан', hint: 'Поток работы', permission: 'kanban' },
       { to: '/calendar', icon: CalendarDays, label: 'Календарь', hint: 'План выполнения', permission: 'calendar' },
       { to: '/notifications', icon: Bell, label: 'Уведомления', hint: 'События', permission: 'notifications' },
@@ -77,6 +81,8 @@ const titles: Record<string, string> = {
   '/reports': 'Отчёты',
   '/ai': 'AI-аналитика',
   '/trash': 'Корзина',
+  '/sprints': 'Спринты',
+  '/workspace': 'Окружение',
   '/settings': 'Настройки',
 };
 
@@ -144,7 +150,14 @@ export function Layout() {
   const [navOrder, setNavOrder] = useState<Record<string, string[]>>({});
   const [activeNavRoute, setActiveNavRoute] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('taskflow:sidebar-collapsed') === '1');
+  const [clientsLabel, setClientsLabel] = useState(() => workspaceClientsLabel());
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  useEffect(() => {
+    const sync = () => setClientsLabel(workspaceClientsLabel());
+    window.addEventListener(WORKSPACE_EVENT, sync);
+    return () => window.removeEventListener(WORKSPACE_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -177,7 +190,10 @@ export function Layout() {
     if (route === '/users') return false;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };
-  const pageTitle = useMemo(() => titles[location.pathname] || 'TaskFlow', [location.pathname]);
+  const pageTitle = useMemo(() => {
+    if (location.pathname === '/clients') return clientsLabel;
+    return titles[location.pathname] || 'TaskFlow';
+  }, [location.pathname, clientsLabel]);
 
   const handleLogout = async () => {
     await logout();
@@ -237,6 +253,9 @@ export function Layout() {
         </div>
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={event => setActiveNavRoute(String(event.active.id))} onDragCancel={() => setActiveNavRoute(null)} onDragEnd={handleNavDragEnd}>
+        <div className={cn(sidebarCollapsed && 'lg:hidden')}>
+          <WorkspaceSwitcher compact={sidebarCollapsed} />
+        </div>
         <nav className={cn('flex gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
             const visibleItems = group.items.filter(item => canSee(item.permission, item.to));
@@ -246,7 +265,14 @@ export function Layout() {
                 <div className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)] lg:block', sidebarCollapsed && 'lg:hidden')}>{group.section}</div>
                 <SortableContext items={orderedItems(group.section, visibleItems).map(item => item.to)} strategy={rectSortingStrategy}>
                   <div className={cn('flex gap-2 lg:block lg:space-y-1', sidebarCollapsed && 'lg:w-full')}>
-                    {orderedItems(group.section, visibleItems).map(item => <SortableNavItem key={item.to} item={item} unreadCount={unreadCount} compact={sidebarCollapsed} />)}
+                    {orderedItems(group.section, visibleItems).map(item => (
+                      <SortableNavItem
+                        key={item.to}
+                        item={item.to === '/clients' ? { ...item, label: clientsLabel } : item}
+                        unreadCount={unreadCount}
+                        compact={sidebarCollapsed}
+                      />
+                    ))}
                   </div>
                 </SortableContext>
               </div>

@@ -9,7 +9,7 @@ from app.core.cache import dashboard_cache
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.models import Client, ClientResponsible, Task, TaskCoExecutor, User
-from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, task_co_executor_ids, task_is_visible_to_user, user_is_superadmin
+from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, resolve_workspace, task_co_executor_ids, task_is_visible_to_user, user_is_superadmin
 from app.core.utils.timezone import safe_dt, to_utc, utc_now
 from app.services.client_service import ClientService
 from app.services.task_service import TaskService
@@ -33,17 +33,18 @@ def _task_visibility_condition(user_id: int, is_superadmin: bool):
 
 
 @router.get('/stats')
-async def dashboard_stats(user=Depends(get_current_user)):
-    cache_key = ('stats', user.id)
+async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_current_user)):
+    cache_key = ('stats', user.id, workspace_id)
     if cached := dashboard_cache.get(cache_key):
         return JSONResponse(cached)
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         tz = settings.tz
         now_local = datetime.now(tz)
         today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         today_start_utc = to_utc(today_start)
-        conditions = [Task.deleted_at.is_(None)]
+        conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
@@ -58,10 +59,11 @@ async def dashboard_stats(user=Depends(get_current_user)):
         ).where(*conditions))).one()
         total, done, in_progress, overdue = (int(value or 0) for value in task_counts)
         active_clients = int((await session.execute(select(func.count(Client.id)).where(
-            Client.deleted_at.is_(None), Client.status == 'active',
+            Client.deleted_at.is_(None), Client.status == 'active', Client.workspace_id == workspace.id,
         ))).scalar_one() or 0)
         ending_clients = int((await session.execute(select(func.count(Client.id)).where(
             Client.deleted_at.is_(None),
+            Client.workspace_id == workspace.id,
             Client.contract_end >= utc_now(),
             Client.contract_end <= utc_now() + timedelta(days=14),
         ))).scalar_one() or 0)
@@ -79,8 +81,8 @@ async def dashboard_stats(user=Depends(get_current_user)):
 
 
 @router.get('/chart')
-async def dashboard_chart(period: str = Query('month'), user=Depends(get_current_user)):
-    cache_key = ('chart', user.id, period)
+async def dashboard_chart(period: str = Query('month'), workspace_id: int = Query(None), user=Depends(get_current_user)):
+    cache_key = ('chart', user.id, period, workspace_id)
     if cached := dashboard_cache.get(cache_key):
         return JSONResponse(cached)
     tz = settings.tz
@@ -102,7 +104,8 @@ async def dashboard_chart(period: str = Query('month'), user=Depends(get_current
     start_day = start.replace(hour=0, minute=0, second=0, microsecond=0)
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        conditions = [Task.deleted_at.is_(None)]
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
@@ -129,13 +132,14 @@ async def dashboard_chart(period: str = Query('month'), user=Depends(get_current
 
 
 @router.get('/focus')
-async def dashboard_focus(limit: int = Query(7, ge=1, le=20), user=Depends(get_current_user)):
-    cache_key = ('focus', user.id, limit)
+async def dashboard_focus(limit: int = Query(7, ge=1, le=20), workspace_id: int = Query(None), user=Depends(get_current_user)):
+    cache_key = ('focus', user.id, limit, workspace_id)
     if cached := dashboard_cache.get(cache_key):
         return JSONResponse(cached)
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        conditions = [Task.deleted_at.is_(None), Task.status != 'done']
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        conditions = [Task.deleted_at.is_(None), Task.status != 'done', Task.workspace_id == workspace.id]
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
@@ -159,16 +163,17 @@ async def dashboard_focus(limit: int = Query(7, ge=1, le=20), user=Depends(get_c
 
 
 @router.get('/client-table')
-async def client_table(user=Depends(get_current_user)):
+async def client_table(workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         cs = ClientService(session)
-        clients = await cs.list_clients()
+        role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        clients = [c for c in await cs.list_clients() if (c.workspace_id or workspace.id) == workspace.id]
         task_rows = (await session.execute(select(
             Task.id, Task.client_id, Task.title, Task.status, Task.completion_date, Task.deadline,
             Task.created_at, Task.updated_at, Task.creator_id, Task.assignee_id,
-        ).where(Task.deleted_at.is_(None)))).all()
+        ).where(Task.deleted_at.is_(None), Task.workspace_id == workspace.id))).all()
         co_executor_rows = (await session.execute(select(TaskCoExecutor.task_id, TaskCoExecutor.user_id))).all()
-        role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
     co_executor_by_task = {}
     for task_id, co_executor_id in co_executor_rows:
@@ -194,19 +199,21 @@ async def client_table(user=Depends(get_current_user)):
 async def organization_overview(
     scope: str = Query('mine'),
     user_id: int | None = Query(None),
+    workspace_id: int = Query(None),
     user=Depends(get_current_user),
 ):
-    cache_key = ('organizations', user.id, scope, user_id)
+    cache_key = ('organizations', user.id, scope, user_id, workspace_id)
     if cached := dashboard_cache.get(cache_key):
         return JSONResponse(cached)
     async with async_session() as session:
-        clients = await ClientService(session).list_clients()
+        role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        clients = [c for c in await ClientService(session).list_clients() if (c.workspace_id or workspace.id) == workspace.id]
         task_rows = (await session.execute(select(
             Task.id, Task.client_id, Task.title, Task.status, Task.completion_date, Task.deadline,
             Task.created_at, Task.updated_at, Task.creator_id, Task.assignee_id,
-        ).where(Task.deleted_at.is_(None)))).all()
+        ).where(Task.deleted_at.is_(None), Task.workspace_id == workspace.id))).all()
         co_executor_rows = (await session.execute(select(TaskCoExecutor.task_id, TaskCoExecutor.user_id))).all()
-        role_names = await get_user_role_names(user.id)
         permissions = await get_user_permissions(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         can_view_team = user_is_superadmin(role_names) or permissions.get('all') or permissions.get('dashboard_team')
@@ -310,13 +317,14 @@ async def organization_overview(
 
 
 @router.get('/client-summaries')
-async def client_work_summaries(user=Depends(get_current_user)):
-    cache_key = ('client-summaries', user.id)
+async def client_work_summaries(workspace_id: int = Query(None), user=Depends(get_current_user)):
+    cache_key = ('client-summaries', user.id, workspace_id)
     if cached := dashboard_cache.get(cache_key):
         return JSONResponse(cached)
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        conditions = [Task.deleted_at.is_(None)]
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
@@ -341,11 +349,12 @@ async def client_work_summaries(user=Depends(get_current_user)):
 
 
 @router.get('/expiring')
-async def expiring_contracts(user=Depends(get_current_user)):
+async def expiring_contracts(workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         cs = ClientService(session)
-        clients = await cs.get_clients_ending_soon(days=14)
         role_names = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        clients = [c for c in await cs.get_clients_ending_soon(days=14) if (c.workspace_id or workspace.id) == workspace.id]
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
     return JSONResponse([{
         'id': c.id,

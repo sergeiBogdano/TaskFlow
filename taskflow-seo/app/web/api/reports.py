@@ -230,7 +230,9 @@ async def _ai_text(facts: dict[str, Any], model: str | None) -> tuple[str, str]:
         f"Факты JSON: {json.dumps(compact, ensure_ascii=False)}"
     )
     try:
-        text = await asyncio.to_thread(_ollama_generate, selected_model, prompt)
+        from app.core.ai_lock import ollama_lock
+        async with ollama_lock:
+            text = await asyncio.to_thread(_ollama_generate, selected_model, prompt)
         return text, selected_model
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         fallback = (
@@ -807,9 +809,29 @@ async def report_analytics(payload: AnalyticsPayload, user=Depends(get_current_u
     work_date = func.coalesce(Task.completion_date, Task.updated_at, Task.deadline, Task.created_at)
 
     async with async_session() as session:
+        from app.core.models import WorkspaceMember
+        from app.core.permissions import resolve_workspace, user_is_superadmin as _is_super
+        ws_ids: set[int] = set()
+        for cid in (payload.client_ids or []):
+            client = await session.get(Client, cid)
+            if client is None or client.deleted_at is not None:
+                continue
+            ws, _ = await resolve_workspace(session, user, role_names, client.workspace_id)
+            ws_ids.add(ws.id)
         client_query = select(Client.id, Client.org_name, Client.domain).where(Client.deleted_at.is_(None))
         if payload.client_ids:
             client_query = client_query.where(Client.id.in_(payload.client_ids))
+        if ws_ids:
+            client_query = client_query.where(Client.workspace_id.in_(ws_ids))
+        elif not _is_super(role_names):
+            member_ws = {
+                row[0] for row in (await session.execute(
+                    select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user.id)
+                )).all()
+            }
+            if not member_ws:
+                return JSONResponse({'period': {'start': payload.period_start.isoformat(), 'end': payload.period_end.isoformat()}, 'summary': {'organizations': 0, 'total': 0, 'completed': 0, 'other': 0, 'overdue': 0, 'without_modules': 0}, 'by_type': [], 'by_client': [], 'modules': []})
+            client_query = client_query.where(Client.workspace_id.in_(member_ws))
         clients = (await session.execute(client_query.order_by(Client.org_name))).all()
         client_id_set = {row.id for row in clients}
         empty = {'period': {'start': payload.period_start.isoformat(), 'end': payload.period_end.isoformat()}, 'summary': {'organizations': 0, 'total': 0, 'completed': 0, 'other': 0, 'overdue': 0, 'without_modules': 0}, 'by_type': [], 'by_client': [], 'modules': []}
