@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.core.ai_lock import ollama_lock
 from app.core.database import async_session
 from app.core.models import Client, User
 from app.core.permissions import get_current_user
@@ -259,7 +260,8 @@ async def parse_task_command(payload: TaskCommandPayload, user=Depends(get_curre
         f"Команда: {text}"
     )
     try:
-        parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
+        async with ollama_lock:
+            parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
     except Exception:
         parsed = _fallback_parse(text)
 
@@ -308,7 +310,8 @@ async def polish_text(payload: TextPolishPayload, user=Depends(get_current_user)
         f"Текст: {text}"
     )
     try:
-        parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
+        async with ollama_lock:
+            parsed = await asyncio.to_thread(_ollama_json, payload.model or OLLAMA_MODEL, prompt)
         html = _strip_code_fence(str(parsed.get("html") or "")).strip()
     except Exception as exc:
         return JSONResponse({"error": f"AI недоступен: {exc}"}, status_code=503)

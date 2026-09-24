@@ -121,3 +121,58 @@ def require_role(roles: list[str]):
                     return user
         raise HTTPException(status_code=403, detail="Forbidden")
     return check
+
+
+async def get_workspace_role(session, user_id: int, workspace_id: int) -> str | None:
+    from sqlalchemy import select
+    from app.core.models import WorkspaceMember
+    row = (await session.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    return row.role if row else None
+
+
+async def resolve_workspace(session, user, role_names: set[str], workspace_id: int | None):
+    """Возвращает воркспейс + роль пользователя в нём.
+
+    workspace_id=None означает воркспейс по умолчанию (первый).
+    Суперадмин имеет доступ везде.
+    """
+    from sqlalchemy import select
+    from app.core.models import Workspace
+    if workspace_id is None:
+        workspace = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+    else:
+        workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Воркспейс не найден")
+    if user_is_superadmin(role_names):
+        return workspace, "owner"
+    role = await get_workspace_role(session, user.id, workspace.id)
+    if role is None:
+        raise HTTPException(status_code=403, detail="Нет доступа к воркспейсу")
+    return workspace, role
+
+
+def workspace_role_rank(role: str | None) -> int:
+    return {"owner": 3, "admin": 2, "member": 1}.get(role or "", 0)
+
+
+def require_workspace_role(*allowed: str):
+    """Проверка роли внутри воркспейса (workspace_id из query)."""
+    async def check(request: Request, user=Depends(get_current_user)):
+        from sqlalchemy import select
+        from app.core.database import async_session
+        from app.core.models import Workspace
+        raw = request.query_params.get("workspace_id") or request.path_params.get("workspace_id")
+        workspace_id = int(raw) if raw and str(raw).isdigit() else None
+        async with async_session() as session:
+            role_names = await get_user_role_names(user.id)
+            workspace, role = await resolve_workspace(session, user, role_names, workspace_id)
+            if role not in allowed and not user_is_superadmin(role_names):
+                raise HTTPException(status_code=403, detail="Недостаточно прав в воркспейсе")
+            return {"user": user, "workspace": workspace, "role": role, "role_names": role_names}
+    return check

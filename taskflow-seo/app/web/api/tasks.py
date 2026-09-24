@@ -8,13 +8,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
-from app.core.models import Client, FileAttachment, Notification, Task, TaskCoExecutor, TaskComment
+from app.core.models import Client, FileAttachment, Notification, SprintTask, Task, TaskCoExecutor, TaskComment
 from app.core.permissions import (
     client_is_visible_to_user,
     get_accessible_client_ids,
     get_current_user,
     get_user_permissions,
     get_user_role_names,
+    resolve_workspace,
     task_is_editable_by_user,
     task_is_visible_to_user,
     user_is_superadmin,
@@ -245,7 +246,23 @@ def _task_to_dict(t: Task) -> dict:
         'visibility': t.visibility or 'public',
         'client_access_ids': json.loads(t.client_access_ids) if isinstance(t.client_access_ids, str) and t.client_access_ids else [],
         'deleted_at': safe_dt(t.deleted_at).isoformat() if t.deleted_at else None,
+        'sprint_ids': [],
     }
+
+
+async def _attach_sprint_ids(session, items: list[dict]) -> None:
+    ids = [item['id'] for item in items if isinstance(item.get('id'), int)]
+    if not ids:
+        return
+    rows = (await session.execute(
+        select(SprintTask.task_id, SprintTask.sprint_id).where(SprintTask.task_id.in_(ids))
+    )).all()
+    by_task: dict[int, list[int]] = {}
+    for task_id, sprint_id in rows:
+        by_task.setdefault(task_id, []).append(sprint_id)
+    for item in items:
+        if isinstance(item.get('id'), int):
+            item['sprint_ids'] = by_task.get(item['id'], [])
 
 
 def _client_accesses_for_task(task: Task) -> list[dict]:
@@ -281,6 +298,11 @@ async def _load_task_for_response(session, task_id: int) -> Task | None:
     return result.scalar_one_or_none()
 
 
+async def _assert_task_workspace(session, task: Task, user, role_names: set) -> tuple:
+    """403 если у пользователя нет доступа к воркспейсу задачи."""
+    return await resolve_workspace(session, user, role_names, task.workspace_id)
+
+
 @router.get('')
 @router.get('/all')
 async def list_tasks(
@@ -295,6 +317,8 @@ async def list_tasks(
     search: str = Query(None),
     scope: str = Query('mine'),
     scope_user_id: str = Query(None),
+    workspace_id: int = Query(None),
+    sprint_id: int = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=200),
     paginated: bool = Query(False),
@@ -304,7 +328,12 @@ async def list_tasks(
         role_names = await get_user_role_names(user.id)
         permissions = await get_user_permissions(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        conditions = [Task.deleted_at.is_(None)]
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
+        conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
+        if sprint_id:
+            conditions.append(Task.id.in_(
+                select(SprintTask.task_id).where(SprintTask.sprint_id == sprint_id)
+            ))
 
         scope_condition = _task_scope_condition(scope, user.id, role_names, permissions, scope_user_id)
         if scope_condition is not None:
@@ -347,25 +376,29 @@ async def list_tasks(
         if paginated:
             query = query.offset((page - 1) * page_size).limit(page_size)
             page_tasks = list((await session.execute(query)).scalars().unique().all())
+            items = [_task_to_dict(t) for t in page_tasks]
+            await _attach_sprint_ids(session, items)
             return JSONResponse({
-                'items': [_task_to_dict(t) for t in page_tasks],
+                'items': items,
                 'total': total,
                 'page': page,
                 'page_size': page_size,
             })
         tasks = list((await session.execute(query)).scalars().unique().all())
         result = [_task_to_dict(t) for t in tasks]
+        await _attach_sprint_ids(session, result)
     return JSONResponse(result)
 
 
 @router.get('/trash')
-async def list_trash(user=Depends(get_current_user)):
+async def list_trash(workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         result = await session.execute(
             select(Task).options(selectinload(Task.client))
-            .where(Task.deleted_at.is_not(None))
+            .where(Task.deleted_at.is_not(None), Task.workspace_id == workspace.id)
             .order_by(Task.deleted_at.desc())
         )
         tasks = [
@@ -377,14 +410,15 @@ async def list_trash(user=Depends(get_current_user)):
 
 
 @router.post('/trash/empty')
-async def empty_trash(user=Depends(get_current_user)):
+async def empty_trash(workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not ({'superadmin', 'admin'} & role_names):
             raise HTTPException(status_code=403, detail='Forbidden')
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         trash_tasks = (await session.execute(
-            select(Task).where(Task.deleted_at.is_not(None))
+            select(Task).where(Task.deleted_at.is_not(None), Task.workspace_id == workspace.id)
         )).scalars().all()
         count = len(trash_tasks)
         for task in trash_tasks:
@@ -422,6 +456,10 @@ async def bulk_update_tasks(data: dict, user=Depends(get_current_user)):
         for task in tasks:
             if not task_is_editable_by_user(task, user, role_names, accessible_client_ids):
                 continue
+            try:
+                await _assert_task_workspace(session, task, user, role_names)
+            except HTTPException:
+                continue
             if fields.get('deleted'):
                 task.deleted_at = utc_now()
                 updated += 1
@@ -432,6 +470,10 @@ async def bulk_update_tasks(data: dict, user=Depends(get_current_user)):
             next_completion_date = _parse_iso_datetime(fields.get('completion_date')) if 'completion_date' in fields else task.completion_date
             next_deadline = _parse_iso_datetime(fields.get('deadline')) if 'deadline' in fields else task.deadline
             await _ensure_client_access(session, user, role_names, accessible_client_ids, next_client_id)
+            if next_client_id != task.client_id and next_client_id is not None:
+                _new_client = await session.get(Client, next_client_id)
+                if _new_client is None or (_new_client.workspace_id or task.workspace_id) != task.workspace_id:
+                    continue
             await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids)
             _validate_task_dates(next_completion_date, next_deadline)
             await _validate_contract_task_dates(session, next_client_id, fields.get('no_contract', task.no_contract), next_completion_date, next_deadline)
@@ -462,6 +504,7 @@ async def restore_task(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, t, user, role_names)
         t.deleted_at = None
         await session.commit()
         await log_activity('task', task_id, 'restored', actor_user_id=user.id, summary=f'Задача #{task_id} восстановлена')
@@ -478,7 +521,10 @@ async def get_task(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
-    return JSONResponse(_task_to_dict(t))
+        await _assert_task_workspace(session, t, user, role_names)
+        data = _task_to_dict(t)
+        await _attach_sprint_ids(session, [data])
+    return JSONResponse(data)
 
 
 @router.get('/{task_id}/accesses')
@@ -492,6 +538,7 @@ async def get_task_accesses(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, permissions):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         return JSONResponse(_client_accesses_for_task(task))
 
 
@@ -505,6 +552,7 @@ async def task_activity(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
     logs = await list_activity(limit=100, entity_type='task', entity_id=task_id)
     return JSONResponse([{
         'id': log.id,
@@ -519,17 +567,22 @@ async def task_activity(task_id: int, user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_task(data: dict, user=Depends(get_current_user)):
+async def create_task(data: dict, workspace_id: int = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
         ts = TaskService(session)
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
+        workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         client_id = data.get('client_id')
         assignee_id = data.get('assignee_id')
         co_executor_ids = _normalize_co_executor_ids(data)
         dl = _parse_iso_datetime(data.get('deadline'))
         cd = _parse_iso_datetime(data.get('completion_date'))
         await _ensure_client_access(session, user, role_names, accessible_client_ids, client_id)
+        if client_id is not None:
+            _client = await session.get(Client, client_id)
+            if _client is None or (_client.workspace_id or workspace.id) != workspace.id:
+                raise HTTPException(status_code=400, detail='Client belongs to another workspace')
         await _ensure_assignees_valid_for_client(session, role_names, client_id, assignee_id, co_executor_ids)
         _validate_task_dates(cd, dl)
         await _validate_contract_task_dates(session, client_id, data.get('no_contract', False), cd, dl)
@@ -545,6 +598,7 @@ async def create_task(data: dict, user=Depends(get_current_user)):
             checklist=data.get('checklist'),
         )
         t.creator_id = user.id
+        t.workspace_id = workspace.id
         t.assignee_id = assignee_id
         await _set_task_co_executors(session, t, co_executor_ids)
         t.no_contract = data.get('no_contract', False)
@@ -567,11 +621,18 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, t, user, role_names)
+        if 'workspace_id' in data:
+            raise HTTPException(status_code=400, detail='Task workspace cannot be changed')
         old_assignee_ids = _assignment_user_ids(
             t.assignee_id,
             [link.user_id for link in t.co_executor_links] or ([t.co_executor_id] if t.co_executor_id else []),
         )
         next_client_id = data['client_id'] if 'client_id' in data else t.client_id
+        if next_client_id != t.client_id and next_client_id is not None:
+            new_client = await session.get(Client, next_client_id)
+            if new_client is None or (new_client.workspace_id or t.workspace_id) != t.workspace_id:
+                raise HTTPException(status_code=400, detail='Client belongs to another workspace')
         next_assignee_id = data['assignee_id'] if 'assignee_id' in data else t.assignee_id
         next_co_executor_ids = _normalize_co_executor_ids(data, [link.user_id for link in t.co_executor_links] or ([t.co_executor_id] if t.co_executor_id else []))
         next_deadline = _parse_iso_datetime(data.get('deadline')) if 'deadline' in data else t.deadline
@@ -674,6 +735,7 @@ async def delete_task(task_id: int, user=Depends(get_current_user)):
             accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
             if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
                 raise HTTPException(status_code=403, detail='Forbidden')
+            await _assert_task_workspace(session, t, user, role_names)
             t.deleted_at = utc_now()
             await session.commit()
         await log_activity('task', task_id, 'deleted', actor_user_id=user.id, summary=f'Задача #{task_id} удалена')
@@ -693,6 +755,7 @@ async def move_task(task_id: int, data: dict, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, t, user, role_names)
         old_status = t.status
         t.status = new_status
         await session.commit()
@@ -712,6 +775,7 @@ async def list_comments(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         r = await session.execute(
             select(TaskComment).where(TaskComment.task_id == task_id)
             .order_by(TaskComment.created_at)
@@ -739,6 +803,7 @@ async def add_comment(task_id: int, data: dict, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         c = TaskComment(
             task_id=task_id,
             user_id=user.id,
@@ -761,6 +826,7 @@ async def upload_file(task_id: int, file: UploadFile, user=Depends(get_current_u
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, t, user, role_names)
         data = await file.read()
         att = FileAttachment(
             task_id=task_id,
@@ -785,6 +851,7 @@ async def list_files(task_id: int, user=Depends(get_current_user)):
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         files = (await session.execute(
             select(FileAttachment).where(FileAttachment.task_id == task_id).order_by(FileAttachment.uploaded_at)
         )).scalars().all()
@@ -810,6 +877,7 @@ async def download_file(task_id: int, file_id: int, user=Depends(get_current_use
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         att = await session.get(FileAttachment, file_id)
         if not att or att.task_id != task_id:
             raise HTTPException(status_code=404, detail='File not found')
@@ -833,6 +901,7 @@ async def delete_task_file(task_id: int, file_id: int, user=Depends(get_current_
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_editable_by_user(task, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
+        await _assert_task_workspace(session, task, user, role_names)
         att = await session.get(FileAttachment, file_id)
         if not att or att.task_id != task_id:
             raise HTTPException(status_code=404, detail='File not found')

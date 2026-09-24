@@ -140,6 +140,19 @@ async def generate_tasks(module_id: int, data: dict = None, user=Depends(require
         m = await session.get(Module, module_id)
         if not m:
             raise HTTPException(status_code=404, detail='Module not found')
+        from app.core.models import Client
+        from app.core.permissions import get_user_role_names, resolve_workspace
+        role_names = await get_user_role_names(user.id)
+        client_ws: dict[int | None, int | None] = {}
+        for client_id in (_module_client_ids(m) or [None]):
+            if client_id is None:
+                client_ws[None] = None
+                continue
+            client = await session.get(Client, client_id)
+            if client is None:
+                raise HTTPException(status_code=404, detail='Client not found')
+            await resolve_workspace(session, user, role_names, client.workspace_id)
+            client_ws[client_id] = client.workspace_id
         count = data.get('count', 1) if data else 1
         templates = []
         if getattr(m, 'task_title_templates', None):
@@ -171,6 +184,7 @@ async def generate_tasks(module_id: int, data: dict = None, user=Depends(require
                     deadline=deadline,
                     creator_id=user.id,
                     notes=getattr(m, 'task_notes_template', None),
+                    workspace_id=client_ws.get(client_id),
                 )
                 session.add(t)
                 if m.assignee_id and m.assignee_id != user.id:

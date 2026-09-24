@@ -84,6 +84,7 @@ class Client(Base):
     accesses = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
 
     tasks = relationship('Task', back_populates='client', cascade='all, delete-orphan')
     reminders = relationship('Reminder', back_populates='client', foreign_keys='Reminder.client_id')
@@ -156,6 +157,7 @@ class Task(Base):
     co_executor_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     no_contract = Column(Boolean, default=False)
     visibility = Column(String(20), default='public')
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
 
     __table_args__ = (
         Index('ix_tasks_deadline_status', 'deadline', 'status'),
@@ -419,6 +421,7 @@ class Note(Base):
     is_public = Column(Boolean, default=False, index=True)
     folder_id = Column(Integer, ForeignKey('notes_folders.id', ondelete='SET NULL'), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -429,3 +432,82 @@ class Note(Base):
     __table_args__ = (
         Index('ix_notes_owner_deleted', 'user_id', 'deleted_at'),
     )
+
+
+WS_ROLE_OWNER = 'owner'
+WS_ROLE_ADMIN = 'admin'
+WS_ROLE_MEMBER = 'member'
+WS_ROLES = (WS_ROLE_OWNER, WS_ROLE_ADMIN, WS_ROLE_MEMBER)
+
+
+class Workspace(Base):
+    __tablename__ = 'workspaces'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    preset = Column(String(20), nullable=False, default='empty')
+    theme = Column(String(20), nullable=True)
+    dictionary = Column(Text, nullable=False, default='{}')
+    ai_instructions = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_workspaces_name', 'name'),
+    )
+
+
+class WorkspaceMember(Base):
+    __tablename__ = 'workspace_members'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default=WS_ROLE_MEMBER)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    workspace = relationship('Workspace', backref='member_links')
+    user = relationship('User', backref='workspace_links')
+
+    __table_args__ = (
+        Index('ix_workspace_member_unique', 'workspace_id', 'user_id', unique=True),
+    )
+
+
+class Sprint(Base):
+    __tablename__ = 'sprints'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    goal = Column(Text, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), nullable=False, default='active', index=True)
+    created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    workspace = relationship('Workspace', backref='sprints')
+
+
+class SprintTask(Base):
+    __tablename__ = 'sprint_tasks'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sprint_id = Column(Integer, ForeignKey('sprints.id', ondelete='CASCADE'), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey('tasks.id', ondelete='CASCADE'), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_sprint_task_unique', 'sprint_id', 'task_id', unique=True),
+    )
+
+
+class WorkspaceKnowledge(Base):
+    __tablename__ = 'workspace_knowledge'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    fact = Column(Text, nullable=False)
+    created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
