@@ -17,6 +17,7 @@ const Settings = lazy(() => import('./pages/Settings').then(module => ({ default
 const Modules = lazy(() => import('./pages/Modules').then(module => ({ default: module.Modules })));
 const Trash = lazy(() => import('./pages/Trash').then(module => ({ default: module.Trash })));
 const AiAnalytics = lazy(() => import('./pages/AiAnalytics').then(module => ({ default: module.AiAnalytics })));
+const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })));
 
 function PageLoader() {
   return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка раздела...</div>;
@@ -43,6 +44,7 @@ export default function App() {
                 <Route path="/reports" element={<PermissionRoute permission="reports"><Reports /></PermissionRoute>} />
                 <Route path="/trash" element={<PermissionRoute permission="tasks"><Trash /></PermissionRoute>} />
                 <Route path="/ai" element={<AiAnalytics />} />
+                <Route path="/notes" element={<Notes />} />
                 <Route path="/settings" element={<PermissionRoute permission="settings"><Settings /></PermissionRoute>} />
               </Route>
             </Route>

@@ -1272,6 +1272,14 @@ NOTIFICATION_ICONS = {
 }
 
 
+@router.get('/notes', summary='Доска заметок', description='Заметки с папками, тегами и поиском')
+async def notes_page(request: Request):
+    user = await current_user(request)
+    if not user:
+        return RedirectResponse(url='/login')
+    return templates.TemplateResponse(request, 'notes.html', ctx(request, user=user, page='notes'))
+
+
 @router.get('/notifications', summary='Уведомления', description='Страница уведомлений')
 async def notifications_page(request: Request):
     user = await current_user(request)

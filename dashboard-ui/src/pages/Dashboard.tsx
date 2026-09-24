@@ -65,23 +65,59 @@ export function Dashboard() {
   }
 
   const cards = [
-    { label: 'Видимых задач', value: stats.total, icon: ListTodo, color: 'var(--color-accent)', to: '/tasks' },
-    { label: 'В работе', value: stats.in_progress, icon: Clock3, color: 'var(--color-warning)', to: '/kanban' },
-    { label: 'Просрочено', value: stats.overdue, icon: AlertTriangle, color: 'var(--color-danger)', to: '/tasks?status=overdue' },
-    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', to: '/reports' },
+    { label: 'Видимых задач', value: stats.total, icon: ListTodo, color: 'var(--color-accent)', soft: 'rgba(43,38,32,.08)', to: '/tasks' },
+    { label: 'В работе', value: stats.in_progress, icon: Clock3, color: 'var(--color-warning)', soft: 'rgba(150,112,42,.13)', to: '/kanban' },
+    { label: 'Просрочено', value: stats.overdue, icon: AlertTriangle, color: 'var(--color-danger)', soft: 'rgba(188,90,72,.12)', to: '/tasks?status=overdue' },
+    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', soft: 'rgba(95,143,106,.13)', to: '/reports' },
   ];
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_.85fr]">
+        <div className="tf-panel-flat overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
+            <div><h2 className="text-sm font-bold">Фокус на сегодня</h2><p className="text-xs text-[var(--color-text-secondary)]">Ближайшие сроки и просрочки</p></div>
+            <button onClick={() => navigate('/tasks')} className="text-xs font-semibold text-[var(--color-accent)]">Все задачи</button>
+          </div>
+          <div className="divide-y divide-[var(--color-border)]/70">
+            {focusTasks.map(task => {
+              const meta = statusMeta[task.status as keyof typeof statusMeta] || statusMeta.todo;
+              const due = daysUntil(task.completion_date || task.deadline);
+              return (
+                <button key={task.id} onClick={() => navigate(`/tasks?task=${task.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)]">
+                  <span className="h-3 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} />
+                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{task.title}</div><div className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">{task.client || 'Без клиента'} · {formatDate(task.completion_date || task.deadline)}</div></div>
+                  <span className="text-xs font-semibold" style={{ color: due !== null && due < 0 ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>{due === null ? 'без срока' : due < 0 ? `${Math.abs(due)} дн. проср.` : due === 0 ? 'сегодня' : `${due} дн.`}</span>
+                </button>
+              );
+            })}
+            {focusTasks.length === 0 && <div className="p-6 text-center text-sm text-[var(--color-text-secondary)]">Нет срочных задач.</div>}
+          </div>
+        </div>
+
+        <div className="tf-panel-flat overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
+            <div><h2 className="text-sm font-bold">Договоры на исходе</h2><p className="text-xs text-[var(--color-text-secondary)]">Проверить продление или завершение работ</p></div>
+            <CalendarClock size={19} className="text-[var(--color-warning)]" />
+          </div>
+          <div className="divide-y divide-[var(--color-border)]/70">
+            {expiring.map(client => (
+              <button key={client.id} onClick={() => navigate(`/clients/${client.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)]">
+                <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{client.org_name}</div><div className="text-xs text-[var(--color-text-secondary)]">Окончание: {formatDate(client.contract_end)}</div></div>
+                <ArrowRight size={14} className="text-[var(--color-muted)]" />
+              </button>
+            ))}
+            {expiring.length === 0 && <div className="p-6 text-sm text-[var(--color-text-secondary)]">Нет договоров на исходе.</div>}
+          </div>
+        </div>
+      </section>
+
+      <section className="tf-panel-flat flex flex-wrap items-center gap-x-8 gap-y-2 px-5 py-3">
         {cards.map(card => (
-          <button key={card.label} onClick={() => navigate(card.to)} className="tf-panel-flat p-4 text-left hover:border-[var(--color-border-strong)]">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="grid h-9 w-9 place-items-center rounded-lg" style={{ background: `${card.color}22`, color: card.color }}><card.icon size={18} /></div>
-              <ArrowRight size={15} className="text-[var(--color-muted)]" />
-            </div>
-            <div className="text-3xl font-black" style={{ color: card.color }}>{card.value}</div>
-            <div className="mt-1 text-sm text-[var(--color-text-secondary)]">{card.label}</div>
+          <button key={card.label} onClick={() => navigate(card.to)} className="group flex min-w-0 items-center gap-3 py-1 text-left">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: card.soft, color: card.color }}><card.icon size={19} /></span>
+            <span className="text-2xl font-semibold tracking-tight" style={{ color: card.color }}>{card.value}</span>
+            <span className="text-[13px] text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">{card.label}</span>
           </button>
         ))}
       </section>
@@ -90,7 +126,7 @@ export function Dashboard() {
         <div className="border-b border-[var(--color-border)] p-4 lg:p-5">
           <div className="flex flex-wrap items-start gap-3">
             <div>
-              <div className="flex items-center gap-2"><Building2 size={18} className="text-[var(--color-accent)]" /><h2 className="text-base font-bold">{scope === 'mine' && !selectedUserId ? 'Мои организации' : 'Организации команды'}</h2></div>
+              <div className="flex items-center gap-2"><Building2 size={19} className="text-[var(--color-accent)]" /><h2 className="text-base font-bold">{scope === 'mine' && !selectedUserId ? 'Мои организации' : 'Организации команды'}</h2></div>
               <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Где идёт работа, что требует внимания и с кем давно не было активности.</p>
             </div>
             {overview?.can_view_team && (
@@ -132,59 +168,23 @@ export function Dashboard() {
         )}
       </section>
 
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_.85fr]">
-        <div className="tf-panel-flat overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
-            <div><h2 className="text-sm font-bold">Фокус на сегодня</h2><p className="text-xs text-[var(--color-text-secondary)]">Ближайшие сроки и просрочки</p></div>
-            <button onClick={() => navigate('/tasks')} className="text-xs font-semibold text-[var(--color-accent)]">Все задачи</button>
-          </div>
-          <div className="divide-y divide-[var(--color-border)]/70">
-            {focusTasks.map(task => {
-              const meta = statusMeta[task.status as keyof typeof statusMeta] || statusMeta.todo;
-              const due = daysUntil(task.completion_date || task.deadline);
-              return (
-                <button key={task.id} onClick={() => navigate(`/tasks?task=${task.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)]">
-                  <span className="h-3 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} />
-                  <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{task.title}</div><div className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">{task.client || 'Без клиента'} · {formatDate(task.completion_date || task.deadline)}</div></div>
-                  <span className="text-xs font-semibold" style={{ color: due !== null && due < 0 ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>{due === null ? 'без срока' : due < 0 ? `${Math.abs(due)} дн. проср.` : due === 0 ? 'сегодня' : `${due} дн.`}</span>
-                </button>
-              );
-            })}
-            {focusTasks.length === 0 && <div className="p-6 text-center text-sm text-[var(--color-text-secondary)]">Нет срочных задач.</div>}
-          </div>
-        </div>
-
-        <div className="tf-panel-flat overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
-            <div><h2 className="text-sm font-bold">Договоры на исходе</h2><p className="text-xs text-[var(--color-text-secondary)]">Проверить продление или завершение работ</p></div>
-            <CalendarClock size={17} className="text-[var(--color-warning)]" />
-          </div>
-          <div className="divide-y divide-[var(--color-border)]/70">
-            {expiring.map(client => (
-              <button key={client.id} onClick={() => navigate(`/clients/${client.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-2)]">
-                <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{client.org_name}</div><div className="text-xs text-[var(--color-text-secondary)]">Окончание: {formatDate(client.contract_end)}</div></div>
-                <ArrowRight size={14} className="text-[var(--color-muted)]" />
-              </button>
-            ))}
-            {expiring.length === 0 && <div className="p-6 text-sm text-[var(--color-text-secondary)]">Нет договоров на исходе.</div>}
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
 
 function OrganizationRow({ item, onOpenClient, onOpenTasks }: { item: OrganizationOverviewItem; onOpenClient: () => void; onOpenTasks: () => void }) {
   return (
-    <div className="grid gap-3 px-4 py-4 hover:bg-[var(--color-surface-2)]/55 lg:grid-cols-[minmax(220px,1.25fr)_repeat(4,82px)_minmax(220px,1fr)_auto] lg:items-center">
+    <div className="grid gap-2 px-4 py-3.5 hover:bg-[var(--color-surface-2)]/55 lg:grid-cols-[minmax(220px,1.15fr)_minmax(0,1.5fr)_minmax(200px,.95fr)_auto] lg:items-center lg:gap-4">
       <button type="button" onClick={onOpenClient} className="min-w-0 text-left">
         <div className="flex items-center gap-2"><span className="truncate text-sm font-bold">{item.name}</span>{item.needs_attention && <AlertTriangle size={14} className="shrink-0 text-[var(--color-warning)]" />}</div>
         <div className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">{item.domain || 'Без домена'} · {item.responsible_users.join(', ') || 'Без ответственного'}</div>
       </button>
-      <Metric label="Активно" value={item.active} />
-      <Metric label="Просрочено" value={item.overdue} tone={item.overdue ? 'danger' : undefined} />
-      <Metric label="На неделе" value={item.due_soon} tone={item.due_soon ? 'warning' : undefined} />
-      <Metric label="Готово" value={item.done_this_month} tone="success" />
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1">
+        <InlineMetric label="Активно" value={item.active} />
+        <InlineMetric label="Просрочено" value={item.overdue} tone={item.overdue ? 'danger' : undefined} />
+        <InlineMetric label="На неделе" value={item.due_soon} tone={item.due_soon ? 'warning' : undefined} />
+        <InlineMetric label="Готово" value={item.done_this_month} tone="success" />
+      </div>
       <div className="min-w-0 text-xs">
         <div className="truncate font-semibold">{item.nearest_task?.title || 'Нет ближайшей задачи'}</div>
         <div className={item.is_stale ? 'mt-1 text-[var(--color-warning)]' : 'mt-1 text-[var(--color-text-secondary)]'}>{activityLabel(item)}</div>
@@ -194,9 +194,14 @@ function OrganizationRow({ item, onOpenClient, onOpenTasks }: { item: Organizati
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone?: 'danger' | 'warning' | 'success' }) {
-  const color = tone === 'danger' ? 'var(--color-danger)' : tone === 'warning' ? 'var(--color-warning)' : tone === 'success' ? 'var(--color-success)' : 'var(--color-text-primary)';
-  return <div><div className="text-base font-black" style={{ color }}>{value}</div><div className="text-[11px] text-[var(--color-muted)]">{label}</div></div>;
+function InlineMetric({ label, value, tone }: { label: string; value: number; tone?: 'danger' | 'warning' | 'success' }) {
+  const color = tone === 'danger' ? 'var(--color-danger)' : tone === 'warning' ? 'var(--color-warning)' : tone === 'success' ? 'var(--color-success)' : 'var(--color-text)';
+  return (
+    <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-[17px] font-semibold tracking-tight" style={{ color }}>{value}</span>
+      <span className="text-[11.5px] text-[var(--color-muted)]">{label}</span>
+    </span>
+  );
 }
 
 function activityLabel(item: OrganizationOverviewItem) {

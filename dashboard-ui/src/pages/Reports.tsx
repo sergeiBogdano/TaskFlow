@@ -207,10 +207,15 @@ export function Reports() {
                 В модель отправляется только короткая сводка по задачам, без доступов и больших текстов.
               </p>
               {useAi && (
-                <select className="tf-input mt-3" value={aiModel} onChange={event => setAiModel(event.target.value)}>
-                  {models.length === 0 && <option value="">Модели не найдены</option>}
-                  {models.map(model => <option key={model} value={model}>{model}</option>)}
-                </select>
+                <div className="mt-3">
+                  <SearchSelect
+                    value={aiModel}
+                    options={models.map(model => ({ value: model, label: model }))}
+                    onChange={setAiModel}
+                    placeholder="Выбрать модель"
+                    searchPlaceholder="Найти модель..."
+                  />
+                </div>
               )}
             </div>
 

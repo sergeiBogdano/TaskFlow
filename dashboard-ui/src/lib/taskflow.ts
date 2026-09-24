@@ -10,21 +10,21 @@ import {
 } from 'lucide-react';
 
 export const statusMeta = {
-  todo: { label: 'Создана', short: 'Новая', color: '#60a5fa', soft: 'rgba(96,165,250,.14)', icon: Circle },
-  in_progress: { label: 'В работе', short: 'В работе', color: '#facc15', soft: 'rgba(250,204,21,.14)', icon: Loader2 },
-  waiting: { label: 'В ожидании', short: 'Ожидание', color: '#d1d5db', soft: 'rgba(209,213,219,.12)', icon: PauseCircle },
-  client_check: { label: 'На проверке', short: 'Проверка', color: '#fb923c', soft: 'rgba(251,146,60,.14)', icon: Eye },
-  done: { label: 'Готово', short: 'Готово', color: '#4ade80', soft: 'rgba(74,222,128,.14)', icon: CheckCircle2 },
-  overdue: { label: 'Просрочено', short: 'Просрочено', color: '#f87171', soft: 'rgba(248,113,113,.14)', icon: AlertTriangle },
+  todo: { label: 'Создана', short: 'Новая', color: '#a39a8c', soft: 'rgba(163,154,140,.18)', icon: Circle },
+  in_progress: { label: 'В работе', short: 'В работе', color: '#2b2620', soft: 'rgba(43,38,32,.1)', icon: Loader2 },
+  waiting: { label: 'В ожидании', short: 'Ожидание', color: '#c9c2b4', soft: 'rgba(201,194,180,.25)', icon: PauseCircle },
+  client_check: { label: 'На проверке', short: 'Проверка', color: '#6d6355', soft: 'rgba(109,99,85,.14)', icon: Eye },
+  done: { label: 'Готово', short: 'Готово', color: '#5f8f6a', soft: 'rgba(95,143,106,.14)', icon: CheckCircle2 },
+  overdue: { label: 'Просрочено', short: 'Просрочено', color: '#bc5a48', soft: 'rgba(188,90,72,.13)', icon: AlertTriangle },
 } as const;
 
 export const workflowStatuses = ['todo', 'in_progress', 'waiting', 'client_check', 'overdue', 'done'] as const;
 
 export const priorityMeta = {
-  low: { label: 'Низкий', color: '#94a3b8' },
-  medium: { label: 'Средний', color: '#facc15' },
-  high: { label: 'Высокий', color: '#fb923c' },
-  critical: { label: 'Критический', color: '#f87171' },
+  low: { label: 'Низкий', color: '#b3aa9c' },
+  medium: { label: 'Средний', color: '#6d6355' },
+  high: { label: 'Высокий', color: '#2b2620' },
+  critical: { label: 'Критический', color: '#bc5a48' },
 } as const;
 
 export const taskTypeMeta: Record<string, string> = {
