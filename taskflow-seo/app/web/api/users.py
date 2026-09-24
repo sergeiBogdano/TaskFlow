@@ -66,6 +66,13 @@ async def create_user(request: Request, user=Depends(get_current_user)):
         await session.flush()
         if target_ws is not None:
             session.add(WorkspaceMember(workspace_id=target_ws.id, user_id=u.id, role=ws_role))
+        else:
+            # Новый пользователь без явного окружения попадает в воркспейс
+            # по умолчанию участником — иначе он не увидит вообще ничего.
+            from app.core.models import Workspace
+            default_ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+            if default_ws is not None:
+                session.add(WorkspaceMember(workspace_id=default_ws.id, user_id=u.id, role="member"))
         await session.commit()
         await session.refresh(u)
     return JSONResponse({'id': u.id, 'username': u.username}, status_code=201)

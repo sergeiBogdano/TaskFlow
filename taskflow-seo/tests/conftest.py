@@ -46,7 +46,7 @@ async def admin_cookies(client):
 async def executor_cookies(client):
     from app.core.auth import hash_password
     from app.core.database import async_session
-    from app.core.models import Role, User, UserRole
+    from app.core.models import Role, User, UserRole, Workspace, WorkspaceMember
     from sqlalchemy import select
 
     async with async_session() as session:
@@ -71,6 +71,19 @@ async def executor_cookies(client):
             )).scalar_one_or_none()
             if not link:
                 session.add(UserRole(user_id=existing.id, role_id=executor_role.id))
+                await session.commit()
+
+        # Как и создание через API: участник дефолтного воркспейса
+        default_ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+        if default_ws is not None:
+            membership = (await session.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == default_ws.id,
+                    WorkspaceMember.user_id == existing.id,
+                )
+            )).scalar_one_or_none()
+            if membership is None:
+                session.add(WorkspaceMember(workspace_id=default_ws.id, user_id=existing.id, role='member'))
                 await session.commit()
 
     resp = await client.post(
