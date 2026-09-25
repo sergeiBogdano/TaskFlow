@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { BookOpen, KeyRound, Plus, Settings2, Trash2, UsersRound, X } from 'lucide-react';
+import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
 import { api, type WorkspaceDetail, type WorkspaceMember } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { referenceCache } from '../api/cache';
 import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
+import { refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
 
 export function WorkspaceSettings() {
   const { user, hasRole } = useAuth();
@@ -329,6 +330,12 @@ export function WorkspaceSettings() {
       </section>
 
       <section className="tf-panel-flat p-5">
+        <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Переименование и скрытие пунктов меню, полей и заголовков. Применяется сразу. Таблица задач и новые поля — не входят (таблица с фиксированной сеткой).</p>
+        <UiEditor detail={detail} canManage={canManage} onSaved={load} />
+      </section>
+
+      <section className="tf-panel-flat p-5">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><BookOpen size={16} />База знаний AI</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Факты подмешиваются в ответы AI и аналитику. Добавлять можно и из чата командой «запомни ...».</p>
         {canManage && (
@@ -359,6 +366,267 @@ export function WorkspaceSettings() {
           <button type="button" onClick={deleteWorkspace} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить окружение</button>
         </section>
       )}
+    </div>
+  );
+}
+
+const KNOWN_ROUTES = [
+  { to: '/', label: 'Дашборд' },
+  { to: '/tasks', label: 'Задачи' },
+  { to: '/sprints', label: 'Спринты' },
+  { to: '/kanban', label: 'Канбан' },
+  { to: '/calendar', label: 'Календарь' },
+  { to: '/notifications', label: 'Уведомления' },
+  { to: '/trash', label: 'Корзина' },
+  { to: '/clients', label: 'Клиенты' },
+  { to: '/modules', label: 'Модули' },
+  { to: '/reports', label: 'Отчёты' },
+  { to: '/ai', label: 'AI-аналитика' },
+  { to: '/notes', label: 'Заметки' },
+  { to: '/users', label: 'Пользователи' },
+  { to: '/settings', label: 'Настройки' },
+  { to: '/workspace', label: 'Окружение' },
+];
+
+const TITLE_DEFAULTS: Record<string, string> = {
+  '/': 'Командный обзор',
+  '/tasks': 'Задачи',
+  '/sprints': 'Спринты',
+  '/kanban': 'Канбан',
+  '/clients': 'Клиенты',
+  '/modules': 'Модули',
+  '/calendar': 'Календарь',
+  '/notifications': 'Уведомления',
+  '/users': 'Пользователи',
+  '/reports': 'Отчёты',
+  '/trash': 'Корзина',
+  '/notes': 'Заметки',
+  '/ai': 'AI-аналитика',
+  '/workspace': 'Окружение',
+  '/settings': 'Настройки',
+};
+
+function UiEditor({ detail, canManage, onSaved }: {
+  detail: WorkspaceDetail;
+  canManage: boolean;
+  onSaved: () => void;
+}) {
+  const [tab, setTab] = useState<'menu' | 'tasks' | 'sprints' | 'titles'>('menu');
+  const [cfg, setCfg] = useState<UiConfig>(() => (
+    detail.ui_config && typeof detail.ui_config === 'object' ? detail.ui_config as UiConfig : {}
+  ));
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const setNav = (to: string, patch: Record<string, any>) => {
+    setCfg(prev => ({ ...prev, nav: { ...(prev.nav || {}), [to]: { ...(prev.nav?.[to] || {}), ...patch } } }));
+  };
+  const setTitle = (path: string, value: string) => {
+    setCfg(prev => ({ ...prev, titles: { ...(prev.titles || {}), [path]: value } }));
+  };
+  const setTaskField = (key: string, patch: Record<string, any>) => {
+    setCfg(prev => ({
+      ...prev,
+      tasks: { fields: { ...((prev.tasks || {}).fields || {}), [key]: { ...((prev.tasks || {}).fields || {})[key], ...patch } } },
+    }));
+  };
+  const setSprintField = (key: string, patch: Record<string, any>) => {
+    setCfg(prev => ({
+      ...prev,
+      sprints: { fields: { ...((prev.sprints || {}).fields || {}), [key]: { ...((prev.sprints || {}).fields || {})[key], ...patch } } },
+    }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMsg('');
+    try {
+      const updated = await api.updateWorkspace(detail.id, { ui_config: cfg });
+      try {
+        localStorage.setItem('taskflow:workspace-detail', JSON.stringify({ ...detail, ui_config: (updated as any).ui_config ?? cfg }));
+      } catch {
+        /* ignore */
+      }
+      refreshUiConfig();
+      setMsg('Применено. Откройте разделы — увидите изменения.');
+      onSaved();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Не удалось сохранить.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reset = () => {
+    if (!confirm('Сбросить всё оформление к стандартному?')) return;
+    setCfg({});
+  };
+
+  const visibleNav = KNOWN_ROUTES.filter(r => cfg.nav?.[r.to]?.visible !== false);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {([
+          ['menu', 'Меню'],
+          ['tasks', 'Задачи'],
+          ['sprints', 'Спринты'],
+          ['titles', 'Заголовки'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={tab === key ? 'tf-button tf-button-primary' : 'tf-button'}
+          >
+            {label}
+          </button>
+        ))}
+        <div className="ml-auto flex gap-2">
+          <button type="button" onClick={reset} disabled={!canManage} className="tf-button" title="Сбросить к стандартному">
+            <RotateCcw size={15} />Сброс
+          </button>
+          <button type="button" onClick={save} disabled={saving || !canManage} className="tf-button tf-button-primary">
+            {saving ? 'Сохранение...' : 'Применить'}
+          </button>
+        </div>
+      </div>
+
+      {tab === 'menu' && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+          <div className="space-y-2">
+            {KNOWN_ROUTES.map(route => {
+              const item = cfg.nav?.[route.to] || {};
+              const hidden = item.visible === false;
+              return (
+                <div key={route.to} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                  <input
+                    className="tf-input h-9 min-w-0 flex-1 text-sm"
+                    value={item.label ?? ''}
+                    onChange={event => setNav(route.to, { label: event.target.value })}
+                    placeholder={route.label}
+                    disabled={!canManage}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setNav(route.to, { visible: hidden ? undefined : false })}
+                    disabled={!canManage}
+                    title={hidden ? 'Показать' : 'Скрыть'}
+                    aria-label={hidden ? `Показать ${route.label}` : `Скрыть ${route.label}`}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
+                  >
+                    {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              );
+            })}
+            <p className="text-xs text-[var(--color-muted)]">Порядок пунктов меняется перетаскиванием в самом меню. Скрытый пункт не удаляется — его можно вернуть.</p>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">Предпросмотр</div>
+            <div className="space-y-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+              {visibleNav.map(route => (
+                <div key={route.to} className="truncate rounded-lg bg-[var(--color-overlay)] px-3 py-2 text-sm font-medium">
+                  {(cfg.nav?.[route.to]?.label || '').trim() || route.label}
+                </div>
+              ))}
+              {visibleNav.length === 0 && <div className="p-3 text-sm text-[var(--color-danger)]">Скрыто всё — так нельзя, оставьте хоть один пункт.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'tasks' && (
+        <div className="space-y-2">
+          {Object.entries(TASK_FIELD_DEFAULTS).map(([key, defLabel]) => {
+            const item = cfg.tasks?.fields?.[key] || {};
+            const hideable = key !== 'title';
+            const hidden = hideable && item.visible === false;
+            return (
+              <div key={key} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{defLabel}</span>
+                <input
+                  className="tf-input h-9 min-w-0 flex-1 text-sm"
+                  value={item.label ?? ''}
+                  onChange={event => setTaskField(key, { label: event.target.value })}
+                  placeholder={defLabel}
+                  disabled={!canManage}
+                />
+                {hideable ? (
+                  <button
+                    type="button"
+                    onClick={() => setTaskField(key, { visible: hidden ? undefined : false })}
+                    disabled={!canManage}
+                    title={hidden ? 'Показать' : 'Скрыть'}
+                    aria-label={hidden ? `Показать ${defLabel}` : `Скрыть ${defLabel}`}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
+                  >
+                    {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                ) : (
+                  <span className="tf-chip shrink-0">обязательно</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'sprints' && (
+        <div className="space-y-2">
+          {Object.entries(SPRINT_FIELD_DEFAULTS).map(([key, defLabel]) => {
+            const item = cfg.sprints?.fields?.[key] || {};
+            const hideable = key !== 'name';
+            const hidden = hideable && item.visible === false;
+            return (
+              <div key={key} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{defLabel}</span>
+                <input
+                  className="tf-input h-9 min-w-0 flex-1 text-sm"
+                  value={item.label ?? ''}
+                  onChange={event => setSprintField(key, { label: event.target.value })}
+                  placeholder={defLabel}
+                  disabled={!canManage}
+                />
+                {hideable ? (
+                  <button
+                    type="button"
+                    onClick={() => setSprintField(key, { visible: hidden ? undefined : false })}
+                    disabled={!canManage}
+                    title={hidden ? 'Показать' : 'Скрыть'}
+                    aria-label={hidden ? `Показать ${defLabel}` : `Скрыть ${defLabel}`}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
+                  >
+                    {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                ) : (
+                  <span className="tf-chip shrink-0">обязательно</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'titles' && (
+        <div className="space-y-2">
+          {KNOWN_ROUTES.filter(r => TITLE_DEFAULTS[r.to]).map(route => (
+            <div key={route.to} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+              <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{route.to}</span>
+              <input
+                className="tf-input h-9 min-w-0 flex-1 text-sm"
+                value={cfg.titles?.[route.to] ?? ''}
+                onChange={event => setTitle(route.to, event.target.value)}
+                placeholder={TITLE_DEFAULTS[route.to]}
+                disabled={!canManage}
+              />
+            </div>
+          ))}
+          <p className="text-xs text-[var(--color-muted)]">Заголовок сверху страницы. Пусто — стандартный.</p>
+        </div>
+      )}
+
+      {msg && <div className="text-sm font-semibold text-[var(--color-text-secondary)]">{msg}</div>}
     </div>
   );
 }

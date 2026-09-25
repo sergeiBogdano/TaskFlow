@@ -328,6 +328,7 @@ export type Workspace = {
 
 export type WorkspaceDetail = Workspace & {
   ai_instructions: string;
+  ui_config?: Record<string, any>;
 };
 
 export type WorkspaceMember = {
