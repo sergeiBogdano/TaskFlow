@@ -449,6 +449,7 @@ class Workspace(Base):
     theme = Column(String(20), nullable=True)
     dictionary = Column(Text, nullable=False, default='{}')
     ai_instructions = Column(Text, nullable=True)
+    ui_config = Column(Text, nullable=False, default='{}')
     created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
