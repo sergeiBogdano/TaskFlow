@@ -232,7 +232,6 @@ class TestSprints:
 
 
 class TestKnowledge:
-
     def test_chat_remember(self, sync_request, admin_cookies):
         ws = _make_workspace(sync_request, admin_cookies, "Память ТС")
         resp = sync_request(
@@ -244,3 +243,32 @@ class TestKnowledge:
         assert resp.json()["intent"] == "remember"
         resp = sync_request("GET", f"/api/workspaces/{ws['id']}/knowledge", cookies=admin_cookies)
         assert any("пятницам" in f["fact"] for f in resp.json())
+
+
+class TestUiConfig:
+
+    def test_patch_and_read(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Интерфейс ТС")
+        cfg = {"nav": {"/tasks": {"label": "Дела", "visible": False}}, "titles": {"/tasks": "Дела"}}
+        resp = sync_request("PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": cfg}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        resp = sync_request("GET", f"/api/workspaces/{ws['id']}", cookies=admin_cookies)
+        assert resp.json()["ui_config"]["nav"]["/tasks"]["label"] == "Дела"
+
+    def test_rejects_non_dict_and_oversize(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Интерфейс лимиты ТС")
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": ["nope"]}, cookies=admin_cookies
+        )
+        assert resp.status_code in (400, 422)
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": {"x": "y" * 60000}}, cookies=admin_cookies
+        )
+        assert resp.status_code == 400
+
+    def test_member_cannot_patch(self, sync_request, admin_cookies, executor_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Интерфейс чужой ТС")
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": {}}, cookies=executor_cookies
+        )
+        assert resp.status_code == 403

@@ -65,6 +65,14 @@ PRESETS: dict[str, dict] = {
 }
 
 
+def _parse_ui_config(raw) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _ws_to_dict(ws: Workspace, role: str) -> dict:
     try:
         dictionary = json.loads(ws.dictionary or "{}")
@@ -77,6 +85,7 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
         "theme": ws.theme,
         "dictionary": dictionary,
         "has_ai_instructions": bool(ws.ai_instructions),
+        "ui_config": _parse_ui_config(ws.ui_config),
         "role": role,
         "created_at": ws.created_at.isoformat() if ws.created_at else None,
     }
@@ -162,6 +171,7 @@ class WorkspaceUpdate(BaseModel):
     theme: str | None = None
     dictionary: dict | None = None
     ai_instructions: str | None = None
+    ui_config: dict | None = None
 
 
 @router.patch("/{workspace_id}")
@@ -185,6 +195,13 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
             ws.dictionary = json.dumps(clean, ensure_ascii=False)
         if payload.ai_instructions is not None:
             ws.ai_instructions = payload.ai_instructions[:10000] or None
+        if payload.ui_config is not None:
+            if not isinstance(payload.ui_config, dict):
+                return JSONResponse({"error": "ui_config должен быть объектом"}, status_code=400)
+            raw = json.dumps(payload.ui_config, ensure_ascii=False)
+            if len(raw) > 50000:
+                return JSONResponse({"error": "Слишком большой ui_config"}, status_code=400)
+            ws.ui_config = raw
         await session.commit()
         await session.refresh(ws)
         role = await get_workspace_role(session, ctx["user"].id, ws.id) or ctx["role"]

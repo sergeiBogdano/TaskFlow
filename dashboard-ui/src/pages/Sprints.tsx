@@ -3,6 +3,7 @@ import { CalendarDays, Flag, Plus, Target, Trash2, X } from 'lucide-react';
 import { api, type Sprint, type SprintDetail, type Task } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { formatDate, cn } from '../lib/taskflow';
+import { sprintField } from '../lib/uiconfig';
 
 export function Sprints() {
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -150,20 +151,22 @@ function SprintCreateModal({ onClose, onCreated }: { onClose: () => void; onCrea
         <div className="mb-4 text-base font-bold">Новый спринт</div>
         <div className="space-y-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
+            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('name').label}</span>
             <input className="tf-input" value={name} onChange={event => setName(event.target.value)} placeholder="Например: Неделя 1" maxLength={200} required autoFocus />
           </label>
+          {sprintField('goal').visible && (
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Цель</span>
+            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('goal').label}</span>
             <input className="tf-input" value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
           </label>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Начало</span>
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('start').label}</span>
               <input className="tf-input" type="date" value={start} onChange={event => setStart(event.target.value)} />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Конец</span>
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('end').label}</span>
               <input className="tf-input" type="date" value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
             </label>
           </div>
@@ -302,20 +305,20 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Цель спринта</span>
-                  <input className="tf-input" value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Начало</span>
-                  <input className="tf-input" type="date" value={start} onChange={event => setStart(event.target.value)} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Конец</span>
-                  <input className="tf-input" type="date" value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
-                </label>
-              </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('goal').label}</span>
+              <input className="tf-input" value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('start').label}</span>
+              <input className="tf-input" type="date" value={start} onChange={event => setStart(event.target.value)} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('end').label}</span>
+              <input className="tf-input" type="date" value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
+            </label>
+          </div>
               <div className="text-xs text-[var(--color-text-secondary)]">
                 {detail.start_date || detail.end_date
                   ? <>Сроки: {detail.start_date ? formatDate(detail.start_date) : '—'} — {detail.end_date ? formatDate(detail.end_date) : '—'}</>

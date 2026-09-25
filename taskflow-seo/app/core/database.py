@@ -125,6 +125,7 @@ async def _migrate():
             'ALTER TABLE tasks ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
             'ALTER TABLE clients ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
             'ALTER TABLE notes ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+            'ALTER TABLE workspaces ADD COLUMN ui_config TEXT DEFAULT \'{}\'',
         ]:
             try:
                 await conn.execute(text(col))
@@ -154,6 +155,7 @@ async def _ensure_indexes():
                 await conn.execute(text('ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
                 await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
                 await conn.execute(text('ALTER TABLE notes ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
+                await conn.execute(text('ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\''))
         except Exception as e:
             logger.warning('Column migration error for client_warning: %s', e)
 
