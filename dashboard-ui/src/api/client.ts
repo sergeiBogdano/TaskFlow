@@ -324,6 +324,7 @@ export type Workspace = {
   has_ai_instructions: boolean;
   role: string;
   created_at: string | null;
+  deleted_at?: string | null;
 };
 
 export type WorkspaceDetail = Workspace & {
@@ -720,14 +721,16 @@ export const api = {
     request<{ ok: boolean; moved_notes: number }>(`/api/notes/folders/${id}`, { method: 'DELETE' }),
 
   // Workspaces
-  getWorkspaces: () => request<Workspace[]>('/api/workspaces'),
+  getWorkspaces: (deleted?: boolean) => request<Workspace[]>(`/api/workspaces${deleted ? '?deleted=true' : ''}`),
   createWorkspace: (name: string, preset: string) =>
     request<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, preset }) }),
   getWorkspace: (id: number) => request<WorkspaceDetail>(`/api/workspaces/${id}`),
   updateWorkspace: (id: number, data: Record<string, any>) =>
     request<Workspace>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteWorkspace: (id: number) =>
-    request<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  deleteWorkspace: (id: number, permanent?: boolean) =>
+    request<{ ok: boolean; permanent: boolean }>(`/api/workspaces/${id}${permanent ? '?permanent=true' : ''}`, { method: 'DELETE' }),
+  restoreWorkspace: (id: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}/restore`, { method: 'POST' }),
   getWsMembers: (id: number) => request<WorkspaceMember[]>(`/api/workspaces/${id}/members`),
   addWsMember: (id: number, userId: number, role: string) =>
     request<WorkspaceMember>(`/api/workspaces/${id}/members`, {
