@@ -130,7 +130,7 @@ async def set_role(user_id: int, request: Request, user=Depends(require_role(['s
         r = await session.get(Role, role_id)
         if not r:
             raise HTTPException(status_code=404, detail='Role not found')
-        if r.name == 'superadmin':
+        if r.name == 'superadmin' and not user_is_superadmin(await get_user_role_names(user.id)):
             raise HTTPException(status_code=403, detail='Superadmin cannot be assigned here')
         superadmin_role = await session.execute(select(Role).where(Role.name == 'superadmin'))
         superadmin_role = superadmin_role.scalar_one_or_none()
