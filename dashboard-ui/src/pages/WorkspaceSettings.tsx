@@ -30,6 +30,7 @@ export function WorkspaceSettings() {
   const [newFact, setNewFact] = useState('');
   const [pwdUserId, setPwdUserId] = useState<number | null>(null);
   const [pwdValue, setPwdValue] = useState('');
+  const [trash, setTrash] = useState<{ id: number; name: string; deleted_at: string | null }[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -71,6 +72,19 @@ export function WorkspaceSettings() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  const loadTrash = async () => {
+    try {
+      const rows = await api.getWorkspaces(true);
+      setTrash(rows.map(w => ({ id: w.id, name: w.name, deleted_at: w.deleted_at || null })));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    void loadTrash();
   }, []);
 
   if (loading || !detail) {
@@ -204,21 +218,6 @@ export function WorkspaceSettings() {
       setError(err instanceof Error ? err.message : 'Не удалось удалить.');
     }
   };
-
-  const [trash, setTrash] = useState<{ id: number; name: string; deleted_at: string | null }[]>([]);
-
-  const loadTrash = async () => {
-    try {
-      const rows = await api.getWorkspaces(true);
-      setTrash(rows.map(w => ({ id: w.id, name: w.name, deleted_at: w.deleted_at || null })));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  useEffect(() => {
-    void loadTrash();
-  }, []);
 
   const restoreWs = async (id: number, name: string) => {
     setError('');
