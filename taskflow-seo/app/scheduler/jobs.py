@@ -192,7 +192,7 @@ async def check_contracts_ending():
 
 
 async def autopurge_trash():
-    """Удаляет навсегда задачи и клиентов, пробывших в корзине >30 дней."""
+    """Удаляет навсегда задачи, клиентов и окружения, пробывших в корзине >30 дней."""
     try:
         cutoff = utc_now() - timedelta(days=30)
         async with async_session() as session:
@@ -208,8 +208,16 @@ async def autopurge_trash():
             for c in clients:
                 await session.execute(sa_delete(Task).where(Task.client_id == c.id))
                 await session.delete(c)
+            from app.web.api.workspaces import _purge_workspace
+            from app.core.models import Workspace
+            old_workspaces = (await session.execute(
+                select(Workspace).where(Workspace.deleted_at.is_not(None), Workspace.deleted_at < cutoff)
+            )).scalars().all()
+            for ws in old_workspaces:
+                await _purge_workspace(session, ws.id)
             await session.commit()
-            if tasks or clients:
-                logger.info('Автоочистка корзины: удалено %d задач, %d клиентов', len(tasks), len(clients))
+            if tasks or clients or old_workspaces:
+                logger.info('Автоочистка корзины: удалено %d задач, %d клиентов, %d окружений',
+                            len(tasks), len(clients), len(old_workspaces))
     except Exception as e:
         logger.error('Ошибка в autopurge_trash: %s', e)

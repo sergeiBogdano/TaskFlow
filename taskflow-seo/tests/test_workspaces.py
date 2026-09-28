@@ -244,3 +244,75 @@ class TestKnowledge:
         assert resp.json()["intent"] == "remember"
         resp = sync_request("GET", f"/api/workspaces/{ws['id']}/knowledge", cookies=admin_cookies)
         assert any("пятницам" in f["fact"] for f in resp.json())
+
+
+class TestWorkspaceTrash:
+
+    def test_soft_delete_hides_and_restores(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Корзина ТС")
+        wid = ws["id"]
+        resp = sync_request("DELETE", f"/api/workspaces/{wid}", cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "permanent": False}
+
+        assert sync_request("GET", f"/api/workspaces/{wid}", cookies=admin_cookies).status_code == 404
+        resp = sync_request("GET", "/api/workspaces", cookies=admin_cookies)
+        assert all(w["id"] != wid for w in resp.json())
+
+        resp = sync_request("GET", "/api/workspaces?deleted=true", cookies=admin_cookies)
+        assert any(w["id"] == wid for w in resp.json())
+
+        resp = sync_request("POST", f"/api/workspaces/{wid}/restore", cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert sync_request("GET", f"/api/workspaces/{wid}", cookies=admin_cookies).status_code == 200
+
+    def test_member_cannot_delete(self, sync_request, admin_cookies, executor_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Чужая корзина ТС")
+        me = sync_request("GET", "/api/auth/me", cookies=executor_cookies).json()["user"]
+        sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/members",
+            json={"user_id": me["id"], "role": "member"}, cookies=admin_cookies,
+        )
+        resp = sync_request("DELETE", f"/api/workspaces/{ws['id']}", cookies=executor_cookies)
+        assert resp.status_code == 403
+        resp = sync_request("POST", f"/api/workspaces/{ws['id']}/restore", cookies=executor_cookies)
+        assert resp.status_code == 403
+
+    def test_permanent_delete_cascades(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Снос навсегда ТС")
+        wid = ws["id"]
+        tid = sync_request(
+            "POST", f"/api/tasks?workspace_id={wid}", json={"title": "Умрёт навсегда"}, cookies=admin_cookies
+        ).json()["id"]
+        resp = sync_request("DELETE", f"/api/workspaces/{wid}?permanent=true", cookies=admin_cookies)
+        assert resp.json() == {"ok": True, "permanent": True}
+        assert sync_request("GET", f"/api/tasks/{tid}", cookies=admin_cookies).status_code in (403, 404)
+
+    def test_autopurge_old_deleted(self, sync_request, admin_cookies, event_loop):
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import select
+
+        from app.core.database import async_session
+        from app.core.models import Workspace
+
+        ws = _make_workspace(sync_request, admin_cookies, "Протухшая ТС")
+        wid = ws["id"]
+        sync_request("DELETE", f"/api/workspaces/{wid}", cookies=admin_cookies)
+
+        async def backdate():
+            async with async_session() as session:
+                row = await session.get(Workspace, wid)
+                row.deleted_at = datetime.now(timezone.utc) - timedelta(days=31)
+                await session.commit()
+
+        event_loop.run_until_complete(backdate())
+
+        from app.scheduler.jobs import autopurge_trash
+        event_loop.run_until_complete(autopurge_trash())
+
+        async def exists():
+            async with async_session() as session:
+                return await session.get(Workspace, wid)
+
+        assert event_loop.run_until_complete(exists()) is None

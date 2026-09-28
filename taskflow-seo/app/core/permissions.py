@@ -135,19 +135,22 @@ async def get_workspace_role(session, user_id: int, workspace_id: int) -> str | 
     return row.role if row else None
 
 
-async def resolve_workspace(session, user, role_names: set[str], workspace_id: int | None):
+async def resolve_workspace(session, user, role_names: set[str], workspace_id: int | None, allow_deleted: bool = False):
     """Возвращает воркспейс + роль пользователя в нём.
 
     workspace_id=None означает воркспейс по умолчанию (первый).
     Суперадмин имеет доступ везде.
+    Удалённые окружения по умолчанию не резолвятся (404).
     """
     from sqlalchemy import select
     from app.core.models import Workspace
     if workspace_id is None:
-        workspace = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+        workspace = (await session.execute(
+            select(Workspace).where(Workspace.deleted_at.is_(None)).order_by(Workspace.id)
+        )).scalars().first()
     else:
         workspace = await session.get(Workspace, workspace_id)
-    if workspace is None:
+    if workspace is None or (workspace.deleted_at is not None and not allow_deleted):
         raise HTTPException(status_code=404, detail="Воркспейс не найден")
     if user_is_superadmin(role_names):
         return workspace, "owner"
