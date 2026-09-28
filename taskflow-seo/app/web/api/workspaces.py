@@ -216,6 +216,19 @@ async def create_workspace(payload: WorkspaceCreate, user=Depends(get_current_us
         return JSONResponse({"error": "Нужно название"}, status_code=400)
     preset = PRESETS.get(payload.preset, PRESETS["empty"])
     async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        if not user_is_superadmin(role_names):
+            owned_count = (await session.execute(
+                select(Workspace).where(
+                    Workspace.created_by == user.id,
+                    Workspace.deleted_at.is_(None),
+                )
+            )).scalars().all()
+            if len(owned_count) >= 3:
+                return JSONResponse(
+                    {"error": "Можно создать не более 3 окружений. Вас могут добавить в любое количество чужих."},
+                    status_code=400,
+                )
         ws = Workspace(
             name=name[:200],
             preset=payload.preset if payload.preset in PRESETS else "empty",

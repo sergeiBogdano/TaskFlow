@@ -50,10 +50,71 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
     }
   };
 
-  if (!workspaces.length) return null;
+  const renderModal = () => modalOpen && (
+    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setModalOpen(false)}>
+      <form onSubmit={create} className="tf-modal-shell w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
+        <div className="mb-4 text-base font-bold">Новое окружение</div>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
+            <input className="tf-input" value={name} onChange={event => setName(event.target.value)} placeholder="Например: Учёба" maxLength={200} autoFocus />
+          </label>
+          <div>
+            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Пресет</span>
+            <div className="grid gap-2">
+              {PRESETS.map(p => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setPreset(p.value)}
+                  className={preset === p.value
+                    ? 'rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-3 py-2.5 text-left'
+                    : 'rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left hover:border-[var(--color-border-strong)]'}
+                >
+                  <span className="block text-sm font-bold">{p.label}</span>
+                  <span className="block text-xs text-[var(--color-text-secondary)]">{p.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {error && <div className="text-sm font-semibold text-[var(--color-danger)]">{error}</div>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setModalOpen(false)} className="tf-button flex-1">Отмена</button>
+            <button type="submit" disabled={saving} className="tf-button tf-button-primary flex-1">
+              {saving ? 'Создаём...' : 'Создать'}
+            </button>
+          </div>
+          <p className="text-xs leading-5 text-[var(--color-text-secondary)]">Ты станешь владельцем: удалить тебя и сменить тебе пароль сможет только суперадмин.</p>
+        </div>
+      </form>
+    </div>
+  );
+
+  if (!workspaces.length) {
+    return (
+      <div className={compact ? "hidden px-2 pb-2 lg:block" : "px-2 pb-2"}>
+        <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+          Окружение
+        </div>
+        <div className="rounded-xl border border-dashed border-[var(--color-border)] p-4 text-center">
+          <p className="mb-3 text-xs leading-5 text-[var(--color-text-secondary)]">
+            У вас пока нет окружения. Создайте своё — вы станете владельцем.
+          </p>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="tf-button tf-button-primary h-9 px-4 text-sm"
+          >
+            Создать окружение
+          </button>
+        </div>
+        {renderModal()}
+      </div>
+    );
+  }
 
   return (
-    <div className={compact ? 'hidden' : 'px-2 pb-2 lg:block'}>
+    <div className={compact ? "hidden" : "px-2 pb-2 lg:block"}>
       <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)]">
         Окружение
       </div>
@@ -78,46 +139,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
           <Plus size={16} />
         </button>
       </div>
-
-      {modalOpen && (
-        <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setModalOpen(false)}>
-          <form onSubmit={create} className="tf-modal-shell w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
-            <div className="mb-4 text-base font-bold">Новое окружение</div>
-            <div className="space-y-3">
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
-                <input className="tf-input" value={name} onChange={event => setName(event.target.value)} placeholder="Например: Учёба" maxLength={200} autoFocus />
-              </label>
-              <div>
-                <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Пресет</span>
-                <div className="grid gap-2">
-                  {PRESETS.map(p => (
-                    <button
-                      key={p.value}
-                      type="button"
-                      onClick={() => setPreset(p.value)}
-                      className={preset === p.value
-                        ? 'rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-3 py-2.5 text-left'
-                        : 'rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left hover:border-[var(--color-border-strong)]'}
-                    >
-                      <span className="block text-sm font-bold">{p.label}</span>
-                      <span className="block text-xs text-[var(--color-text-secondary)]">{p.hint}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {error && <div className="text-sm font-semibold text-[var(--color-danger)]">{error}</div>}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setModalOpen(false)} className="tf-button flex-1">Отмена</button>
-                <button type="submit" disabled={saving} className="tf-button tf-button-primary flex-1">
-                  {saving ? 'Создаём...' : 'Создать'}
-                </button>
-              </div>
-              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">Ты станешь владельцем: удалить тебя и сменить тебе пароль сможет только суперадмин.</p>
-            </div>
-          </form>
-        </div>
-      )}
+      {renderModal()}
     </div>
   );
 }
