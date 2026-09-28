@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   LogOut,
   Mic,
+  Layers,
   NotebookPen,
   Puzzle,
   Send,
@@ -64,6 +65,7 @@ const nav = [
     section: 'Система',
     items: [
       { to: '/users', icon: CircleUser, label: 'Пользователи', hint: 'Роли и доступ', permission: 'users' },
+      { to: '/workspace', icon: Layers, label: 'Окружение', hint: 'Настройки и команда', permission: 'tasks' },
       { to: '/settings', icon: Settings, label: 'Настройки', hint: 'Профиль', permission: 'settings' },
     ],
   },
