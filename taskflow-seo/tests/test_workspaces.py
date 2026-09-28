@@ -39,7 +39,7 @@ class TestWorkspaces:
         assert ws["dictionary"].get("clients") == "Проекты"
         resp = sync_request("GET", f"/api/sprints?workspace_id={ws['id']}", cookies=admin_cookies)
         assert resp.status_code == 200
-        assert any(s["name"] == "Первая неделя" for s in resp.json())
+        assert any(s["name"] == "Неделя 1: старт" for s in resp.json())
 
     def test_create_requires_name(self, sync_request, admin_cookies):
         resp = sync_request("POST", "/api/workspaces", json={"name": "  "}, cookies=admin_cookies)
@@ -272,3 +272,46 @@ class TestUiConfig:
             "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": {}}, cookies=executor_cookies
         )
         assert resp.status_code == 403
+
+    def test_admin_cannot_patch_ui_config(self, sync_request, admin_cookies):
+        import uuid as uuid_mod
+        uniq = uuid_mod.uuid4().hex[:8]
+        ws = _make_workspace(sync_request, admin_cookies, f"Интерфейс админ ТС {uniq}")
+        uid = _make_user(sync_request, admin_cookies, f"wsadmin_{uniq}")[0]
+        sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/members",
+            json={"user_id": uid, "role": "admin"}, cookies=admin_cookies,
+        )
+        # логинимся админом окружения
+        login = sync_request("POST", "/api/auth/login", json={"username": f"wsadmin_{uniq}", "password": "pass1234"})
+        cookies = {"taskflow_user": login.cookies.get("taskflow_user")}
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": {"titles": {"/tasks": "Дела"}}},
+            cookies=cookies,
+        )
+        assert resp.status_code == 403
+        # а название менять может
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}", json={"name": f"Переименовано {uniq}"}, cookies=cookies
+        )
+        assert resp.status_code == 200
+
+    def test_labels_truncated(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Интерфейс обрезка ТС")
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}",
+            json={"ui_config": {"nav": {"/tasks": {"label": "x" * 100}}, "titles": {"/tasks": "y" * 100}}},
+            cookies=admin_cookies,
+        )
+        assert resp.status_code == 200
+        data = sync_request("GET", f"/api/workspaces/{ws['id']}", cookies=admin_cookies).json()
+        assert data["ui_config"]["nav"]["/tasks"]["label"] == "x" * 40
+        assert data["ui_config"]["titles"]["/tasks"] == "y" * 60
+
+    def test_project_preset(self, sync_request, admin_cookies):
+        ws = _make_workspace(sync_request, admin_cookies, "Проект ТС", preset="project")
+        assert ws["preset"] == "project"
+        resp = sync_request("GET", f"/api/workspaces/{ws['id']}", cookies=admin_cookies).json()
+        assert resp["dictionary"].get("clients") == "Проекты"
+        sprints = sync_request("GET", f"/api/sprints?workspace_id={ws['id']}", cookies=admin_cookies).json()
+        assert any(s["name"] == "Спринт 1: MVP" for s in sprints)
