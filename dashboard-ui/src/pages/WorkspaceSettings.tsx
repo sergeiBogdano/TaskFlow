@@ -331,8 +331,8 @@ export function WorkspaceSettings() {
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Переименование и скрытие пунктов меню, полей и заголовков. Применяется сразу. Таблица задач и новые поля — не входят (таблица с фиксированной сеткой).</p>
-        <UiEditor detail={detail} canManage={canManage} onSaved={load} />
+        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Переименование и скрытие пунктов меню, полей и заголовков. {(isOwner || isSuperadmin) ? 'Применяется сразу.' : 'Менять оформление может только владелец окружения.'} Таблица задач и новые поля — не входят (таблица с фиксированной сеткой).</p>
+        <UiEditor detail={detail} canManage={isOwner || isSuperadmin} onSaved={load} />
       </section>
 
       <section className="tf-panel-flat p-5">
@@ -499,24 +499,35 @@ function UiEditor({ detail, canManage, onSaved }: {
               const item = cfg.nav?.[route.to] || {};
               const hidden = item.visible === false;
               return (
-                <div key={route.to} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                <div key={route.to} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="tf-input h-9 min-w-0 flex-1 text-sm"
+                      value={item.label ?? ''}
+                      onChange={event => setNav(route.to, { label: event.target.value })}
+                      placeholder={route.label}
+                      maxLength={40}
+                      disabled={!canManage}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setNav(route.to, { visible: hidden ? undefined : false })}
+                      disabled={!canManage}
+                      title={hidden ? 'Показать' : 'Скрыть'}
+                      aria-label={hidden ? `Показать ${route.label}` : `Скрыть ${route.label}`}
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
+                    >
+                      {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
                   <input
-                    className="tf-input h-9 min-w-0 flex-1 text-sm"
-                    value={item.label ?? ''}
-                    onChange={event => setNav(route.to, { label: event.target.value })}
-                    placeholder={route.label}
+                    className="tf-input mt-2 h-8 min-w-0 flex-1 text-xs"
+                    value={item.hint ?? ''}
+                    onChange={event => setNav(route.to, { hint: event.target.value })}
+                    placeholder="Подсказка под пунктом"
+                    maxLength={80}
                     disabled={!canManage}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setNav(route.to, { visible: hidden ? undefined : false })}
-                    disabled={!canManage}
-                    title={hidden ? 'Показать' : 'Скрыть'}
-                    aria-label={hidden ? `Показать ${route.label}` : `Скрыть ${route.label}`}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
-                  >
-                    {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
                 </div>
               );
             })}
@@ -550,6 +561,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                   value={item.label ?? ''}
                   onChange={event => setTaskField(key, { label: event.target.value })}
                   placeholder={defLabel}
+                  maxLength={60}
                   disabled={!canManage}
                 />
                 {hideable ? (
@@ -586,6 +598,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                   value={item.label ?? ''}
                   onChange={event => setSprintField(key, { label: event.target.value })}
                   placeholder={defLabel}
+                  maxLength={60}
                   disabled={!canManage}
                 />
                 {hideable ? (
@@ -618,6 +631,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                 value={cfg.titles?.[route.to] ?? ''}
                 onChange={event => setTitle(route.to, event.target.value)}
                 placeholder={TITLE_DEFAULTS[route.to]}
+                maxLength={60}
                 disabled={!canManage}
               />
             </div>
