@@ -189,7 +189,7 @@ export function WorkspaceSettings() {
   };
 
   const deleteWorkspace = async () => {
-    if (!confirm(`Удалить окружение «${detail.name}» со всеми задачами и данными? Это необратимо.`)) return;
+    if (!confirm(`Удалить окружение «${detail.name}» в корзину? Данные сохранятся 30 дней, потом удалятся навсегда.`)) return;
     setError('');
     try {
       await api.deleteWorkspace(detail.id);
@@ -202,6 +202,43 @@ export function WorkspaceSettings() {
       window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить.');
+    }
+  };
+
+  const [trash, setTrash] = useState<{ id: number; name: string; deleted_at: string | null }[]>([]);
+
+  const loadTrash = async () => {
+    try {
+      const rows = await api.getWorkspaces(true);
+      setTrash(rows.map(w => ({ id: w.id, name: w.name, deleted_at: w.deleted_at || null })));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    void loadTrash();
+  }, []);
+
+  const restoreWs = async (id: number, name: string) => {
+    setError('');
+    try {
+      await api.restoreWorkspace(id);
+      await loadTrash();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Не удалось восстановить «${name}».`);
+    }
+  };
+
+  const purgeWs = async (id: number, name: string) => {
+    if (!confirm(`Удалить окружение «${name}» НАВСЕГДА со всеми данными? Это необратимо.`)) return;
+    setError('');
+    try {
+      await api.deleteWorkspace(id, true);
+      await loadTrash();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Не удалось удалить «${name}».`);
     }
   };
 
@@ -362,8 +399,26 @@ export function WorkspaceSettings() {
       {(isOwner || isSuperadmin) && (
         <section className="tf-panel-flat border-[var(--color-danger)]/40 p-5">
           <h3 className="mb-1 text-sm font-bold text-[var(--color-danger)]">Опасная зона</h3>
-          <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Удаление сотрёт задачи, клиентов, спринты и знания окружения. Необратимо.</p>
-          <button type="button" onClick={deleteWorkspace} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить окружение</button>
+          <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Удаление отправляет окружение в корзину на 30 дней — потом всё удалится само. Можно удалить навсегда сразу.</p>
+          <button type="button" onClick={deleteWorkspace} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить в корзину</button>
+        </section>
+      )}
+
+      {trash.length > 0 && (
+        <section className="tf-panel-flat p-5">
+          <h3 className="mb-1 text-sm font-bold">Корзина окружений</h3>
+          <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Автоматически удаляются навсегда через 30 дней после удаления.</p>
+          <div className="space-y-2">
+            {trash.map(ws => (
+              <div key={ws.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{ws.name}</span>
+                <button type="button" onClick={() => restoreWs(ws.id, ws.name)} className="tf-button h-9 px-3 text-xs">Восстановить</button>
+                {(isOwner || isSuperadmin) && (
+                  <button type="button" onClick={() => purgeWs(ws.id, ws.name)} className="tf-button h-9 px-3 text-xs text-[var(--color-danger)]">Навсегда</button>
+                )}
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </div>

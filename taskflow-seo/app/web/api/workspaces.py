@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -155,7 +155,21 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
         "ui_config": _parse_ui_config(ws.ui_config),
         "role": role,
         "created_at": ws.created_at.isoformat() if ws.created_at else None,
+        "deleted_at": ws.deleted_at.isoformat() if ws.deleted_at else None,
     }
+
+
+async def _purge_workspace(session, workspace_id: int) -> None:
+    """Безвозвратное удаление окружения и всех его данных."""
+    from app.core.models import WorkspaceKnowledge
+    await session.execute(SprintTask.__table__.delete().where(
+        SprintTask.sprint_id.in_(select(Sprint.id).where(Sprint.workspace_id == workspace_id))))
+    for model, column in ((Sprint, Sprint.workspace_id), (Task, Task.workspace_id),
+                          (Client, Client.workspace_id), (Note, Note.workspace_id),
+                          (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
+                          (WorkspaceMember, WorkspaceMember.workspace_id)):
+        await session.execute(model.__table__.delete().where(column == workspace_id))
+    await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
 
 
 def _member_to_dict(member: WorkspaceMember, username: str | None) -> dict:
@@ -168,22 +182,25 @@ def _member_to_dict(member: WorkspaceMember, username: str | None) -> dict:
 
 
 @router.get("")
-async def list_workspaces(user=Depends(get_current_user)):
+async def list_workspaces(deleted: bool = Query(default=False), user=Depends(get_current_user)):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         if user_is_superadmin(role_names):
-            workspaces = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().all()
+            stmt = select(Workspace).order_by(Workspace.id)
+            stmt = stmt.where(Workspace.deleted_at.is_not(None) if deleted else Workspace.deleted_at.is_(None))
+            workspaces = (await session.execute(stmt)).scalars().all()
             out = []
             for ws in workspaces:
                 role = await get_workspace_role(session, user.id, ws.id) or WS_ROLE_OWNER
                 out.append(_ws_to_dict(ws, role))
             return JSONResponse(out)
-        rows = (await session.execute(
+        stmt = (
             select(Workspace, WorkspaceMember)
             .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
             .where(WorkspaceMember.user_id == user.id)
-            .order_by(Workspace.id)
-        )).all()
+        )
+        stmt = stmt.where(Workspace.deleted_at.is_not(None) if deleted else Workspace.deleted_at.is_(None))
+        rows = (await session.execute(stmt.order_by(Workspace.id))).all()
         return JSONResponse([_ws_to_dict(ws, member.role) for ws, member in rows])
 
 
@@ -289,23 +306,37 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
 
 
 @router.delete("/{workspace_id}")
-async def delete_workspace(workspace_id: int, ctx=Depends(require_workspace_role("owner"))):
-    user = ctx["user"]
+async def delete_workspace(
+    workspace_id: int,
+    permanent: bool = Query(default=False),
+    user=Depends(get_current_user),
+):
+    from app.core.utils.timezone import utc_now
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        workspace, role = await resolve_workspace(session, user, role_names, workspace_id)
+        workspace, role = await resolve_workspace(session, user, role_names, workspace_id, allow_deleted=True)
         if role != WS_ROLE_OWNER and not user_is_superadmin(role_names):
             return JSONResponse({"error": "Удалять может только владелец"}, status_code=403)
-        wid = workspace.id
         # Каскад вручную (работает и на sqlite без FK-enforcement)
-        await session.execute(SprintTask.__table__.delete().where(
-            SprintTask.sprint_id.in_(select(Sprint.id).where(Sprint.workspace_id == wid))))
-        for model, column in ((Sprint, Sprint.workspace_id), (Task, Task.workspace_id),
-                              (Client, Client.workspace_id), (Note, Note.workspace_id),
-                              (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
-                              (WorkspaceMember, WorkspaceMember.workspace_id)):
-            await session.execute(model.__table__.delete().where(column == wid))
-        await session.execute(Workspace.__table__.delete().where(Workspace.id == wid))
+        ws = await session.get(Workspace, workspace.id)
+        if permanent:
+            await _purge_workspace(session, ws.id)
+            await session.commit()
+            return JSONResponse({"ok": True, "permanent": True})
+        ws.deleted_at = utc_now()
+        await session.commit()
+    return JSONResponse({"ok": True, "permanent": False})
+
+
+@router.post("/{workspace_id}/restore")
+async def restore_workspace(workspace_id: int, user=Depends(get_current_user)):
+    async with async_session() as session:
+        role_names = await get_user_role_names(user.id)
+        workspace, role = await resolve_workspace(session, user, role_names, workspace_id, allow_deleted=True)
+        if role != WS_ROLE_OWNER and not user_is_superadmin(role_names):
+            return JSONResponse({"error": "Восстанавливать может только владелец"}, status_code=403)
+        ws = await session.get(Workspace, workspace.id)
+        ws.deleted_at = None
         await session.commit()
     return JSONResponse({"ok": True})
 
