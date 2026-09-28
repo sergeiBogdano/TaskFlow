@@ -25,7 +25,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || err.detail || `API error: ${res.status}`);
+    const error = new Error(err.error || err.detail || `API error: ${res.status}`) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }

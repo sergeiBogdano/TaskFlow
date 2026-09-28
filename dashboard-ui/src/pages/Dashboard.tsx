@@ -12,6 +12,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { getActiveWorkspaceId } from '../lib/workspace';
 import { SearchSelect } from '../components/SearchSelect';
 import type { DashboardStats, OrganizationOverview, OrganizationOverviewItem, Task } from '../api/client';
 import { daysUntil, formatDate, statusMeta } from '../lib/taskflow';
@@ -38,7 +39,14 @@ export function Dashboard() {
         setExpiring(expiringClients);
         setTasks(taskList);
       })
-      .catch(() => navigate('/login'))
+      .catch((err: unknown) => {
+        const status = (err as { status?: number })?.status;
+        if (status === 401) {
+          navigate('/login');
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить данные.');
+      })
       .finally(() => setLoading(false));
   }, [navigate]);
 
@@ -60,8 +68,25 @@ export function Dashboard() {
     return true;
   }), [organizationFilter, overview]);
 
+  const hasWorkspace = Boolean(getActiveWorkspaceId());
+
   if (loading || !stats) {
     return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка рабочего пространства...</div>;
+  }
+
+  if (!hasWorkspace) {
+    return (
+      <div className="mx-auto max-w-[1500px] space-y-5">
+        <section className="tf-panel-flat flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <Building2 size={28} className="text-[var(--color-accent)]" />
+          <h2 className="text-base font-bold">У вас пока нет окружения</h2>
+          <p className="max-w-md text-sm leading-6 text-[var(--color-text-secondary)]">
+            Создайте своё окружение в панели слева — вы станете его владельцем.
+            Вас также могут добавить в чужое окружение как участника или администратора.
+          </p>
+        </section>
+      </div>
+    );
   }
 
   const cards = [
