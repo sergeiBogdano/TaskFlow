@@ -227,7 +227,6 @@ export function Users() {
         {users.map(user => {
           const protectedUser = isProtectedSuperadmin(user, users);
           const hasSuperadmin = isSuperadmin(user);
-          const canEditRoles = currentUser ? isSuperadmin(currentUser) : false;
           return (
             <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_96px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
               <div className="min-w-0">
@@ -237,17 +236,17 @@ export function Users() {
                   {hasSuperadmin && <span className="tf-chip text-[var(--color-warning)]"><ShieldCheck size={13} />{protectedUser ? 'защищён' : 'superadmin'}</span>}
                 </div>
               </div>
-              {canEditRoles ? (
+              {hasSuperadmin ? (
+                <div className="text-sm font-semibold text-[var(--color-text-secondary)]">superadmin</div>
+              ) : (
                 <SearchSelect
                   value={user.roles?.[0]?.id ? String(user.roles[0].id) : ''}
-                  options={roles.map(role => ({ value: String(role.id), label: role.name }))}
+                  options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: role.name }))}
                   onChange={value => handleSetRole(user.id, Number(value))}
                   emptyLabel="Без роли"
                   placeholder="Роль"
                   searchPlaceholder="Найти роль..."
                 />
-              ) : (
-                <div className="text-sm font-semibold text-[var(--color-text-secondary)]">superadmin</div>
               )}
               <div className="flex justify-end gap-1.5">
                 <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>

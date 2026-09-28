@@ -360,11 +360,11 @@ class TestUiConfig:
             cookies=cookies,
         )
         assert resp.status_code == 403
-        # а название менять может
+        # настройки окружения менять может только владелец
         resp = sync_request(
             "PATCH", f"/api/workspaces/{ws['id']}", json={"name": f"Переименовано {uniq}"}, cookies=cookies
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_labels_truncated(self, sync_request, admin_cookies):
         ws = _make_workspace(sync_request, admin_cookies, "Интерфейс обрезка ТС")

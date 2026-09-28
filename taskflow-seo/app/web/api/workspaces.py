@@ -281,7 +281,7 @@ class WorkspaceUpdate(BaseModel):
 
 
 @router.patch("/{workspace_id}")
-async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depends(require_workspace_role("owner", "admin"))):
+async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depends(require_workspace_role("owner"))):
     workspace = ctx["workspace"]
     async with async_session() as session:
         ws = await session.get(Workspace, workspace.id)

@@ -105,6 +105,13 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
                     break
                 if not allowed:
                     raise HTTPException(status_code=403, detail='Forbidden')
+            target_roles = (await session.execute(
+                select(UserRole).where(UserRole.user_id == user_id)
+            )).scalars().all()
+            for ur_ in target_roles:
+                r = await session.get(Role, ur_.role_id)
+                if r and r.name == 'superadmin':
+                    raise HTTPException(status_code=403, detail='Cannot change the superadmin password')
         target.password_hash = hash_password(password)
         await session.commit()
     return JSONResponse({'ok': True})
@@ -130,17 +137,10 @@ async def set_role(user_id: int, request: Request, user=Depends(require_role(['s
         r = await session.get(Role, role_id)
         if not r:
             raise HTTPException(status_code=404, detail='Role not found')
-        if r.name == 'superadmin' and not user_is_superadmin(await get_user_role_names(user.id)):
+        if r.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Superadmin cannot be assigned here')
-        superadmin_role = await session.execute(select(Role).where(Role.name == 'superadmin'))
-        superadmin_role = superadmin_role.scalar_one_or_none()
-        superadmin_count = 0
-        if superadmin_role:
-            superadmin_count = len((await session.execute(
-                select(UserRole).where(UserRole.role_id == superadmin_role.id)
-            )).scalars().all())
-        if target_is_superadmin and r.name != 'superadmin' and superadmin_count <= 1:
-            raise HTTPException(status_code=403, detail='Cannot remove the last superadmin')
+        if target_is_superadmin:
+            raise HTTPException(status_code=403, detail='Cannot change the superadmin role')
         await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
         existing = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)
@@ -160,17 +160,10 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
         ur_check = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id)
         )
-        superadmin_role = await session.execute(select(Role).where(Role.name == 'superadmin'))
-        superadmin_role = superadmin_role.scalar_one_or_none()
-        superadmin_count = 0
-        if superadmin_role:
-            superadmin_count = len((await session.execute(
-                select(UserRole).where(UserRole.role_id == superadmin_role.id)
-            )).scalars().all())
         for ur_ in ur_check.scalars().all():
             r = await session.get(Role, ur_.role_id)
-            if r and r.name == 'superadmin' and superadmin_count <= 1:
-                raise HTTPException(status_code=403, detail='Cannot delete the last superadmin user')
+            if r and r.name == 'superadmin':
+                raise HTTPException(status_code=403, detail='Cannot delete the superadmin user')
         await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
         await session.delete(u)
         await session.commit()
