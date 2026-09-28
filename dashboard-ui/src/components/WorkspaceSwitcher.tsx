@@ -7,7 +7,8 @@ import { ensureWorkspace, getActiveWorkspaceId, switchWorkspace } from '../lib/w
 const PRESETS = [
   { value: 'seo', label: 'SEO-команда', hint: 'Задачи, клиенты, договоры' },
   { value: 'study', label: 'Учёба', hint: 'Проекты, спринты, наставник AI' },
-  { value: 'empty', label: 'Пустой', hint: 'С нуля' },
+  { value: 'project', label: 'Проект', hint: 'Командная разработка, спринты, фичи' },
+  { value: 'empty', label: 'Пустой', hint: 'Стандартные названия, с нуля' },
 ];
 
 export function WorkspaceSwitcher({ compact }: { compact: boolean }) {

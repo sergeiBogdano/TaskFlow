@@ -30,6 +30,7 @@ import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { workspaceClientsLabel, WORKSPACE_EVENT } from '../lib/workspace';
+import { isNavVisible, navOverride, titleOverride } from '../lib/uiconfig';
 import type { Client, Task, User, VoiceTaskDraft } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { cn, roleMeta } from '../lib/taskflow';
@@ -151,10 +152,14 @@ export function Layout() {
   const [activeNavRoute, setActiveNavRoute] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('taskflow:sidebar-collapsed') === '1');
   const [clientsLabel, setClientsLabel] = useState(() => workspaceClientsLabel());
+  const [, setUiTick] = useState(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   useEffect(() => {
-    const sync = () => setClientsLabel(workspaceClientsLabel());
+    const sync = () => {
+      setClientsLabel(workspaceClientsLabel());
+      setUiTick(tick => tick + 1);
+    };
     window.addEventListener(WORKSPACE_EVENT, sync);
     return () => window.removeEventListener(WORKSPACE_EVENT, sync);
   }, []);
@@ -192,7 +197,7 @@ export function Layout() {
   };
   const pageTitle = useMemo(() => {
     if (location.pathname === '/clients') return clientsLabel;
-    return titles[location.pathname] || 'TaskFlow';
+    return titleOverride(location.pathname) || titles[location.pathname] || 'TaskFlow';
   }, [location.pathname, clientsLabel]);
 
   const handleLogout = async () => {
@@ -260,15 +265,24 @@ export function Layout() {
           {nav.map(group => {
             const visibleItems = group.items.filter(item => canSee(item.permission, item.to));
             if (!visibleItems.length) return null;
+            const shownItems = orderedItems(group.section, visibleItems)
+              .filter(item => isNavVisible(item.to))
+              .map(item => {
+                const override = navOverride(item.to);
+                const label = override?.label?.trim() || (item.to === '/clients' ? clientsLabel : item.label);
+                const hint = override?.hint?.trim() || item.hint;
+                return { ...item, label, hint };
+              });
+            if (!shownItems.length) return null;
             return (
               <div key={group.section} className={cn('flex shrink-0 gap-2 lg:block', sidebarCollapsed && 'lg:flex lg:justify-center')}>
                 <div className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)] lg:block', sidebarCollapsed && 'lg:hidden')}>{group.section}</div>
-                <SortableContext items={orderedItems(group.section, visibleItems).map(item => item.to)} strategy={rectSortingStrategy}>
+                <SortableContext items={shownItems.map(item => item.to)} strategy={rectSortingStrategy}>
                   <div className={cn('flex gap-2 lg:block lg:space-y-1', sidebarCollapsed && 'lg:w-full')}>
-                    {orderedItems(group.section, visibleItems).map(item => (
+                    {shownItems.map(item => (
                       <SortableNavItem
                         key={item.to}
-                        item={item.to === '/clients' ? { ...item, label: clientsLabel } : item}
+                        item={item}
                         unreadCount={unreadCount}
                         compact={sidebarCollapsed}
                       />

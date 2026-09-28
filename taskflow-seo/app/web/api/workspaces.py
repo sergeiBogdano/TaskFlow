@@ -55,6 +55,17 @@ PRESETS: dict[str, dict] = {
             "Ты наставник по учёбе. Отвечай по-русски, дружелюбно и конкретно: "
             "разбивай сложное на шаги, давай план и проверяй понимание."
         ),
+        "welcome_sprint": {"name": "Неделя 1: старт", "goal": "Освоиться, разбить обучение на задачи и закрыть первые шаги"},
+    },
+    "project": {
+        "label": "Проект",
+        "theme": "cream",
+        "dictionary": {"clients": "Проекты"},
+        "ai_instructions": (
+            "Ты помощник команды разработки. Отвечай по-русски, конкретно и по делу: "
+            "фичи разбивай на задачи, сроки оценивай честно, риски называй прямо."
+        ),
+        "welcome_sprint": {"name": "Спринт 1: MVP", "goal": "Собрать минимальный продукт: основные функции, первые задачи команде"},
     },
     "empty": {
         "label": "Пустой",
@@ -63,6 +74,70 @@ PRESETS: dict[str, dict] = {
         "ai_instructions": None,
     },
 }
+
+
+def _parse_ui_config(raw) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _sanitize_ui_config(raw: dict) -> dict:
+    """Чистит конфиг оформления: только известные секции, лимиты длины."""
+    clean: dict = {}
+    nav = raw.get("nav")
+    if isinstance(nav, dict):
+        items = {}
+        for route, item in list(nav.items())[:40]:
+            if not isinstance(route, str) or not route.startswith("/") or len(route) > 40:
+                continue
+            if not isinstance(item, dict):
+                continue
+            entry: dict = {}
+            label = item.get("label")
+            if isinstance(label, str) and label.strip():
+                entry["label"] = label.strip()[:40]
+            hint = item.get("hint")
+            if isinstance(hint, str) and hint.strip():
+                entry["hint"] = hint.strip()[:80]
+            if item.get("visible") is False:
+                entry["visible"] = False
+            if entry:
+                items[route] = entry
+        if items:
+            clean["nav"] = items
+    titles = raw.get("titles")
+    if isinstance(titles, dict):
+        items = {}
+        for route, title in list(titles.items())[:40]:
+            if isinstance(route, str) and isinstance(title, str) and title.strip():
+                items[route] = title.strip()[:60]
+        if items:
+            clean["titles"] = items
+    for section in ("tasks", "sprints"):
+        fields = raw.get(section)
+        if not isinstance(fields, dict):
+            continue
+        fields = fields.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        items = {}
+        for key, item in list(fields.items())[:40]:
+            if not isinstance(key, str) or len(key) > 40 or not isinstance(item, dict):
+                continue
+            entry = {}
+            label = item.get("label")
+            if isinstance(label, str) and label.strip():
+                entry["label"] = label.strip()[:60]
+            if item.get("visible") is False:
+                entry["visible"] = False
+            if entry:
+                items[key] = entry
+        if items:
+            clean[section] = {"fields": items}
+    return clean
 
 
 def _ws_to_dict(ws: Workspace, role: str) -> dict:
@@ -77,6 +152,7 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
         "theme": ws.theme,
         "dictionary": dictionary,
         "has_ai_instructions": bool(ws.ai_instructions),
+        "ui_config": _parse_ui_config(ws.ui_config),
         "role": role,
         "created_at": ws.created_at.isoformat() if ws.created_at else None,
         "deleted_at": ws.deleted_at.isoformat() if ws.deleted_at else None,
@@ -151,17 +227,26 @@ async def create_workspace(payload: WorkspaceCreate, user=Depends(get_current_us
         session.add(ws)
         await session.flush()
         session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role=WS_ROLE_OWNER))
-        if payload.preset == "study":
+        welcome = preset.get("welcome_sprint")
+        if isinstance(welcome, dict) and welcome.get("name"):
             session.add(Sprint(
                 workspace_id=ws.id,
-                name="Первая неделя",
-                goal="Освоиться и закрыть первые учебные задачи",
+                name=str(welcome["name"])[:200],
+                goal=str(welcome.get("goal") or "")[:2000] or None,
                 status="active",
                 created_by=user.id,
             ))
         await session.commit()
         await session.refresh(ws)
     return JSONResponse(_ws_to_dict(ws, WS_ROLE_OWNER), status_code=201)
+
+
+@router.get("/presets/list")
+async def list_presets(user=Depends(get_current_user)):
+    return JSONResponse([
+        {"id": key, "label": value["label"]}
+        for key, value in PRESETS.items()
+    ])
 
 
 @router.get("/{workspace_id}")
@@ -179,6 +264,7 @@ class WorkspaceUpdate(BaseModel):
     theme: str | None = None
     dictionary: dict | None = None
     ai_instructions: str | None = None
+    ui_config: dict | None = None
 
 
 @router.patch("/{workspace_id}")
@@ -202,6 +288,17 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
             ws.dictionary = json.dumps(clean, ensure_ascii=False)
         if payload.ai_instructions is not None:
             ws.ai_instructions = payload.ai_instructions[:10000] or None
+        if payload.ui_config is not None:
+            # Оформление меняет только владелец окружения (или суперадмин)
+            role_names = await get_user_role_names(ctx["user"].id)
+            if ctx["role"] != WS_ROLE_OWNER and not user_is_superadmin(role_names):
+                return JSONResponse({"error": "Оформление меняет только владелец"}, status_code=403)
+            if not isinstance(payload.ui_config, dict):
+                return JSONResponse({"error": "ui_config должен быть объектом"}, status_code=400)
+            if len(json.dumps(payload.ui_config, ensure_ascii=False)) > 50000:
+                return JSONResponse({"error": "Слишком большой ui_config"}, status_code=400)
+            raw = json.dumps(_sanitize_ui_config(payload.ui_config), ensure_ascii=False)
+            ws.ui_config = raw
         await session.commit()
         await session.refresh(ws)
         role = await get_workspace_role(session, ctx["user"].id, ws.id) or ctx["role"]
