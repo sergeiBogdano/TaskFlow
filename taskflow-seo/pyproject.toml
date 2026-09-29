@@ -38,3 +38,9 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "preserve"
+
+[tool.coverage.run]
+# На Python 3.13 ядра CTracer/pytrace теряли line-события в async-эндпоинтах,
+# из-за чего покрытие занижалось (49% вместо 91%). sysmon пишет корректно.
+core = "sysmon"
+branch = false

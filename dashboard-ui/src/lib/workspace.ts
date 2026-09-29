@@ -30,8 +30,22 @@ export function workspaceClientsLabel(): string {
 
 /** Гарантирует выбранный воркспейс: чинит протухший id, возвращает список + активный. */
 export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; activeId: string | null }> {
-  const workspaces = await api.getWorkspaces().catch(() => [] as Workspace[]);
-  if (!workspaces.length) return { workspaces, activeId: null };
+  const workspaces = await api.getWorkspaces().catch(() => null);
+  if (workspaces === null) {
+    // Ошибка сети/авторизации — не трогаем сохранённый выбор.
+    return { workspaces: [], activeId: null };
+  }
+  if (!workspaces.length) {
+    // Окружений нет — чистим протухший id, иначе все API будут ходить
+    // с чужим workspace_id и возвращать 403 «Нет доступа».
+    try {
+      localStorage.removeItem(WORKSPACE_KEY);
+      localStorage.removeItem(DETAIL_KEY);
+    } catch {
+      /* ignore */
+    }
+    return { workspaces, activeId: null };
+  }
   const stored = getActiveWorkspaceId();
   const ok = stored && workspaces.some(w => String(w.id) === stored);
   const activeId = ok && stored ? stored : String(workspaces[0].id);
@@ -39,6 +53,11 @@ export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; acti
     localStorage.setItem(WORKSPACE_KEY, activeId);
   } catch {
     /* ignore */
+  }
+  if (stored && !ok) {
+    // Сохранённый id больше не наш (другой аккаунт или удалили из окружения):
+    // страница уже загрузилась с чужим workspace_id — перезагружаем данные.
+    window.location.reload();
   }
   return { workspaces, activeId };
 }

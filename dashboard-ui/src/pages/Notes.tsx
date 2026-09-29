@@ -124,25 +124,44 @@ export function Notes() {
       if (tab === 'shared') {
         const withFolder = new URLSearchParams(query);
         if (folder) withFolder.set('folder_id', folder);
-        const [list, folderList] = await Promise.all([
-          api.getNotes(withFolder.toString()),
+        const [folderList, localFolderList] = await Promise.all([
           api.getNoteFolders().catch(() => [] as NoteFolder[]),
+          listLocalFolders().catch(() => [] as LocalFolder[]),
         ]);
-        setNotes(list.notes.filter(n => n.is_public).map(toViewServer));
-        setTags(list.tags);
+        let sharedNotes: Note[] = [];
+        let sharedTags: string[] = [];
+        try {
+          const list = await api.getNotes(withFolder.toString());
+          sharedNotes = list.notes;
+          sharedTags = list.tags;
+        } catch (err) {
+          // Ошибка сервера (например 403) не должна ронять всю страницу заметок.
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
+        }
+        setNotes(sharedNotes.filter(n => n.is_public).map(toViewServer));
+        setTags(sharedTags);
         setServerFolders(folderList);
-        setLocalFolders(await listLocalFolders().catch(() => []));
+        setLocalFolders(localFolderList);
       } else {
         // «Мои» и «Корзина»: локальные + собственные серверные
-        const [local, server, localFolderList, serverFolderList] = await Promise.all([
+        const [local, localFolderList, serverFolderList] = await Promise.all([
           listLocalNotes({ q: search, folderId: folder || undefined, tag: tag || undefined, format: format || undefined, trash }),
-          api.getNotes(`${query}${query ? '&' : ''}${trash ? 'archived=true' : 'scope=mine'}`),
           listLocalFolders().catch(() => [] as LocalFolder[]),
           api.getNoteFolders().catch(() => [] as NoteFolder[]),
         ]);
+        let serverNotes: Note[] = [];
+        let serverTags: string[] = [];
+        try {
+          const res = await api.getNotes(`${query}${query ? '&' : ''}${trash ? 'archived=true' : 'scope=mine'}`);
+          serverNotes = res.notes;
+          serverTags = res.tags;
+        } catch (err) {
+          // Ошибка сервера не должна скрывать локальные заметки.
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
+        }
         const localMap = new Map(localFolderList.map(f => [f.id, f.name]));
         const localView = local.notes.map(n => toViewLocal(n, id => localMap.get(id) || '—'));
-        let serverView = server.notes.map(toViewServer);
+        let serverView = serverNotes.map(toViewServer);
         if (tab === 'mine' && folder) {
           // серверные показываем только из выбранной локальной папки? нет — папки разные,
           // поэтому при фильтре по папке серверные скрываем, чтобы не врать
@@ -150,7 +169,7 @@ export function Notes() {
         }
         const merged = [...localView, ...serverView].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
         setNotes(merged);
-        setTags(Array.from(new Set([...local.tags, ...server.tags])).sort());
+        setTags(Array.from(new Set([...local.tags, ...serverTags])).sort());
         setServerFolders(serverFolderList);
         setLocalFolders(localFolderList);
       }

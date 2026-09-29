@@ -138,19 +138,43 @@ async def get_workspace_role(session, user_id: int, workspace_id: int) -> str | 
 async def resolve_workspace(session, user, role_names: set[str], workspace_id: int | None, allow_deleted: bool = False):
     """Возвращает воркспейс + роль пользователя в нём.
 
-    workspace_id=None означает воркспейс по умолчанию (первый).
+    workspace_id=None означает окружение пользователя по умолчанию:
+    первое доступное пользователю (для суперадмина — первое в системе).
     Суперадмин имеет доступ везде.
     Удалённые окружения по умолчанию не резолвятся (404).
     """
     from sqlalchemy import select
-    from app.core.models import Workspace
+    from app.core.models import Workspace, WorkspaceMember
     if workspace_id is None:
-        workspace = (await session.execute(
-            select(Workspace).where(Workspace.deleted_at.is_(None)).order_by(Workspace.id)
-        )).scalars().first()
+        if user_is_superadmin(role_names):
+            workspace = (await session.execute(
+                select(Workspace).where(Workspace.deleted_at.is_(None)).order_by(Workspace.id)
+            )).scalars().first()
+            if workspace is None:
+                raise HTTPException(status_code=404, detail="Воркспейс не найден")
+        else:
+            # Первое окружение, членом которого является пользователь.
+            # Раньше здесь бралось первое окружение в БД, из-за чего
+            # участники не-первого окружения получали 403 «Нет доступа».
+            workspace = (await session.execute(
+                select(Workspace)
+                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+                .where(
+                    WorkspaceMember.user_id == user.id,
+                    Workspace.deleted_at.is_(None),
+                )
+                .order_by(Workspace.id)
+            )).scalars().first()
+            if workspace is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="У вас нет окружения. Создайте своё окружение.",
+                )
     else:
         workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or (workspace.deleted_at is not None and not allow_deleted):
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Воркспейс не найден")
+    if workspace.deleted_at is not None and not allow_deleted:
         raise HTTPException(status_code=404, detail="Воркспейс не найден")
     if user_is_superadmin(role_names):
         return workspace, "owner"

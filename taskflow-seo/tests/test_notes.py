@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 
@@ -12,6 +14,38 @@ def _login_note_payload(**kw):
     }
     payload.update(kw)
     return payload
+
+
+def _login_user(sync_request, username, password='pass1234'):
+    resp = sync_request('POST', '/api/auth/login', json={'username': username, 'password': password})
+    assert resp.status_code == 200, resp.text
+    return {'taskflow_user': resp.cookies.get('taskflow_user')}
+
+
+def _new_user(sync_request, admin_cookies, prefix):
+    """Создаёт свежего пользователя без членств в окружениях."""
+    uniq = uuid.uuid4().hex[:8]
+    username = f'{prefix}_{uniq}'
+    resp = sync_request(
+        'POST', '/api/users', json={'username': username, 'password': 'pass1234'}, cookies=admin_cookies,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()['id'], _login_user(sync_request, username)
+
+
+def _make_ws(sync_request, cookies, name, preset='empty'):
+    resp = sync_request('POST', '/api/workspaces', json={'name': name, 'preset': preset}, cookies=cookies)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _add_member(sync_request, cookies, ws_id, user_id, role='member'):
+    resp = sync_request(
+        'POST', f'/api/workspaces/{ws_id}/members',
+        json={'user_id': user_id, 'role': role}, cookies=cookies,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp
 
 
 class TestNotesPage:
@@ -340,3 +374,206 @@ class TestNotesValidation:
         assert data['title'] == 'Public source (копия)'
         assert data['is_owner'] is True
         assert data['is_public'] is False
+
+
+class TestNotesWorkspaceIsolation:
+    """Изоляция окружений и resolve_workspace по умолчанию.
+
+    Фикс бага «Нет доступа к воркспейсу»: без workspace_id берётся первое
+    окружение, членом которого является пользователь, а не первое в БД.
+    """
+
+    def test_user_without_workspace_gets_clear_403(self, sync_request, admin_cookies):
+        _, cookies = _new_user(sync_request, admin_cookies, 'nows')
+
+        resp = sync_request('GET', '/api/notes', cookies=cookies)
+        assert resp.status_code == 403
+        assert 'нет окружения' in resp.json()['detail'].lower()
+
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Без окружения'), cookies=cookies)
+        assert resp.status_code == 403
+        assert 'нет окружения' in resp.json()['detail'].lower()
+
+        # и создавать заметку, и список — один и тот же внятный ответ
+        resp = sync_request('GET', '/api/workspaces', cookies=cookies)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_member_of_nonfirst_workspace_resolves_own_default(self, sync_request, admin_cookies):
+        uid, cookies = _new_user(sync_request, admin_cookies, 'second')
+        # Ловушка: окружение, которое гарантированно станет «первым в БД»,
+        # но юзер в нём НЕ состоит. Без фикса resolve брало именно его.
+        _make_ws(sync_request, admin_cookies, f'Ловушка {uuid.uuid4().hex[:6]}')
+        ws = _make_ws(sync_request, admin_cookies, f'Второе окружение {uuid.uuid4().hex[:6]}')
+        _add_member(sync_request, admin_cookies, ws['id'], uid)
+
+        created = sync_request(
+            'POST', f'/api/notes?workspace_id={ws["id"]}',
+            json=_login_note_payload(title='Заметка во втором'), cookies=cookies,
+        )
+        assert created.status_code == 201
+        note_id = created.json()['id']
+
+        # без workspace_id: раньше было 403 «Нет доступа к воркспейсу»
+        resp = sync_request('GET', '/api/notes', cookies=cookies)
+        assert resp.status_code == 200
+        assert any(n['id'] == note_id for n in resp.json()['notes'])
+
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Ещё без ws'), cookies=cookies)
+        assert resp.status_code == 201
+
+    def test_notes_isolated_between_user_workspaces(self, sync_request, admin_cookies):
+        # юзер A: своё окружение + заметка в нём (без параметра ws)
+        _, user_a = _new_user(sync_request, admin_cookies, 'iso_a')
+        _make_ws(sync_request, user_a, f'Окружение A {uuid.uuid4().hex[:6]}')
+        note_a = sync_request(
+            'POST', '/api/notes', json=_login_note_payload(title='Только у A'), cookies=user_a,
+        )
+        assert note_a.status_code == 201
+        note_a_id = note_a.json()['id']
+
+        # юзер B: член первого окружения в системе
+        uid_b, user_b = _new_user(sync_request, admin_cookies, 'iso_b')
+        workspaces = sync_request('GET', '/api/workspaces', cookies=admin_cookies).json()
+        first_ws_id = workspaces[0]['id']
+        resp = sync_request(
+            'POST', f'/api/workspaces/{first_ws_id}/members',
+            json={'user_id': uid_b, 'role': 'member'}, cookies=admin_cookies,
+        )
+        assert resp.status_code in (201, 400), resp.text
+
+        # у A и B разные окружения по умолчанию — списки не пересекаются
+        resp = sync_request('GET', '/api/notes', cookies=user_b)
+        assert resp.status_code == 200
+        assert all(n['id'] != note_a_id for n in resp.json()['notes'])
+
+        resp = sync_request('GET', '/api/notes', cookies=user_a)
+        assert resp.status_code == 200
+        assert any(n['id'] == note_a_id for n in resp.json()['notes'])
+
+    def test_explicit_foreign_workspace_forbidden(self, sync_request, admin_cookies):
+        _, cookies = _new_user(sync_request, admin_cookies, 'foreign')
+        ws = _make_ws(sync_request, admin_cookies, f'Чужое окружение {uuid.uuid4().hex[:6]}')
+
+        resp = sync_request('GET', f'/api/notes?workspace_id={ws["id"]}', cookies=cookies)
+        assert resp.status_code == 403
+        assert resp.json()['detail'] == 'Нет доступа к воркспейсу'
+
+        resp = sync_request('POST', f'/api/notes?workspace_id={ws["id"]}', json=_login_note_payload(title='X'), cookies=cookies)
+        assert resp.status_code == 403
+
+    def test_superuser_resolves_first_workspace_by_default(self, sync_request, admin_cookies):
+        resp = sync_request('GET', '/api/notes', cookies=admin_cookies)
+        assert resp.status_code == 200
+
+
+class TestNotesTagsParsing:
+
+    def test_tags_none_and_plain_string(self, sync_request, admin_cookies):
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Tags none', tags=None), cookies=admin_cookies)
+        assert resp.status_code == 201
+        assert resp.json()['tags'] == []
+
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Tags string', tags='alpha, beta'), cookies=admin_cookies)
+        assert resp.status_code == 201
+        assert resp.json()['tags'] == ['alpha', 'beta']
+
+    def test_tags_json_string(self, sync_request, admin_cookies):
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Tags json', tags='["one", "two"]'), cookies=admin_cookies)
+        assert resp.status_code == 201
+        assert resp.json()['tags'] == ['one', 'two']
+
+
+class TestNotesFolderOwnership:
+
+    def test_update_foreign_folder_404(self, sync_request, admin_cookies, executor_cookies):
+        folder = sync_request('POST', '/api/notes/folders', json={'name': 'Owner folder'}, cookies=admin_cookies).json()
+        resp = sync_request('PUT', f"/api/notes/folders/{folder['id']}", json={'name': 'Hacked'}, cookies=executor_cookies)
+        assert resp.status_code == 404
+
+    def test_delete_foreign_folder_404(self, sync_request, admin_cookies, executor_cookies):
+        folder = sync_request('POST', '/api/notes/folders', json={'name': 'Doomed foreign'}, cookies=admin_cookies).json()
+        resp = sync_request('DELETE', f"/api/notes/folders/{folder['id']}", cookies=executor_cookies)
+        assert resp.status_code == 404
+
+    def test_update_folder_empty_name_400(self, sync_request, admin_cookies):
+        folder = sync_request('POST', '/api/notes/folders', json={'name': 'Rename me'}, cookies=admin_cookies).json()
+        resp = sync_request('PUT', f"/api/notes/folders/{folder['id']}", json={'name': '   '}, cookies=admin_cookies)
+        assert resp.status_code == 400
+
+    def test_folder_parent_reset_to_root(self, sync_request, admin_cookies):
+        parent = sync_request('POST', '/api/notes/folders', json={'name': 'Reset parent'}, cookies=admin_cookies).json()
+        child = sync_request('POST', '/api/notes/folders', json={'name': 'Reset child', 'parent_id': parent['id']}, cookies=admin_cookies).json()
+        resp = sync_request('PUT', f"/api/notes/folders/{child['id']}", json={'parent_id': None}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json()['parent_id'] is None
+
+    def test_folder_reparent_to_valid(self, sync_request, admin_cookies):
+        one = sync_request('POST', '/api/notes/folders', json={'name': 'Reparent one'}, cookies=admin_cookies).json()
+        two = sync_request('POST', '/api/notes/folders', json={'name': 'Reparent two'}, cookies=admin_cookies).json()
+        child = sync_request('POST', '/api/notes/folders', json={'name': 'Reparent child', 'parent_id': one['id']}, cookies=admin_cookies).json()
+        resp = sync_request('PUT', f"/api/notes/folders/{child['id']}", json={'parent_id': two['id']}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json()['parent_id'] == two['id']
+
+    def test_folder_reparent_to_foreign_400(self, sync_request, admin_cookies, executor_cookies):
+        foreign = sync_request('POST', '/api/notes/folders', json={'name': 'Foreign target'}, cookies=executor_cookies).json()
+        own = sync_request('POST', '/api/notes/folders', json={'name': 'Own source'}, cookies=admin_cookies).json()
+        resp = sync_request('PUT', f"/api/notes/folders/{own['id']}", json={'parent_id': foreign['id']}, cookies=admin_cookies)
+        assert resp.status_code == 400
+
+
+class TestNotesUpdateEdges:
+
+    def test_update_missing_note_404(self, sync_request, admin_cookies):
+        resp = sync_request('PUT', '/api/notes/999999', json={'title': 'Ghost'}, cookies=admin_cookies)
+        assert resp.status_code == 404
+
+    def test_update_title_too_long_400(self, sync_request, admin_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Long title src'), cookies=admin_cookies).json()['id']
+        resp = sync_request('PUT', f'/api/notes/{note_id}', json={'title': 'y' * 201}, cookies=admin_cookies)
+        assert resp.status_code == 400
+
+    def test_create_content_too_large_400(self, sync_request, admin_cookies):
+        resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Huge', content='x' * 500_001), cookies=admin_cookies)
+        assert resp.status_code == 400
+
+    def test_update_content_too_large_400(self, sync_request, admin_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Content limit'), cookies=admin_cookies).json()['id']
+        resp = sync_request('PUT', f'/api/notes/{note_id}', json={'content': 'x' * 500_001}, cookies=admin_cookies)
+        assert resp.status_code == 400
+
+    def test_update_content_ok(self, sync_request, admin_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Content ok'), cookies=admin_cookies).json()['id']
+        resp = sync_request('PUT', f'/api/notes/{note_id}', json={'content': 'новое содержимое'}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json()['content'] == 'новое содержимое'
+
+    def test_update_format_and_tags_ok(self, sync_request, admin_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Format tags'), cookies=admin_cookies).json()['id']
+        resp = sync_request('PUT', f'/api/notes/{note_id}', json={'format': 'text', 'tags': ['tag1', 'tag2']}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json()['format'] == 'text'
+        assert resp.json()['tags'] == ['tag1', 'tag2']
+
+
+class TestNotesArchiveEdges:
+
+    def test_duplicate_archived_note_404(self, sync_request, admin_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Archived source'), cookies=admin_cookies).json()['id']
+        sync_request('POST', f'/api/notes/{note_id}/archive', cookies=admin_cookies)
+        resp = sync_request('POST', f'/api/notes/{note_id}/duplicate', cookies=admin_cookies)
+        assert resp.status_code == 404
+
+    def test_archive_foreign_note_404(self, sync_request, admin_cookies, executor_cookies):
+        note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Foreign archive target'), cookies=admin_cookies).json()['id']
+        resp = sync_request('POST', f'/api/notes/{note_id}/archive', cookies=executor_cookies)
+        assert resp.status_code == 404
+
+    def test_restore_missing_note_404(self, sync_request, admin_cookies):
+        resp = sync_request('POST', '/api/notes/999999/restore', cookies=admin_cookies)
+        assert resp.status_code == 404
+
+    def test_delete_missing_note_404(self, sync_request, admin_cookies):
+        resp = sync_request('DELETE', '/api/notes/999999', cookies=admin_cookies)
+        assert resp.status_code == 404
