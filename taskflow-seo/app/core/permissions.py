@@ -28,7 +28,7 @@ async def get_user_permissions(user_id: int) -> dict:
     import json
     from sqlalchemy import select
     from app.core.database import async_session
-    from app.core.models import Role, UserRole
+    from app.core.models import Group, Role, UserGroup, UserRole
 
     async with async_session() as session:
         result = await session.execute(select(UserRole).where(UserRole.user_id == user_id))
@@ -39,6 +39,19 @@ async def get_user_permissions(user_id: int) -> dict:
                 continue
             role_permissions = json.loads(role.permissions or '{}') if isinstance(role.permissions, str) else (role.permissions or {})
             permissions.update(role_permissions)
+        # группы — additive: только добавляют к правам ролей
+        group_rows = (await session.execute(
+            select(UserGroup).where(UserGroup.user_id == user_id)
+        )).scalars().all()
+        for link in group_rows:
+            group = await session.get(Group, link.group_id)
+            if not group:
+                continue
+            group_permissions = (
+                json.loads(group.permissions or '{}')
+                if isinstance(group.permissions, str) else (group.permissions or {})
+            )
+            permissions.update(group_permissions)
         return permissions
 
 

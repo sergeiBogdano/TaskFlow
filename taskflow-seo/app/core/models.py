@@ -513,3 +513,23 @@ class WorkspaceKnowledge(Base):
     fact = Column(Text, nullable=False)
     created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Group(Base):
+    """Глобальная группа пользователей: additive-набор прав (правило «Группы»)."""
+    __tablename__ = 'groups'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    permissions = Column(Text, default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserGroup(Base):
+    __tablename__ = 'user_groups'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey('groups.id', ondelete='CASCADE'), nullable=False, index=True)
+    user = relationship('User', backref='group_links')
+    group = relationship('Group')

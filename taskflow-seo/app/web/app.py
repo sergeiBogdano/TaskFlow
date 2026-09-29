@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -131,6 +131,7 @@ from app.web.api.workspaces import router as workspaces_router
 from app.web.api.sprints import router as sprints_router
 from app.web.api.notes import router as notes_router
 from app.web.api.permissions import router as permissions_router
+from app.web.api.groups import router as groups_router
 
 
 app.include_router(auth_router)
@@ -151,3 +152,4 @@ app.include_router(workspaces_router)
 app.include_router(sprints_router)
 app.include_router(notes_router)
 app.include_router(permissions_router)
+app.include_router(groups_router)

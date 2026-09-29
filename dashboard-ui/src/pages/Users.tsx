@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
+﻿import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, KeyRound, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
 import { api } from '../api/client';
-import type { PermissionCatalog, PermissionGroup, Role, User } from '../api/client';
+import type { Group, PermissionCatalog, PermissionGroup, Role, User } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
@@ -35,6 +35,12 @@ export function Users() {
   const [roleName, setRoleName] = useState('');
   const [permissionSearch, setPermissionSearch] = useState('');
   const [permissionTab, setPermissionTab] = useState<'app' | 'work'>('work');
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupEditorId, setGroupEditorId] = useState<number | null>(null);
+  const [groupName, setGroupName] = useState('');
+  const [groupEditorPermissions, setGroupEditorPermissions] = useState<Record<string, boolean>>({});
+  const [newGroupName, setNewGroupName] = useState('');
+    const [groupError, setGroupError] = useState('');
 
   const load = async () => {
     const [userList, roleList, permissionCatalog] = await Promise.all([
@@ -45,6 +51,9 @@ export function Users() {
     setUsers(userList);
     setRoles(roleList);
     setCatalog(permissionCatalog);
+    if (isSuperadminActor) {
+      api.getGroups().then(setGroups).catch(() => setGroups([]));
+    }
     const firstEditable = roleList.find(role => role.name !== 'superadmin');
     if (!selectedRoleId && firstEditable) {
       setSelectedRoleId(firstEditable.id);
@@ -149,6 +158,62 @@ export function Users() {
     await load();
   };
 
+  const createGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    setGroupError('');
+    try {
+      const group = await api.createGroup({ name, permissions: {} });
+      setNewGroupName('');
+      setGroups(prev => [...prev, { ...group, user_ids: [] }]);
+      setGroupEditorId(group.id);
+      setGroupName(group.name);
+      setGroupEditorPermissions(group.permissions || {});
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : 'Не удалось создать группу.');
+    }
+  };
+
+  const selectGroup = (groupId: number) => {
+    const group = groups.find(item => item.id === groupId);
+    setGroupEditorId(groupId);
+    setGroupName(group?.name || '');
+    setGroupEditorPermissions(group?.permissions || {});
+    setGroupError('');
+  };
+
+  const saveGroup = async () => {
+    if (!groupEditorId) return;
+    setGroupError('');
+    try {
+      await api.updateGroup(groupEditorId, { name: groupName.trim() || groups.find(g => g.id === groupEditorId)?.name, permissions: groupEditorPermissions });
+      await load();
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : 'Не удалось сохранить группу.');
+    }
+  };
+
+  const deleteGroup = async () => {
+    if (!groupEditorId) return;
+    const group = groups.find(item => item.id === groupEditorId);
+    if (!group || !confirm(`Удалить группу ${group.name}?`)) return;
+    await api.deleteGroup(group.id);
+    setGroupEditorId(null);
+    setGroupName('');
+    setGroupEditorPermissions({});
+    await load();
+  };
+
+  const toggleGroupMember = async (groupId: number, userId: number) => {
+    const group = groups.find(item => item.id === groupId);
+    if (!group) return;
+    const current = new Set(group.user_ids || []);
+    if (current.has(userId)) current.delete(userId);
+    else current.add(userId);
+    await api.setGroupMembers(groupId, [...current]);
+    await load();
+  };
+
   if (loading) return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка пользователей...</div>;
 
   const selectedRole = roles.find(role => role.id === selectedRoleId);
@@ -189,6 +254,7 @@ export function Users() {
         {users.map(user => {
           const protectedUser = isProtectedSuperadmin(user, users);
           const hasSuperadmin = isSuperadmin(user);
+          const userGroups = groups.filter(g => (g.user_ids || []).includes(user.id));
           return (
             <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_96px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
               <div className="min-w-0">
@@ -197,6 +263,11 @@ export function Users() {
                   {currentUser?.id === user.id && <span className="tf-chip text-[var(--color-accent)]">это вы</span>}
                   {hasSuperadmin && <span className="tf-chip text-[var(--color-warning)]"><ShieldCheck size={13} />{protectedUser ? 'защищён' : 'superadmin'}</span>}
                 </div>
+                {userGroups.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {userGroups.map(group => <span key={group.id} className="tf-chip text-[var(--color-muted)]">{group.name}</span>)}
+                  </div>
+                )}
               </div>
               {hasSuperadmin ? (
                 <div className="text-sm font-semibold text-[var(--color-text-secondary)]">superadmin</div>
@@ -319,6 +390,70 @@ export function Users() {
         )}
       </section>
       </div>
+
+      {isSuperadminActor && (
+        <section className="tf-panel-flat p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-black"><UsersRound size={16} className="text-[var(--color-accent)]" />Группы</div>
+              <div className="mt-1 text-xs text-[var(--color-text-secondary)]">Глобальные группы: additive-набор прав поверх роли. Назначает только superadmin.</div>
+            </div>
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <input className="tf-input max-w-xs" value={newGroupName} onChange={event => setNewGroupName(event.target.value)} placeholder="Название новой группы" />
+            <button type="button" onClick={createGroup} className="tf-button"><Plus size={15} />Добавить группу</button>
+            {groups.length === 0 && <span className="self-center text-xs text-[var(--color-muted)]">Групп пока нет</span>}
+          </div>
+          {groups.length > 0 && (
+            <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="space-y-1">
+                {groups.map(group => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => selectGroup(group.id)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${groupEditorId === group.id ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]' : 'border-[var(--color-border)] hover:bg-[var(--color-surface-2)]'}`}
+                  >
+                    <span className="truncate font-semibold">{group.name}</span>
+                    <span className="tf-chip">{(group.user_ids || []).length}</span>
+                  </button>
+                ))}
+              </div>
+              {groupEditorId && (
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                  <div className="mb-3 grid gap-3 sm:grid-cols-[minmax(160px,1fr)_auto_auto]">
+                    <input className="tf-input" value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="Название группы" />
+                    <button onClick={saveGroup} className="tf-button tf-button-primary"><Save size={15} />Сохранить</button>
+                    <button onClick={deleteGroup} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
+                  </div>
+                  {groupError && <div className="mb-2 text-xs font-semibold text-[var(--color-danger)]">{groupError}</div>}
+                  <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">Права группы (только добавляются к правам роли):</div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {(catalog?.groups || []).flatMap(groupDef => groupDef.items).map(item => (
+                      <label key={item.key} className={`flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs ${groupEditorPermissions[item.key] ? 'border-[var(--color-accent)]' : ''}`}>
+                        <input className="accent-[var(--color-accent)]" type="checkbox" checked={Boolean(groupEditorPermissions[item.key])} onChange={event => setGroupEditorPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
+                        {item.label}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="text-xs font-semibold text-[var(--color-text-secondary)]">Участники:</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {users.map(u => {
+                      const member = (groups.find(g => g.id === groupEditorId)?.user_ids || []).includes(u.id);
+                      return (
+                        <label key={u.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1 text-xs ${member ? 'border-[var(--color-accent)] bg-[var(--color-surface)]' : 'border-[var(--color-border)]'}`}>
+                          <input className="accent-[var(--color-accent)]" type="checkbox" checked={member} onChange={() => toggleGroupMember(groupEditorId, u.id)} />
+                          {u.username}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {showModal && <CreateUserModal onClose={() => setShowModal(false)} onCreate={handleCreate} />}
     </div>

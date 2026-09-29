@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.core.database import async_session
-from app.core.models import Role, User, UserRole, WorkspaceMember
+from app.core.models import Role, User, UserGroup, UserRole, WorkspaceMember
 from app.core.permissions import (
     assert_within_ceiling,
     get_current_user,
@@ -27,6 +27,10 @@ async def list_users(user=Depends(get_current_user)):
     async with async_session() as session:
         r = await session.execute(select(User).order_by(User.id))
         users = r.scalars().all()
+        all_links = (await session.execute(select(UserGroup))).scalars().all()
+        groups_by_user: dict[int, list[int]] = {}
+        for link in all_links:
+            groups_by_user.setdefault(link.user_id, []).append(link.group_id)
         result = []
         for u in users:
             rr = await session.execute(select(UserRole).where(UserRole.user_id == u.id))
@@ -36,6 +40,7 @@ async def list_users(user=Depends(get_current_user)):
                 'username': u.username,
                 'created_at': u.created_at.isoformat() if u.created_at else '',
                 'roles': [{'id': ur.role_id, 'name': (await session.get(Role, ur.role_id)).name} for ur in roles if await session.get(Role, ur.role_id)],
+                'group_ids': groups_by_user.get(u.id, []),
             })
     return JSONResponse(result)
 

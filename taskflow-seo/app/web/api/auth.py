@@ -17,19 +17,19 @@ class LoginRequest(BaseModel):
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _get_user_data(user: User, roles_list: list = None) -> dict:
-    perms = {}
-    if roles_list:
-        for ur in roles_list:
-            import json
+def _get_user_data(user: User, roles_list: list = None, permissions: dict | None = None) -> dict:
+    if permissions is None:
+        import json
+        permissions = {}
+        for ur in (roles_list or []):
             p = json.loads(ur.role.permissions) if isinstance(ur.role.permissions, str) else ur.role.permissions
-            perms.update(p)
+            permissions.update(p)
     return {
         'id': user.id,
         'username': user.username,
         'created_at': user.created_at.isoformat() if user.created_at else '',
         'roles': [{'id': ur.role.id, 'name': ur.role.name} for ur in (roles_list or [])],
-        'permissions': perms,
+        'permissions': permissions,
     }
 
 
@@ -45,8 +45,9 @@ async def login(body: LoginRequest):
             .where(UserRole.user_id == u.id)
         )
         roles = r.scalars().all()
+    from app.core.permissions import get_user_permissions
     response = JSONResponse({
-        'user': _get_user_data(u, roles),
+        'user': _get_user_data(u, roles, await get_user_permissions(u.id)),
         'token': token,
     })
     response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 30, samesite='lax')
@@ -79,4 +80,5 @@ async def me(request: Request):
             .where(UserRole.user_id == user.id)
         )
         roles = r.scalars().all()
-    return JSONResponse({'user': _get_user_data(user, roles)})
+    from app.core.permissions import get_user_permissions
+    return JSONResponse({'user': _get_user_data(user, roles, await get_user_permissions(user.id))})

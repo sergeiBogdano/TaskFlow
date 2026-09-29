@@ -1,4 +1,4 @@
-const API_BASE = '';
+﻿const API_BASE = '';
 
 const WORKSPACE_KEY = 'taskflow:workspace';
 
@@ -38,6 +38,14 @@ export type User = {
   created_at: string;
   roles: { id: number; name: string }[];
   permissions: Record<string, boolean>;
+  group_ids?: number[];
+};
+
+export type Group = {
+  id: number;
+  name: string;
+  permissions: Record<string, boolean>;
+  user_ids?: number[];
 };
 
 export type Task = {
@@ -483,6 +491,16 @@ export const api = {
   updateRole: (id: number, data: Record<string, any>) =>
     request<{ ok: boolean }>(`/api/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRole: (id: number) => request<{ ok: boolean }>(`/api/roles/${id}`, { method: 'DELETE' }),
+
+  // Groups (глобальные, только суперадмин)
+  getGroups: () => request<Group[]>('/api/groups'),
+  createGroup: (data: { name: string; permissions?: Record<string, boolean> }) =>
+    request<Group>('/api/groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateGroup: (id: number, data: Record<string, any>) =>
+    request<{ ok: boolean }>(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGroup: (id: number) => request<{ ok: boolean }>(`/api/groups/${id}`, { method: 'DELETE' }),
+  setGroupMembers: (id: number, userIds: number[]) =>
+    request<{ ok: boolean }>(`/api/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ user_ids: userIds }) }),
 
   // Tasks
   getTasks: (params?: string) => request<Task[]>(`/api/tasks/all${params ? `?${params}` : ''}`),
