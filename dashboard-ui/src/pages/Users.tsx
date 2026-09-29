@@ -30,6 +30,7 @@ export function Users() {
   const [newRoleName, setNewRoleName] = useState('');
   const [roleName, setRoleName] = useState('');
   const [permissionSearch, setPermissionSearch] = useState('');
+  const [permissionTab, setPermissionTab] = useState<'app' | 'work'>('work');
 
   const load = async () => {
     const [userList, roleList, permissionCatalog] = await Promise.all([
@@ -144,6 +145,7 @@ export function Users() {
   const selectedRole = roles.find(role => role.id === selectedRoleId);
   const enabledCount = Object.values(permissions).filter(Boolean).length;
   const filteredGroups = (catalog?.groups || [])
+    .filter(group => group.scope === permissionTab)
     .map(group => ({
       ...group,
       items: group.items.filter(item => {
@@ -230,7 +232,7 @@ export function Users() {
         <div className="mb-4 grid gap-3 lg:grid-cols-[220px_minmax(180px,1fr)_auto_auto]">
           <SearchSelect
             value={selectedRoleId ? String(selectedRoleId) : ''}
-            options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: roleLabel(role) }))}
+            options={roles.map(role => ({ value: String(role.id), label: roleLabel(role) }))}
             onChange={value => selectRole(Number(value))}
             placeholder="Выберите роль"
             searchPlaceholder="Найти роль..."
@@ -249,6 +251,10 @@ export function Users() {
             <button type="button" className="tf-button" onClick={() => applyPreset('manager')}>Менеджер</button>
             <button type="button" className="tf-button" onClick={() => applyPreset('admin')}>Админ</button>
           </div>
+        </div>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button type="button" className={`tf-button ${permissionTab === 'app' ? 'tf-button-primary' : ''}`} onClick={() => setPermissionTab('app')}>Приложение</button>
+          <button type="button" className={`tf-button ${permissionTab === 'work' ? 'tf-button-primary' : ''}`} onClick={() => setPermissionTab('work')}>Работа</button>
         </div>
         <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
           <label className="relative">
