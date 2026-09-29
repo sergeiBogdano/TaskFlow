@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -6,9 +8,12 @@ from app.core.auth import hash_password
 from app.core.database import async_session
 from app.core.models import Role, User, UserRole, WorkspaceMember
 from app.core.permissions import (
+    assert_within_ceiling,
     get_current_user,
+    get_user_permissions,
     get_user_role_names,
     get_workspace_role,
+    require_permission,
     require_role,
     resolve_workspace,
     user_is_superadmin,
@@ -118,7 +123,7 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
 
 
 @router.put('/{user_id}/role')
-async def set_role(user_id: int, request: Request, user=Depends(require_role(['superadmin']))):
+async def set_role(user_id: int, request: Request, user=Depends(require_permission('users'))):
     data = await request.json()
     role_id = data.get('role_id')
     async with async_session() as session:
@@ -141,6 +146,12 @@ async def set_role(user_id: int, request: Request, user=Depends(require_role(['s
             raise HTTPException(status_code=403, detail='Superadmin cannot be assigned here')
         if target_is_superadmin:
             raise HTTPException(status_code=403, detail='Cannot change the superadmin role')
+        # потолок: назначаемая роль не должна давать прав сверх прав назначающего
+        role_permissions = (
+            json.loads(r.permissions) if isinstance(r.permissions, str) else (r.permissions or {})
+        )
+        assert_within_ceiling(await get_user_permissions(user.id), role_permissions,
+                              detail='Назначаемая роль даёт права выше ваших')
         await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
         existing = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)

@@ -123,6 +123,33 @@ def require_role(roles: list[str]):
     return check
 
 
+def require_permission(key: str):
+    """Доступ по праву из каталога (суперадмин с `all` проходит всегда)."""
+    async def check(user=Depends(get_current_user)):
+        permissions = await get_user_permissions(user.id)
+        if not (permissions.get('all') or permissions.get(key)):
+            raise HTTPException(status_code=403, detail=f'Нет права "{key}"')
+        return user
+    return check
+
+
+def assert_within_ceiling(granter_permissions: dict, target_permissions: dict,
+                          detail: str = 'Нельзя выдать права выше своих'):
+    """Единый потолок (правило 3): записываемые права ⊆ прав вызывающего.
+
+    Суперадмин (`all`) проходит без проверки. Ложные значения (`False`)
+    потолок не нарушают — это снятие права, а не выдача.
+    """
+    if granter_permissions.get('all'):
+        return
+    extra = sorted(
+        key for key, value in (target_permissions or {}).items()
+        if value and not granter_permissions.get(key)
+    )
+    if extra:
+        raise HTTPException(status_code=403, detail=f'{detail}: {", ".join(extra)}')
+
+
 async def get_workspace_role(session, user_id: int, workspace_id: int) -> str | None:
     from sqlalchemy import select
     from app.core.models import WorkspaceMember

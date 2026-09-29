@@ -6,13 +6,22 @@ from sqlalchemy import select
 
 from app.core.database import async_session
 from app.core.models import Role, UserRole
-from app.core.permissions import require_role
+from app.core.permissions import assert_within_ceiling, get_user_permissions, require_permission
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
 
 
+def _role_permissions(role) -> dict:
+    if isinstance(role.permissions, str):
+        try:
+            return json.loads(role.permissions or '{}')
+        except ValueError:
+            return {}
+    return dict(role.permissions or {})
+
+
 @router.get('')
-async def list_roles(user=Depends(require_role(['superadmin']))):
+async def list_roles(user=Depends(require_permission('users'))):
     async with async_session() as session:
         r = await session.execute(select(Role).order_by(Role.id))
         roles = r.scalars().all()
@@ -24,10 +33,12 @@ async def list_roles(user=Depends(require_role(['superadmin']))):
 
 
 @router.post('')
-async def create_role(request: Request, user=Depends(require_role(['superadmin']))):
+async def create_role(request: Request, user=Depends(require_permission('users'))):
     data = await request.json()
     name = (data.get('name') or '').strip()
     permissions = data.get('permissions') or {}
+    granter = await get_user_permissions(user.id)
+    assert_within_ceiling(granter, permissions)
     async with async_session() as session:
         existing = await session.execute(select(Role).where(Role.name == name))
         if existing.scalar_one_or_none():
@@ -40,8 +51,9 @@ async def create_role(request: Request, user=Depends(require_role(['superadmin']
 
 
 @router.put('/{role_id}')
-async def update_role(role_id: int, request: Request, user=Depends(require_role(['superadmin']))):
+async def update_role(role_id: int, request: Request, user=Depends(require_permission('users'))):
     data = await request.json()
+    granter = await get_user_permissions(user.id)
     async with async_session() as session:
         role = await session.get(Role, role_id)
         if not role:
@@ -54,19 +66,23 @@ async def update_role(role_id: int, request: Request, user=Depends(require_role(
                 raise HTTPException(status_code=403, detail='Нельзя создать или переименовать роль в superadmin')
             role.name = next_name
         if 'permissions' in data:
+            assert_within_ceiling(granter, data.get('permissions') or {})
             role.permissions = json.dumps(data.get('permissions') or {}, ensure_ascii=False)
         await session.commit()
     return JSONResponse({'ok': True})
 
 
 @router.delete('/{role_id}')
-async def delete_role(role_id: int, user=Depends(require_role(['superadmin']))):
+async def delete_role(role_id: int, user=Depends(require_permission('users'))):
     async with async_session() as session:
         role = await session.get(Role, role_id)
         if not role:
             raise HTTPException(status_code=404, detail='Role not found')
         if role.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Cannot delete superadmin role')
+        # удалять можно только роль, чьи права сам способен выдать
+        assert_within_ceiling(await get_user_permissions(user.id), _role_permissions(role),
+                              detail='Нельзя удалить роль с правами выше ваших')
         await session.execute(UserRole.__table__.delete().where(UserRole.role_id == role_id))
         await session.delete(role)
         await session.commit()

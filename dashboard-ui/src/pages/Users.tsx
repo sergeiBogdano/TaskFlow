@@ -17,6 +17,10 @@ const roleLabel = (role: Role) => roleMeta[role.name]?.label || role.name;
 
 export function Users() {
   const { user: currentUser } = useAuth();
+  const isSuperadminActor = Boolean(currentUser?.permissions?.all);
+  const canGrant = (key: string) => isSuperadminActor || Boolean(currentUser?.permissions?.[key]);
+  const canGrantRole = (role: Role) =>
+    isSuperadminActor || Object.entries(role.permissions || {}).every(([key, value]) => !value || canGrant(key));
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
@@ -118,14 +122,19 @@ export function Users() {
 
   const applyPreset = (preset: string) => {
     const next: Record<string, boolean> = {};
-    (catalog?.presets[preset] || []).forEach(key => { next[key] = true; });
+    (catalog?.presets[preset] || []).forEach(key => {
+      if (canGrant(key)) next[key] = true;
+    });
     setPermissions(next);
   };
 
   const setGroupPermissions = (group: PermissionGroup, enabled: boolean) => {
     setPermissions(prev => {
       const next = { ...prev };
-      group.items.forEach(item => { next[item.key] = enabled; });
+      group.items.forEach(item => {
+        if (enabled && !canGrant(item.key)) return;
+        next[item.key] = enabled;
+      });
       return next;
     });
   };
@@ -194,7 +203,7 @@ export function Users() {
               ) : (
                 <SearchSelect
                   value={user.roles?.[0]?.id ? String(user.roles[0].id) : ''}
-                  options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: roleLabel(role) }))}
+                  options={roles.filter(role => role.name !== 'superadmin' && canGrantRole(role)).map(role => ({ value: String(role.id), label: roleLabel(role) }))}
                   onChange={value => handleSetRole(user.id, Number(value))}
                   emptyLabel="Без роли"
                   placeholder="Роль"
@@ -203,7 +212,7 @@ export function Users() {
               )}
               <div className="flex justify-end gap-1.5">
                 <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
-                {currentUser?.id !== user.id && !protectedUser && (
+                {isSuperadminActor && currentUser?.id !== user.id && !protectedUser && (
                   <button onClick={() => handleDelete(user)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Удалить"><Trash2 size={15} /></button>
                 )}
               </div>
@@ -285,19 +294,23 @@ export function Users() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  {group.items.map(item => (
-                    <label key={item.key} className="flex items-start gap-3 rounded-lg border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-3 py-2 text-sm">
-                      <input className="mt-1 accent-[var(--color-accent)]" type="checkbox" checked={Boolean(permissions[item.key])} onChange={event => setPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
+                  {group.items.map(item => {
+                    const overCeiling = !canGrant(item.key);
+                    return (
+                    <label key={item.key} className={`flex items-start gap-3 rounded-lg border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-3 py-2 text-sm ${overCeiling ? 'opacity-60' : ''}`}>
+                      <input className="mt-1 accent-[var(--color-accent)]" type="checkbox" disabled={overCeiling} checked={Boolean(permissions[item.key])} onChange={event => setPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2 font-semibold">
                           {item.label}
                           {item.level === 'sensitive' && <span className="tf-chip text-[var(--color-warning)]"><Lock size={12} />важное</span>}
                           {item.level === 'advanced' && <span className="tf-chip text-[var(--color-accent)]">расширенное</span>}
+                          {overCeiling && <span className="tf-chip text-[var(--color-danger)]">нет у вас прав</span>}
                         </span>
                         <span className="mt-1 block text-xs leading-5 text-[var(--color-text-secondary)]">{item.hint}</span>
                       </span>
                     </label>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="mt-3 text-xs text-[var(--color-muted)]">Включено в группе: {groupEnabled} из {group.items.length}</div>
               </div>
