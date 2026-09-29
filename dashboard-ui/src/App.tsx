@@ -45,10 +45,10 @@ export default function App() {
                 <Route path="/users" element={<AdminRoute><Users /></AdminRoute>} />
                 <Route path="/reports" element={<PermissionRoute permission="reports"><Reports /></PermissionRoute>} />
                 <Route path="/trash" element={<PermissionRoute permission="tasks"><Trash /></PermissionRoute>} />
-                <Route path="/ai" element={<AiAnalytics />} />
-                <Route path="/notes" element={<Notes />} />
+                <Route path="/ai" element={<PermissionRoute permission="ai"><AiAnalytics /></PermissionRoute>} />
+                <Route path="/notes" element={<PermissionRoute permission="notes"><Notes /></PermissionRoute>} />
                 <Route path="/sprints" element={<PermissionRoute permission="tasks"><Sprints /></PermissionRoute>} />
-                <Route path="/workspace" element={<WorkspaceSettings />} />
+                <Route path="/workspace" element={<PermissionRoute permission="workspace"><WorkspaceSettings /></PermissionRoute>} />
                 <Route path="/settings" element={<PermissionRoute permission="settings"><Settings /></PermissionRoute>} />
               </Route>
             </Route>

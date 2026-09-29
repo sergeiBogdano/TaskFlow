@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { PermissionCatalog, PermissionGroup, Role, User } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { useAuth } from '../hooks/useAuth';
+import { roleMeta } from '../lib/taskflow';
 
 const groupIcons: Record<string, typeof LayoutDashboard> = {
   navigation: LayoutDashboard,
@@ -11,6 +12,8 @@ const groupIcons: Record<string, typeof LayoutDashboard> = {
   clients: Building2,
   system: Settings2,
 };
+
+const roleLabel = (role: Role) => roleMeta[role.name]?.label || role.name;
 
 export function Users() {
   const { user: currentUser } = useAuth();
@@ -189,7 +192,7 @@ export function Users() {
               ) : (
                 <SearchSelect
                   value={user.roles?.[0]?.id ? String(user.roles[0].id) : ''}
-                  options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: role.name }))}
+                  options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: roleLabel(role) }))}
                   onChange={value => handleSetRole(user.id, Number(value))}
                   emptyLabel="Без роли"
                   placeholder="Роль"
@@ -227,7 +230,7 @@ export function Users() {
         <div className="mb-4 grid gap-3 lg:grid-cols-[220px_minmax(180px,1fr)_auto_auto]">
           <SearchSelect
             value={selectedRoleId ? String(selectedRoleId) : ''}
-            options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: role.name }))}
+            options={roles.filter(role => role.name !== 'superadmin').map(role => ({ value: String(role.id), label: roleLabel(role) }))}
             onChange={value => selectRole(Number(value))}
             placeholder="Выберите роль"
             searchPlaceholder="Найти роль..."

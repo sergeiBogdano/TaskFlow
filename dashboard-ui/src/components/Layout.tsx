@@ -48,7 +48,7 @@ const nav = [
       { to: '/kanban', icon: Columns3, label: 'Канбан', hint: 'Поток работы', permission: 'kanban' },
       { to: '/calendar', icon: CalendarDays, label: 'Календарь', hint: 'План выполнения', permission: 'calendar' },
       { to: '/notifications', icon: Bell, label: 'Уведомления', hint: 'События', permission: 'notifications' },
-      { to: '/notes', icon: NotebookPen, label: 'Заметки', hint: 'Идеи и черновики', permission: 'tasks' },
+      { to: '/notes', icon: NotebookPen, label: 'Заметки', hint: 'Идеи и черновики', permission: 'notes' },
       { to: '/trash', icon: Trash2, label: 'Корзина', hint: 'Удалённые задачи', permission: 'tasks' },
     ],
   },
@@ -58,14 +58,14 @@ const nav = [
       { to: '/clients', icon: Users, label: 'Клиенты', hint: 'CRM и договоры', permission: 'clients' },
       { to: '/modules', icon: Puzzle, label: 'Модули', hint: 'Автоматизация', permission: 'modules' },
       { to: '/reports', icon: BarChart3, label: 'Отчёты', hint: 'Метрики', permission: 'reports' },
-      { to: '/ai', icon: Sparkles, label: 'AI-аналитика', hint: 'Ollama', permission: 'reports' },
+      { to: '/ai', icon: Sparkles, label: 'AI-аналитика', hint: 'Ollama', permission: 'ai' },
     ],
   },
   {
     section: 'Система',
     items: [
       { to: '/users', icon: CircleUser, label: 'Пользователи', hint: 'Роли и доступ', permission: 'users' },
-      { to: '/workspace', icon: Layers, label: 'Окружение', hint: 'Настройки и команда', permission: 'tasks' },
+      { to: '/workspace', icon: Layers, label: 'Окружение', hint: 'Настройки и команда', permission: 'workspace' },
       { to: '/settings', icon: Settings, label: 'Настройки', hint: 'Профиль', permission: 'settings' },
     ],
   },
@@ -192,9 +192,8 @@ export function Layout() {
   const primaryRole = user?.roles?.[0]?.name || 'executor';
   const role = roleMeta[primaryRole] || roleMeta.executor;
   const isSuperadmin = hasRole('superadmin');
-  const canSee = (permission: string, route?: string) => {
+  const canSee = (permission: string) => {
     if (isSuperadmin) return true;
-    if (route === '/users') return false;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };
   const pageTitle = useMemo(() => {
@@ -265,7 +264,7 @@ export function Layout() {
         </div>
         <nav className={cn('flex gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
-            const visibleItems = group.items.filter(item => canSee(item.permission, item.to));
+            const visibleItems = group.items.filter(item => canSee(item.permission));
             if (!visibleItems.length) return null;
             const shownItems = orderedItems(group.section, visibleItems)
               .filter(item => isNavVisible(item.to))
