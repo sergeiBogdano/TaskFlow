@@ -97,10 +97,12 @@ async def executor_cookies(client):
 @pytest.fixture
 def sync_request(client, event_loop):
     def make_request(method, url, **kw):
-        if 'cookies' in kw:
-            c = kw.pop('cookies')
-            kw.setdefault('headers', {})['Cookie'] = '; '.join(
-                f'{k}={v}' for k, v in c.items()
-            ) if c else ''
+        # Всегда задаём Cookie явно: session-scoped client хранит куки
+        # от прошлых логинов в jar, и без явного заголовка анонимные
+        # запросы ушли бы авторизованными.
+        c = kw.pop('cookies', None)
+        kw.setdefault('headers', {})['Cookie'] = '; '.join(
+            f'{k}={v}' for k, v in c.items()
+        ) if c else ''
         return event_loop.run_until_complete(client.request(method, url, **kw))
     return make_request
