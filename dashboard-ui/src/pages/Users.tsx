@@ -1,79 +1,22 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, KeyRound, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
 import { api } from '../api/client';
-import type { Role, User } from '../api/client';
+import type { PermissionCatalog, PermissionGroup, Role, User } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { useAuth } from '../hooks/useAuth';
 
-type PermissionItem = { key: string; label: string; hint: string; level?: 'basic' | 'advanced' | 'sensitive' };
-type PermissionGroup = { id: string; title: string; icon: any; description: string; items: PermissionItem[] };
-
-const permissionGroups: PermissionGroup[] = [
-  {
-    id: 'navigation',
-    icon: LayoutDashboard,
-    description: 'Какие основные разделы будут видны пользователю в меню.',
-    title: 'Разделы приложения',
-    items: [
-      { key: 'dashboard', label: 'Дашборд', hint: 'Главная сводка и здоровье организаций', level: 'basic' },
-      { key: 'tasks', label: 'Задачи', hint: 'Список задач и создание задач', level: 'basic' },
-      { key: 'kanban', label: 'Канбан', hint: 'Доска статусов и перетаскивание задач', level: 'basic' },
-      { key: 'calendar', label: 'Календарь', hint: 'Задачи по дате выполнения', level: 'basic' },
-      { key: 'clients', label: 'Клиенты', hint: 'Карточки организаций и справочник клиентов', level: 'basic' },
-      { key: 'modules', label: 'Модули', hint: 'Автоматическое создание задач по расписанию', level: 'advanced' },
-      { key: 'reports', label: 'Отчёты и аналитика', hint: 'Отчеты, клиентская аналитика и выгрузки', level: 'advanced' },
-      { key: 'notifications', label: 'Уведомления', hint: 'Личные и системные уведомления', level: 'basic' },
-    ],
-  },
-  {
-    id: 'tasks',
-    icon: ListChecks,
-    title: 'Работа',
-    description: 'Кто какие задачи видит и может выбирать в фильтрах.',
-    items: [
-      { key: 'tasks_view_team', label: 'Выбор сотрудника', hint: 'Можно смотреть задачи выбранного сотрудника в фильтрах', level: 'advanced' },
-      { key: 'tasks_view_others', label: 'Видеть чужие задачи', hint: 'Доступ к задачам других сотрудников в рамках разрешенных клиентов', level: 'sensitive' },
-      { key: 'tasks_view_all', label: 'Видеть все задачи', hint: 'Максимальный обзор задач команды', level: 'sensitive' },
-      { key: 'dashboard_team', label: 'Командный дашборд', hint: 'Сводки и здоровье организаций по команде, а не только по себе', level: 'advanced' },
-    ],
-  },
-  {
-    id: 'clients',
-    icon: Building2,
-    title: 'Клиенты и отчёты',
-    description: 'Доступ к вкладкам клиента. Название организации доступно всем с правом “Клиенты”, а чувствительные вкладки настраиваются отдельно.',
-    items: [
-      { key: 'client_tab_contacts', label: 'Контакты', hint: 'Контактные лица клиента', level: 'basic' },
-      { key: 'client_tab_access', label: 'Доступы', hint: 'Логины, пароли, URL и доступ пользователей к клиенту', level: 'sensitive' },
-      { key: 'client_tab_contracts', label: 'Договоры', hint: 'Сроки, продления и файлы договоров', level: 'sensitive' },
-      { key: 'client_tab_notes', label: 'Заметки', hint: 'Конкуренты и внутренние заметки клиента', level: 'sensitive' },
-      { key: 'client_tab_related', label: 'Задачи и модули', hint: 'Связанные задачи и подключенные модули клиента', level: 'advanced' },
-      { key: 'client_tab_activity', label: 'История', hint: 'Журнал изменений клиента', level: 'advanced' },
-      { key: 'client_delete', label: 'Удаление клиентов', hint: 'Перемещение клиентов в корзину и массовое удаление', level: 'sensitive' },
-    ],
-  },
-  {
-    id: 'system',
-    icon: Settings2,
-    title: 'Система',
-    description: 'Администрирование приложения. Эти права лучше выдавать редко.',
-    items: [
-      { key: 'users', label: 'Пользователи и роли', hint: 'Создание пользователей, назначение ролей, настройка прав', level: 'sensitive' },
-      { key: 'settings', label: 'Настройки', hint: 'Системные настройки приложения', level: 'sensitive' },
-    ],
-  },
-];
-
-const rolePresets = {
-  executor: ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications'],
-  manager: ['dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'kanban', 'calendar', 'clients', 'client_tab_contacts', 'client_tab_contracts', 'client_tab_related', 'client_tab_activity', 'modules', 'reports', 'notifications'],
-  admin: ['dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'tasks_view_others', 'kanban', 'calendar', 'clients', 'client_tab_contacts', 'client_tab_access', 'client_tab_contracts', 'client_tab_notes', 'client_tab_related', 'client_tab_activity', 'client_delete', 'modules', 'reports', 'notifications', 'settings'],
-} as const;
+const groupIcons: Record<string, typeof LayoutDashboard> = {
+  navigation: LayoutDashboard,
+  tasks: ListChecks,
+  clients: Building2,
+  system: Settings2,
+};
 
 export function Users() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -86,9 +29,14 @@ export function Users() {
   const [permissionSearch, setPermissionSearch] = useState('');
 
   const load = async () => {
-    const [userList, roleList] = await Promise.all([api.getUsers(), api.getRoles()]);
+    const [userList, roleList, permissionCatalog] = await Promise.all([
+      api.getUsers(),
+      api.getRoles(),
+      api.getPermissionCatalog(),
+    ]);
     setUsers(userList);
     setRoles(roleList);
+    setCatalog(permissionCatalog);
     const firstEditable = roleList.find(role => role.name !== 'superadmin');
     if (!selectedRoleId && firstEditable) {
       setSelectedRoleId(firstEditable.id);
@@ -164,9 +112,9 @@ export function Users() {
     setRoleName(role.name);
   };
 
-  const applyPreset = (preset: keyof typeof rolePresets) => {
+  const applyPreset = (preset: string) => {
     const next: Record<string, boolean> = {};
-    rolePresets[preset].forEach(key => { next[key] = true; });
+    (catalog?.presets[preset] || []).forEach(key => { next[key] = true; });
     setPermissions(next);
   };
 
@@ -192,7 +140,7 @@ export function Users() {
 
   const selectedRole = roles.find(role => role.id === selectedRoleId);
   const enabledCount = Object.values(permissions).filter(Boolean).length;
-  const filteredGroups = permissionGroups
+  const filteredGroups = (catalog?.groups || [])
     .map(group => ({
       ...group,
       items: group.items.filter(item => {
@@ -313,7 +261,7 @@ export function Users() {
         ) : (
           <div className="grid gap-4 2xl:grid-cols-2">
             {filteredGroups.map(group => {
-              const Icon = group.icon;
+              const Icon = groupIcons[group.id] || LayoutDashboard;
               const groupEnabled = group.items.filter(item => permissions[item.key]).length;
               return (
               <div key={group.title} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">

@@ -130,6 +130,7 @@ from app.web.api.ai_analytics import router as ai_analytics_router
 from app.web.api.workspaces import router as workspaces_router
 from app.web.api.sprints import router as sprints_router
 from app.web.api.notes import router as notes_router
+from app.web.api.permissions import router as permissions_router
 
 
 app.include_router(auth_router)
@@ -149,3 +150,4 @@ app.include_router(ai_analytics_router)
 app.include_router(workspaces_router)
 app.include_router(sprints_router)
 app.include_router(notes_router)
+app.include_router(permissions_router)

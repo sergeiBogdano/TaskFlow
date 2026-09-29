@@ -125,6 +125,28 @@ export type Role = {
   permissions: Record<string, boolean>;
 };
 
+export type PermissionItem = {
+  key: string;
+  label: string;
+  hint: string;
+  level?: 'basic' | 'advanced' | 'sensitive';
+  scope: 'app' | 'work';
+};
+
+export type PermissionGroup = {
+  id: string;
+  scope: 'app' | 'work';
+  title: string;
+  description: string;
+  items: PermissionItem[];
+};
+
+export type PermissionCatalog = {
+  groups: PermissionGroup[];
+  presets: Record<string, string[]>;
+  scopes: Record<string, 'app' | 'work'>;
+};
+
 export type Notification = {
   id: number;
   type: string;
@@ -455,6 +477,7 @@ export const api = {
 
   // Roles
   getRoles: () => request<Role[]>('/api/roles'),
+  getPermissionCatalog: () => request<PermissionCatalog>('/api/permissions/catalog'),
   createRole: (data: { name: string; permissions?: Record<string, boolean> }) =>
     request<Role>('/api/roles', { method: 'POST', body: JSON.stringify(data) }),
   updateRole: (id: number, data: Record<string, any>) =>

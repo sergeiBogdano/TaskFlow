@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.permission_catalog import DEFAULT_ROLE_PERMISSIONS, ROLE_MIGRATION_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +200,7 @@ async def _ensure_admin():
     from app.core.auth import hash_password
     from app.core.models import Role, User, UserRole
     async with async_session() as session:
-        roles_data = [
-            ('superadmin', {'all': True}),
-            ('admin', {'dashboard': True, 'dashboard_team': True, 'tasks': True, 'tasks_view_team': True, 'kanban': True, 'clients': True, 'modules': True, 'calendar': True, 'reports': True, 'notifications': True, 'settings': True, 'client_tab_contacts': True, 'client_tab_access': True, 'client_tab_contracts': True, 'client_tab_related': True, 'client_tab_activity': True, 'client_delete': True}),
-            ('manager', {'dashboard': True, 'tasks': True, 'kanban': True, 'clients': True, 'modules': True, 'calendar': True, 'reports': True, 'notifications': True, 'client_tab_contacts': True, 'client_tab_contracts': True, 'client_tab_related': True, 'client_tab_activity': True}),
-            ('executor', {'dashboard': True, 'tasks': True, 'kanban': True, 'clients': True, 'calendar': True, 'notifications': True}),
-        ]
+        roles_data = list(DEFAULT_ROLE_PERMISSIONS.items())
         for name, perms in roles_data:
             existing = await session.execute(select(Role).where(Role.name == name))
             role = existing.scalar_one_or_none()
@@ -281,6 +277,39 @@ async def _ensure_admin():
             logger.info('Seed data created: clients, contracts, tasks, modules')
 
 
+async def _migrate_role_permissions():
+    """Идемпотентно дозаполняет новые ключи прав в существующих ролях.
+
+    Добавляются только отсутствующие ключи из ROLE_MIGRATION_DEFAULTS;
+    уже сохранённые значения (включая False) и superadmin не трогаются.
+    """
+    from app.core.models import Role
+
+    async with async_session() as session:
+        roles = (await session.execute(select(Role))).scalars().all()
+        for role in roles:
+            keys = ROLE_MIGRATION_DEFAULTS.get(role.name)
+            if not keys:
+                continue
+            try:
+                perms = (
+                    json.loads(role.permissions)
+                    if isinstance(role.permissions, str)
+                    else dict(role.permissions or {})
+                )
+            except (TypeError, ValueError):
+                logger.warning('Role "%s": не удалось разобрать permissions, пропуск', role.name)
+                continue
+            changed = False
+            for key in keys:
+                if key not in perms:
+                    perms[key] = True
+                    changed = True
+            if changed:
+                role.permissions = json.dumps(perms, ensure_ascii=False)
+        await session.commit()
+
+
 async def _ensure_workspaces():
     from sqlalchemy import update
 
@@ -348,6 +377,7 @@ async def init_db():
     await _migrate()
     await _ensure_indexes()
     await _ensure_admin()
+    await _migrate_role_permissions()
     await _ensure_workspaces()
 
 
