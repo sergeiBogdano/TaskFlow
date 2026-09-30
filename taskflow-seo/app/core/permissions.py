@@ -22,6 +22,11 @@ async def get_current_user(request: Request):
     return user
 
 
+# маркер для матрицы защиты endpoint (Ф9): tests/test_endpoint_matrix.py
+# отличает по маркеру require_permission / require_role / require_workspace_role
+get_current_user._tf_guard = 'auth'
+
+
 async def get_user_role_names(user_id: int) -> set[str]:
     from sqlalchemy import select
     from app.core.database import async_session
@@ -214,6 +219,7 @@ def require_role(roles: list[str]):
                 if r and r.name in roles:
                     return user
         raise HTTPException(status_code=403, detail="Forbidden")
+    check._tf_guard = 'role'
     return check
 
 
@@ -231,6 +237,7 @@ def require_permission(key: str):
         if not await is_feature_available(user, key, workspace_id_from_request(request)):
             raise HTTPException(status_code=403, detail=f'Функция "{key}" отключена краном доступности')
         return user
+    check._tf_guard = 'permission'
     return check
 
 
@@ -434,4 +441,5 @@ def require_workspace_role(*allowed: str):
             if role not in allowed and not user_is_superadmin(role_names):
                 raise HTTPException(status_code=403, detail="Недостаточно прав в воркспейсе")
             return {"user": user, "workspace": workspace, "role": role, "role_names": role_names}
+    check._tf_guard = 'ws_role'
     return check

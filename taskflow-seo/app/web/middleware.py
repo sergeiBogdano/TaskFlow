@@ -11,6 +11,10 @@ Work-ключ из карты применяется только при явн�
 app-права, как до Ф8. Создание своего окружения (POST /api/workspaces)
 права не требует — лимит проверяет сам эндпоинт.
 
+Сессия (Ф9-fix): весь /api/* без валидной куки получает 401 здесь,
+кроме PUBLIC_API_PREFIXES (/api/auth*). Это закрывает и легаси-роуты
+(TASKFLOW_LEGACY_UI), которые авторизацию не делают сами.
+
 app-ключи (users, settings) здесь не проверяются: за них отвечают
 require_permission / require_role в самих эндпоинтах.
 """
@@ -49,6 +53,11 @@ API_PREFIX_PERMISSIONS: tuple[tuple[str, str], ...] = (
 _SKIP_PREFIXES = ('/api/auth', '/api/search', '/api/activity', '/api/files',
                   '/api/saved-views', '/api/permissions')
 
+# публичные API-точки: работают без сессии (вход/выход/проверка сессии).
+# Всё остальное /api/* без валидной сессии получает 401 здесь — это закрывает
+# и legacy-роуты (TASKFLOW_LEGACY_UI), которые сами авторизацию не делают.
+PUBLIC_API_PREFIXES: tuple[str, ...] = ('/api/auth',)
+
 
 def required_permission(path: str, method: str) -> str | None:
     """Какой work-ключ нужен запросу. None — проверять нечего."""
@@ -75,15 +84,19 @@ async def work_permission_middleware(request: Request, call_next):
     path, method = request.url.path, request.method
     if not path.startswith('/api/'):
         return await call_next(request)
+    is_public = path.startswith(PUBLIC_API_PREFIXES)
     token = request.cookies.get(COOKIE_NAME)
     user_id = verify_session_token(token) if token else None
     if user_id is None:
-        # без сессии эндпоинт сам вернёт 401
-        return await call_next(request)
+        if is_public:
+            return await call_next(request)
+        return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
     from app.services.user_service import get_user
     user = await get_user(user_id)
     if user is None:
-        return await call_next(request)
+        if is_public:
+            return await call_next(request)
+        return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
     workspace_id = workspace_id_from_request(request)
     permissions = await effective_permissions(user, workspace_id)
     # один набор прав на весь запрос: эндпоинты читают через request_permissions()
