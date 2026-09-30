@@ -2,11 +2,16 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from app.core.auth import hash_password
 from app.core.database import async_session
 from app.core.models import Role, User, UserGroup, UserRole, WorkspaceMember
+from app.core.models import (
+    ActivityLog, ClientResponsible, GeneratedReport, Module, Note, NoteFolder,
+    Notification, SavedView, Sprint, Task, TaskCoExecutor, TaskComment,
+    UserClientAccess, Workspace, WorkspaceKnowledge,
+)
 from app.core.permissions import (
     assert_features_grantable,
     assert_within_ceiling,
@@ -183,6 +188,23 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
             if r and r.name == 'superadmin':
                 raise HTTPException(status_code=403, detail='Cannot delete the superadmin user')
         await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
-        await session.delete(u)
+        # Preserve shared work and history, detaching the deleted account.
+        # Tasks/comments have older foreign keys without ON DELETE SET NULL.
+        for model, field in (
+            (Task, 'creator_id'), (Task, 'assignee_id'), (Task, 'co_executor_id'),
+            (TaskComment, 'user_id'), (ActivityLog, 'user_id'),
+            (GeneratedReport, 'created_by'), (Module, 'assignee_id'),
+            (Workspace, 'created_by'), (Sprint, 'created_by'),
+            (WorkspaceKnowledge, 'created_by'),
+        ):
+            await session.execute(update(model).where(getattr(model, field) == user_id).values({field: None}))
+        # Delete account-owned records explicitly, including on SQLite where
+        # foreign-key cascades may be disabled. Bypass ORM backref nullification.
+        for model in (
+            WorkspaceMember, UserGroup, UserClientAccess, ClientResponsible,
+            TaskCoExecutor, Notification, SavedView, Note, NoteFolder,
+        ):
+            await session.execute(delete(model).where(model.user_id == user_id))
+        await session.execute(delete(User).where(User.id == user_id))
         await session.commit()
     return JSONResponse({'ok': True})
