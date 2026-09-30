@@ -193,6 +193,8 @@ export function Layout() {
   const role = roleMeta[primaryRole] || roleMeta.executor;
   const isSuperadmin = hasRole('superadmin');
   const canSee = (permission: string) => {
+    // кран доступности (Ф6) действует и на суперадмина: функция выключена — пункта нет
+    if (user?.features && user.features[permission] === false) return false;
     if (isSuperadmin) return true;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };

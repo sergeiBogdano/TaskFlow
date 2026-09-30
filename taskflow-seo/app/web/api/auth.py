@@ -80,5 +80,8 @@ async def me(request: Request):
             .where(UserRole.user_id == user.id)
         )
         roles = r.scalars().all()
-    from app.core.permissions import get_user_permissions
-    return JSONResponse({'user': _get_user_data(user, roles, await get_user_permissions(user.id))})
+    from app.core.permissions import get_effective_features, get_user_permissions, workspace_id_from_request
+    payload = _get_user_data(user, roles, await get_user_permissions(user.id))
+    # карта доступности функций (кран Ф6): false = выключена, отсутствие ключа = доступна
+    payload['features'] = await get_effective_features(user, workspace_id_from_request(request))
+    return JSONResponse({'user': payload})

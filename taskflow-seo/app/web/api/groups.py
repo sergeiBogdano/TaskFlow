@@ -6,7 +6,12 @@ from sqlalchemy import select
 
 from app.core.database import async_session
 from app.core.models import Group, User, UserGroup
-from app.core.permissions import assert_within_ceiling, get_user_permissions, require_role
+from app.core.permissions import (
+    assert_features_grantable,
+    assert_within_ceiling,
+    get_user_permissions,
+    require_role,
+)
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
@@ -50,6 +55,7 @@ async def create_group(request: Request, user=Depends(require_role(['superadmin'
     permissions = data.get('permissions') or {}
     # даже суперадмин создаёт группу с правами из каталога — потолок не нужен (all)
     assert_within_ceiling(await get_user_permissions(user.id), permissions)
+    await assert_features_grantable(permissions)
     async with async_session() as session:
         existing = await session.execute(select(Group).where(Group.name == name))
         if existing.scalar_one_or_none():
@@ -73,6 +79,7 @@ async def update_group(group_id: int, request: Request, user=Depends(require_rol
         if 'permissions' in data:
             permissions = data.get('permissions') or {}
             assert_within_ceiling(await get_user_permissions(user.id), permissions)
+            await assert_features_grantable(permissions)
             group.permissions = json.dumps(permissions, ensure_ascii=False)
         await session.commit()
     return JSONResponse({'ok': True})

@@ -20,6 +20,8 @@ export function PermissionRoute({ permission, children }: { permission: string; 
   const { user, loading, hasRole } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen text-[var(--color-text-secondary)]">Загрузка...</div>;
   if (!user) return <Navigate to="/login" replace />;
+  // кран доступности (Ф6): выключенная функция закрыта и для суперадмина
+  if (user.features && user.features[permission] === false) return <Navigate to="/" replace />;
   if (!hasRole('superadmin') && !user.permissions?.all && !user.permissions?.[permission]) {
     return <Navigate to="/" replace />;
   }

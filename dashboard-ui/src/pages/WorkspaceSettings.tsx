@@ -6,6 +6,7 @@ import { referenceCache } from '../api/cache';
 import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
 import { refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
+import { FeaturesPanel } from '../components/FeaturesPanel';
 
 export function WorkspaceSettings() {
   const { user, hasRole } = useAuth();
@@ -370,6 +371,15 @@ export function WorkspaceSettings() {
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Переименование и скрытие пунктов меню, полей и заголовков. {(isOwner || isSuperadmin) ? 'Применяется сразу.' : 'Менять оформление может только владелец окружения.'} Таблица задач и новые поля — не входят (таблица с фиксированной сеткой).</p>
         <UiEditor detail={detail} canManage={isOwner || isSuperadmin} onSaved={load} />
       </section>
+
+      {isSuperadmin && (
+        <FeaturesPanel
+          scope="workspace"
+          targetId={detail.id}
+          title="Функции окружения"
+          description="Кран доступности в границах окружения: приоритет user > workspace > group > global. Выключенная функция скрыта и закрыта (403) для всех, кто работает в этом окружении."
+        />
+      )}
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><BookOpen size={16} />База знаний AI</h3>

@@ -39,6 +39,7 @@ export type User = {
   roles: { id: number; name: string }[];
   permissions: Record<string, boolean>;
   group_ids?: number[];
+  features?: Record<string, boolean>;
 };
 
 export type Group = {
@@ -153,6 +154,20 @@ export type PermissionCatalog = {
   groups: PermissionGroup[];
   presets: Record<string, string[]>;
   scopes: Record<string, 'app' | 'work'>;
+};
+
+export type FeatureOverride = {
+  id: number;
+  scope: 'global' | 'workspace' | 'group' | 'user';
+  target_id: number | null;
+  key: string;
+  enabled: boolean;
+};
+
+export type FeaturesResponse = {
+  catalog: PermissionGroup[];
+  effective: Record<string, boolean>;
+  overrides: FeatureOverride[];
 };
 
 export type Notification = {
@@ -486,6 +501,15 @@ export const api = {
   // Roles
   getRoles: () => request<Role[]>('/api/roles'),
   getPermissionCatalog: () => request<PermissionCatalog>('/api/permissions/catalog'),
+
+  // Features (кран доступности, Ф6)
+  getFeatures: () => request<FeaturesResponse>('/api/features'),
+  setFeature: (data: {
+    scope: 'global' | 'workspace' | 'group' | 'user';
+    target_id?: number | null;
+    key: string;
+    enabled: boolean;
+  }) => request<{ ok: boolean }>('/api/features', { method: 'PUT', body: JSON.stringify(data) }),
   createRole: (data: { name: string; permissions?: Record<string, boolean> }) =>
     request<Role>('/api/roles', { method: 'POST', body: JSON.stringify(data) }),
   updateRole: (id: number, data: Record<string, any>) =>

@@ -8,6 +8,7 @@ from app.core.auth import hash_password
 from app.core.database import async_session
 from app.core.models import Role, User, UserGroup, UserRole, WorkspaceMember
 from app.core.permissions import (
+    assert_features_grantable,
     assert_within_ceiling,
     get_current_user,
     get_user_permissions,
@@ -157,6 +158,7 @@ async def set_role(user_id: int, request: Request, user=Depends(require_permissi
         )
         assert_within_ceiling(await get_user_permissions(user.id), role_permissions,
                               detail='Назначаемая роль даёт права выше ваших')
+        await assert_features_grantable(role_permissions)
         await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
         existing = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)

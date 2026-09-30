@@ -137,13 +137,114 @@ def require_role(roles: list[str]):
 
 
 def require_permission(key: str):
-    """Доступ по праву из каталога (суперадмин с `all` проходит всегда)."""
-    async def check(user=Depends(get_current_user)):
+    """Доступ по праву из каталога + кран доступности функции (Ф6).
+
+    Суперадмин с `all` проходит проверку прав, но кран действует на всех:
+    выключенная функция → 403 даже для суперадмина (кроме самого крана
+    и ключа `settings` — он не может быть выключен).
+    """
+    async def check(request: Request, user=Depends(get_current_user)):
         permissions = await get_user_permissions(user.id)
         if not (permissions.get('all') or permissions.get(key)):
             raise HTTPException(status_code=403, detail=f'Нет права "{key}"')
+        if not await is_feature_available(user, key, workspace_id_from_request(request)):
+            raise HTTPException(status_code=403, detail=f'Функция "{key}" отключена краном доступности')
         return user
     return check
+
+
+def workspace_id_from_request(request: Request | None) -> int | None:
+    """workspace_id из query (фронт подставляет его на всех /api/* кроме auth)."""
+    if request is None:
+        return None
+    raw = request.query_params.get('workspace_id')
+    if raw and str(raw).isdigit():
+        return int(raw)
+    return None
+
+
+def _catalog_feature_keys() -> set[str]:
+    from app.core.permission_catalog import PERMISSION_GROUPS
+    return {item['key'] for group in PERMISSION_GROUPS for item in group['items']}
+
+
+async def get_global_feature_state(keys: list[str] | None = None) -> dict[str, bool]:
+    """Состояние крана только на глобальном уровне (для выдачи прав в ролях)."""
+    from sqlalchemy import select
+    from app.core.database import async_session
+    from app.core.models import FeatureOverride
+
+    if keys is None:
+        keys = sorted(_catalog_feature_keys())
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(FeatureOverride).where(
+                FeatureOverride.scope == 'global',
+                FeatureOverride.key.in_(keys or ['']),
+            )
+        )).scalars().all()
+    state = {key: True for key in keys}
+    for row in rows:
+        state[row.key] = bool(row.enabled)
+    return state
+
+
+async def get_effective_features(user, workspace_id: int | None = None,
+                                 keys: list[str] | None = None) -> dict[str, bool]:
+    """Эффективная доступность функций: приоритет user > workspace > group > global.
+
+    Ключ без записи в кране считается доступным; выключенная функция
+    приостанавливается (выдачи в ролях не трогаются).
+    """
+    from sqlalchemy import or_, select
+    from app.core.database import async_session
+    from app.core.models import FeatureOverride, UserGroup
+
+    if keys is None:
+        keys = sorted(_catalog_feature_keys())
+    if not keys:
+        return {}
+    async with async_session() as session:
+        group_ids = list((await session.execute(
+            select(UserGroup.group_id).where(UserGroup.user_id == user.id)
+        )).scalars())
+        conds = [FeatureOverride.scope == 'global']
+        if workspace_id is not None:
+            conds.append((FeatureOverride.scope == 'workspace') & (FeatureOverride.target_id == workspace_id))
+        if group_ids:
+            conds.append((FeatureOverride.scope == 'group') & (FeatureOverride.target_id.in_(group_ids)))
+        conds.append((FeatureOverride.scope == 'user') & (FeatureOverride.target_id == user.id))
+        rows = (await session.execute(
+            select(FeatureOverride).where(or_(*conds), FeatureOverride.key.in_(keys))
+        )).scalars().all()
+    state = {key: True for key in keys}
+    priority = {'global': 0, 'group': 1, 'workspace': 2, 'user': 3}
+    for row in sorted(rows, key=lambda r: priority.get(r.scope, 0)):
+        if row.key in state:
+            state[row.key] = bool(row.enabled)
+    return state
+
+
+async def is_feature_available(user, key: str, workspace_id: int | None = None) -> bool:
+    state = await get_effective_features(user, workspace_id, keys=[key])
+    return state.get(key, True)
+
+
+async def assert_features_grantable(permissions: dict):
+    """Выдать право можно только если функция включена краном (глобально)."""
+    if not permissions:
+        return
+    catalog_keys = _catalog_feature_keys()
+    keys = sorted(k for k, v in permissions.items() if v and k in catalog_keys)
+    if not keys:
+        return
+    state = await get_global_feature_state(keys)
+    blocked = sorted(k for k in keys if not state.get(k, True))
+    if blocked:
+        raise HTTPException(
+            status_code=403,
+            detail='Функции отключены краном доступности: ' + ', '.join(blocked),
+        )
 
 
 def assert_within_ceiling(granter_permissions: dict, target_permissions: dict,

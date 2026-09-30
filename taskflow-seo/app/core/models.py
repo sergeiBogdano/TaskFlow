@@ -533,3 +533,15 @@ class UserGroup(Base):
     group_id = Column(Integer, ForeignKey('groups.id', ondelete='CASCADE'), nullable=False, index=True)
     user = relationship('User', backref='group_links')
     group = relationship('Group')
+
+
+class FeatureOverride(Base):
+    """Кран доступности функции (Ф6): global|workspace|group|user → key вкл/выкл."""
+    __tablename__ = 'feature_overrides'
+
+    id = Column(Integer, primary_key=True)
+    scope = Column(String(20), nullable=False, default='global')
+    target_id = Column(Integer, nullable=True)
+    key = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

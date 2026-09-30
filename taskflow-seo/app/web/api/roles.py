@@ -6,7 +6,12 @@ from sqlalchemy import select
 
 from app.core.database import async_session
 from app.core.models import Role, UserRole
-from app.core.permissions import assert_within_ceiling, get_user_permissions, require_permission
+from app.core.permissions import (
+    assert_features_grantable,
+    assert_within_ceiling,
+    get_user_permissions,
+    require_permission,
+)
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
 
@@ -39,6 +44,7 @@ async def create_role(request: Request, user=Depends(require_permission('users')
     permissions = data.get('permissions') or {}
     granter = await get_user_permissions(user.id)
     assert_within_ceiling(granter, permissions)
+    await assert_features_grantable(permissions)
     async with async_session() as session:
         existing = await session.execute(select(Role).where(Role.name == name))
         if existing.scalar_one_or_none():
@@ -67,6 +73,7 @@ async def update_role(role_id: int, request: Request, user=Depends(require_permi
             role.name = next_name
         if 'permissions' in data:
             assert_within_ceiling(granter, data.get('permissions') or {})
+            await assert_features_grantable(data.get('permissions') or {})
             role.permissions = json.dumps(data.get('permissions') or {}, ensure_ascii=False)
         await session.commit()
     return JSONResponse({'ok': True})

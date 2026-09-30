@@ -18,7 +18,9 @@ const roleLabel = (role: Role) => roleMeta[role.name]?.label || role.name;
 export function Users() {
   const { user: currentUser } = useAuth();
   const isSuperadminActor = Boolean(currentUser?.permissions?.all);
-  const canGrant = (key: string) => isSuperadminActor || Boolean(currentUser?.permissions?.[key]);
+  const canGrant = (key: string) =>
+    isSuperadminActor || Boolean(currentUser?.permissions?.[key]);
+  const featureOn = (key: string) => currentUser?.features?.[key] !== false;
   const canGrantRole = (role: Role) =>
     isSuperadminActor || Object.entries(role.permissions || {}).every(([key, value]) => !value || canGrant(key));
   const [users, setUsers] = useState<User[]>([]);
@@ -132,7 +134,7 @@ export function Users() {
   const applyPreset = (preset: string) => {
     const next: Record<string, boolean> = {};
     (catalog?.presets[preset] || []).forEach(key => {
-      if (canGrant(key)) next[key] = true;
+      if (canGrant(key) && featureOn(key)) next[key] = true;
     });
     setPermissions(next);
   };
@@ -141,7 +143,7 @@ export function Users() {
     setPermissions(prev => {
       const next = { ...prev };
       group.items.forEach(item => {
-        if (enabled && !canGrant(item.key)) return;
+        if (enabled && (!canGrant(item.key) || !featureOn(item.key))) return;
         next[item.key] = enabled;
       });
       return next;
@@ -223,6 +225,8 @@ export function Users() {
     .map(group => ({
       ...group,
       items: group.items.filter(item => {
+        // кран доступности (Ф6): выключенная функция не показывается в редакторе
+        if (currentUser?.features?.[item.key] === false) return false;
         const query = permissionSearch.trim().toLocaleLowerCase('ru-RU');
         return !query || `${item.label} ${item.hint} ${item.key}`.toLocaleLowerCase('ru-RU').includes(query);
       }),
@@ -429,7 +433,9 @@ export function Users() {
                   {groupError && <div className="mb-2 text-xs font-semibold text-[var(--color-danger)]">{groupError}</div>}
                   <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">Права группы (только добавляются к правам роли):</div>
                   <div className="mb-3 flex flex-wrap gap-2">
-                    {(catalog?.groups || []).flatMap(groupDef => groupDef.items).map(item => (
+                    {(catalog?.groups || []).flatMap(groupDef => groupDef.items)
+                      .filter(item => currentUser?.features?.[item.key] !== false)
+                      .map(item => (
                       <label key={item.key} className={`flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs ${groupEditorPermissions[item.key] ? 'border-[var(--color-accent)]' : ''}`}>
                         <input className="accent-[var(--color-accent)]" type="checkbox" checked={Boolean(groupEditorPermissions[item.key])} onChange={event => setGroupEditorPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
                         {item.label}
