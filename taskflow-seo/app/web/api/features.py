@@ -58,17 +58,19 @@ async def get_features(request: Request, user=Depends(require_role(['superadmin'
 
 @router.put('')
 async def set_feature(request: Request, user=Depends(require_role(['superadmin']))):
-    """Тумблер крана: upsert записи global|workspace|group|user (приоритет user>ws>group>global)."""
+    """Тумблер крана: upsert записи global|workspace|group|user (приоритет user>ws>group>global), enabled=null → убрать запись."""
     data = await request.json()
     scope = data.get('scope') or 'global'
     key = (data.get('key') or '').strip()
+    # enabled=null → убрать запись крана (вернуться к более верхнему уровню)
+    drop = 'enabled' in data and data.get('enabled') is None
     enabled = bool(data.get('enabled'))
     target_id = data.get('target_id')
     if scope not in SCOPES:
         raise HTTPException(status_code=400, detail=f'Область: {", ".join(SCOPES)}')
     if not key or key not in {item['key'] for g in PERMISSION_GROUPS for item in g['items']}:
         raise HTTPException(status_code=400, detail='Неизвестная функция')
-    if key in PROTECTED_KEYS and not enabled:
+    if key in PROTECTED_KEYS and not enabled and not drop:
         raise HTTPException(status_code=400, detail='Эту функцию нельзя выключить — на ней держится сама панель управления')
     if scope == 'global':
         target_id = None
@@ -91,9 +93,11 @@ async def set_feature(request: Request, user=Depends(require_role(['superadmin']
         else:
             stmt = stmt.where(FeatureOverride.target_id == target_id)
         row = (await session.execute(stmt)).scalars().first()
-        if row:
+        if row and drop:
+            await session.delete(row)
+        elif row:
             row.enabled = enabled
-        else:
+        elif not drop:
             session.add(FeatureOverride(scope=scope, target_id=target_id, key=key, enabled=enabled))
         await session.commit()
     return JSONResponse({'ok': True})

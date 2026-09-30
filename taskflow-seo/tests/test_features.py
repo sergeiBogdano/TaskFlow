@@ -94,6 +94,9 @@ class TestFeatures:
         users = sync_request('GET', '/api/users', cookies=admin_cookies).json()
         target = next(u for u in users if u['username'] == 'testexec')
 
+        # снимаем возможный пользовательский переключатель, оставшийся от прошлых прогонов
+        self._reset(sync_request, admin_cookies, 'reports', enabled=None,
+                    scope='user', target_id=target['id'])
         self._reset(sync_request, admin_cookies, 'reports', enabled=False)
         try:
             cookies = self._login(sync_request, 'testexec', 'testpass')
@@ -105,7 +108,7 @@ class TestFeatures:
             resp = sync_request('GET', '/api/auth/me', cookies=cookies)
             assert resp.json()['user']['features'].get('reports') is True
         finally:
-            self._reset(sync_request, admin_cookies, 'reports', enabled=True,
+            self._reset(sync_request, admin_cookies, 'reports', enabled=None,
                         scope='user', target_id=target['id'])
             self._reset(sync_request, admin_cookies, 'reports', enabled=True)
 
