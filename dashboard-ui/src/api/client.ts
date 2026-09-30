@@ -383,7 +383,22 @@ export type WorkspaceMember = {
   user_id: number;
   username: string | null;
   role: string;
+  custom_role_id: number | null;
+  custom_role: string | null;
   created_at: string | null;
+};
+
+export type WorkspaceRole = {
+  id: number;
+  workspace_id: number;
+  name: string;
+  permissions: Record<string, boolean>;
+  created_at: string | null;
+};
+
+export type WorkspaceRolesResponse = {
+  roles: WorkspaceRole[];
+  features: Record<string, boolean>;
 };
 
 export type Sprint = {
@@ -820,6 +835,20 @@ export const api = {
     }),
   deleteWsKnowledge: (id: number, factId: number) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/knowledge/${factId}`, { method: 'DELETE' }),
+
+  // Workspace roles (Ф7)
+  getWsRoles: (id: number) => request<WorkspaceRolesResponse>(`/api/workspaces/${id}/roles`),
+  createWsRole: (id: number, data: { name: string; permissions: Record<string, boolean> }) =>
+    request<WorkspaceRole>(`/api/workspaces/${id}/roles`, { method: 'POST', body: JSON.stringify(data) }),
+  updateWsRole: (id: number, roleId: number, data: { name?: string; permissions?: Record<string, boolean> }) =>
+    request<WorkspaceRole>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteWsRole: (id: number, roleId: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'DELETE' }),
+  setWsMemberRole: (id: number, userId: number, roleId: number | null) =>
+    request<WorkspaceMember>(`/api/workspaces/${id}/members/${userId}/custom-role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role_id: roleId }),
+    }),
 
   // Sprints
   getSprints: () => request<Sprint[]>('/api/sprints'),

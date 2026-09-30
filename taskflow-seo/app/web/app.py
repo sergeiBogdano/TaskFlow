@@ -133,6 +133,7 @@ from app.web.api.notes import router as notes_router
 from app.web.api.permissions import router as permissions_router
 from app.web.api.groups import router as groups_router
 from app.web.api.features import router as features_router
+from app.web.api.workspace_roles import router as workspace_roles_router
 
 
 app.include_router(auth_router)
@@ -155,3 +156,4 @@ app.include_router(notes_router)
 app.include_router(permissions_router)
 app.include_router(groups_router)
 app.include_router(features_router)
+app.include_router(workspace_roles_router)

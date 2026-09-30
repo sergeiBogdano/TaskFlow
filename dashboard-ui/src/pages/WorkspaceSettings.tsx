@@ -1,18 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
-import { api, type WorkspaceDetail, type WorkspaceMember } from '../api/client';
+import { api, type WorkspaceDetail, type WorkspaceMember, type WorkspaceRole } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { referenceCache } from '../api/cache';
 import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
 import { refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
 import { FeaturesPanel } from '../components/FeaturesPanel';
+import { WsRolesPanel } from '../components/WsRolesPanel';
 
 export function WorkspaceSettings() {
   const { user, hasRole } = useAuth();
   const isSuperadmin = hasRole('superadmin');
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [wsRoles, setWsRoles] = useState<WorkspaceRole[]>([]);
   const [users, setUsers] = useState<{ id: number; username: string }[]>([]);
   const [knowledge, setKnowledge] = useState<{ id: number; fact: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,16 +52,18 @@ export function WorkspaceSettings() {
         setError('Нет доступных окружений.');
         return;
       }
-      const [full, memberList, userList, facts] = await Promise.all([
+      const [full, memberList, userList, facts, roleData] = await Promise.all([
         api.getWorkspace(active.id),
         api.getWsMembers(active.id),
         referenceCache.users().catch(() => []),
         api.getWsKnowledge(active.id).catch(() => []),
+        api.getWsRoles(active.id).catch(() => null),
       ]);
       setDetail(full);
       setMembers(memberList);
       setUsers(userList.map(u => ({ id: u.id, username: u.username })));
       setKnowledge(facts);
+      setWsRoles(roleData?.roles || []);
       setName(full.name);
       setTheme(full.theme || '');
       setClientsLabel(full.dictionary?.clients || '');
@@ -161,6 +165,16 @@ export function WorkspaceSettings() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Нельзя изменить роль.');
+    }
+  };
+
+  const changeCustomRole = async (userId: number, roleId: number | null) => {
+    setError('');
+    try {
+      await api.setWsMemberRole(detail.id, userId, roleId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Нельзя назначить роль.');
     }
   };
 
@@ -338,8 +352,7 @@ export function WorkspaceSettings() {
                     <button type="button" onClick={() => setPwdUserId(pwdUserId === member.user_id ? null : member.user_id)} className="tf-button h-9 px-2 text-xs" title="Сменить пароль">
                       <KeyRound size={14} />Пароль
                     </button>
-                  )}
-                  {canTouch && !protectedOwner && user?.id !== member.user_id && (
+                  )}                  {canTouch && !protectedOwner && user?.id !== member.user_id && (
                     <button type="button" onClick={() => removeMember(member)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Убрать" aria-label={`Убрать ${member.username}`}>
                       <X size={15} />
                     </button>
@@ -360,11 +373,36 @@ export function WorkspaceSettings() {
                     <button type="button" onClick={() => savePassword(member.user_id)} className="tf-button h-9 shrink-0 text-xs">OK</button>
                   </div>
                 )}
+                {(wsRoles.length > 0 || member.custom_role) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-[var(--color-text-secondary)]">Роль окружения:</span>
+                    {canTouch && wsRoles.length > 0 ? (
+                      <select
+                        className="tf-input h-8 w-auto py-0 text-xs"
+                        value={member.custom_role_id == null ? '' : String(member.custom_role_id)}
+                        onChange={event =>
+                          changeCustomRole(member.user_id, event.target.value ? Number(event.target.value) : null)
+                        }
+                      >
+                        <option value="">базовые права</option>
+                        {wsRoles.map(role => (
+                          <option key={role.id} value={role.id}>{role.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="tf-chip">{member.custom_role || 'базовые права'}</span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </section>
+
+      {canManage && (
+        <WsRolesPanel workspaceId={detail.id} canManage={canManage} />
+      )}
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>

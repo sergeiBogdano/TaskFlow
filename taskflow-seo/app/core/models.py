@@ -459,6 +459,23 @@ class Workspace(Base):
     )
 
 
+class WorkspaceRole(Base):
+    """Кастомная роль окружения (Ф7): только scope=work-ключи, чекбоксы."""
+    __tablename__ = 'workspace_roles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    permissions = Column(Text, nullable=False, default='{}')
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    workspace = relationship('Workspace', backref='roles')
+
+    __table_args__ = (
+        Index('ix_workspace_role_unique', 'workspace_id', 'name', unique=True),
+    )
+
+
 class WorkspaceMember(Base):
     __tablename__ = 'workspace_members'
 
@@ -466,10 +483,12 @@ class WorkspaceMember(Base):
     workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     role = Column(String(20), nullable=False, default=WS_ROLE_MEMBER)
+    custom_role_id = Column(Integer, ForeignKey('workspace_roles.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workspace = relationship('Workspace', backref='member_links')
     user = relationship('User', backref='workspace_links')
+    custom_role = relationship('WorkspaceRole')
 
     __table_args__ = (
         Index('ix_workspace_member_unique', 'workspace_id', 'user_id', unique=True),

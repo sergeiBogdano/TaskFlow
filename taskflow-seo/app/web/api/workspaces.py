@@ -24,6 +24,7 @@ from app.core.models import (
     Workspace,
     WorkspaceKnowledge,
     WorkspaceMember,
+    WorkspaceRole,
 )
 from app.core.permissions import (
     get_current_user,
@@ -167,16 +168,19 @@ async def _purge_workspace(session, workspace_id: int) -> None:
     for model, column in ((Sprint, Sprint.workspace_id), (Task, Task.workspace_id),
                           (Client, Client.workspace_id), (Note, Note.workspace_id),
                           (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
+                          (WorkspaceRole, WorkspaceRole.workspace_id),
                           (WorkspaceMember, WorkspaceMember.workspace_id)):
         await session.execute(model.__table__.delete().where(column == workspace_id))
     await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
 
 
-def _member_to_dict(member: WorkspaceMember, username: str | None) -> dict:
+def _member_to_dict(member: WorkspaceMember, username: str | None, custom_role: str | None = None) -> dict:
     return {
         "user_id": member.user_id,
         "username": username,
         "role": member.role,
+        "custom_role_id": member.custom_role_id,
+        "custom_role": custom_role,
         "created_at": member.created_at.isoformat() if member.created_at else None,
     }
 
@@ -358,12 +362,16 @@ async def restore_workspace(workspace_id: int, user=Depends(get_current_user)):
 async def list_members(workspace_id: int, ctx=Depends(require_workspace_role("owner", "admin", "member"))):
     async with async_session() as session:
         rows = (await session.execute(
-            select(WorkspaceMember, User.username)
+            select(WorkspaceMember, User.username, WorkspaceRole.name)
             .join(User, User.id == WorkspaceMember.user_id)
+            .outerjoin(WorkspaceRole, WorkspaceRole.id == WorkspaceMember.custom_role_id)
             .where(WorkspaceMember.workspace_id == ctx["workspace"].id)
             .order_by(User.username)
         )).all()
-        return JSONResponse([_member_to_dict(m, username) for m, username in rows])
+        return JSONResponse([
+            _member_to_dict(m, username, custom_role)
+            for m, username, custom_role in rows
+        ])
 
 
 class MemberCreate(BaseModel):

@@ -101,6 +101,26 @@ ROLE_MIGRATION_DEFAULTS = {
 }
 
 
+def work_scope_keys() -> list[str]:
+    """Ключи только scope=work (конструктор ролей окружения, Ф7)."""
+    return [item['key'] for group in PERMISSION_GROUPS if group['scope'] == SCOPE_WORK
+            for item in group['items']]
+
+
+def workspace_default_permissions(rank: str) -> dict:
+    """Права по умолчанию в окружении (Ф7).
+
+    owner/admin → полный набор «Работы»; member → только базовые
+    (без расширений advanced/sensitive).
+    """
+    keys = work_scope_keys()
+    if rank in ('owner', 'admin'):
+        return {key: True for key in keys}
+    basic = {item['key'] for group in PERMISSION_GROUPS if group['scope'] == SCOPE_WORK
+             for item in group['items'] if item.get('level') == 'basic'}
+    return {key: True for key in keys if key in basic}
+
+
 def catalog_payload() -> dict:
     """Пayload для GET /api/permissions/catalog."""
     scopes = {
