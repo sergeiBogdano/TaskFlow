@@ -43,7 +43,7 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ('GET', '/api/workspaces/{workspace_id}'): 'membership проверяется через resolve_workspace внутри',
     ('GET', '/api/users'): 'справочник для назначений; любой авторизованный (тест: 200)',
     ('POST', '/api/users'): 'права внутри: superadmin либо owner/admin окружения',
-    ('PUT', '/api/users/{user_id}/password'): 'смена пароля: свой (кроме суперадмина) — можно, остальным чужой — 403',
+    ('PUT', '/api/users/{user_id}/password'): 'смена пароля: свой — с users_password_own, чужой — сброс rank-вниз/суперадмин',
     ('POST', '/api/users/change-password'): 'смена своего пароля, текущий пароль проверяется внутри',
     ('GET', '/api/sse'): 'стрим уведомлений: cookie-проверка внутри (плюс 401 от middleware)',
 }

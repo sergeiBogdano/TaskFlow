@@ -66,8 +66,20 @@ def _validate_payload(data: dict) -> tuple[str, dict]:
 
 
 async def _assert_grantable(user, workspace_id: int, permissions: dict) -> None:
-    """Потолок (право выдающего) + кран доступности в этом окружении."""
-    assert_within_ceiling(await get_user_permissions(user.id), permissions)
+    """Потолок (право выдающего) + кран доступности в этом окружении.
+
+    Потолок считается по объединению app-прав и effective-прав в ЭТОМ
+    окружении: админ окружения вправе делегировать то, чем реально
+    располагает в нём (например, выдать выбранным участникам право
+    из своей кастомной роли). Чего нет ни там, ни там — выдать нельзя.
+    """
+    from app.core.permissions import get_workspace_permissions
+    app_permissions = await get_user_permissions(user.id)
+    ws_permissions = await get_workspace_permissions(user.id, workspace_id) or {}
+    ceiling = dict(app_permissions)
+    ceiling.update({key: True for key, value in ws_permissions.items() if value})
+    # assert_within_ceiling сам пропускает суперадмина ('all'), кран ниже — для всех
+    assert_within_ceiling(ceiling, permissions)
     if not permissions:
         return
     state = await get_effective_features(user, workspace_id, keys=list(permissions))

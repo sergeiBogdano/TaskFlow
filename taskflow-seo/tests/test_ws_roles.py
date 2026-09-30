@@ -128,7 +128,8 @@ class TestWsRoles:
         assert resp.status_code == 403
 
     def test_ceiling_blocks_outranked_grant(self, sync_request, admin_cookies, executor_cookies):
-        """Потолок: выдающий без права не может включить его в роль."""
+        """Потолок: выдать можно только то, что есть в app-правах или в
+        effective-правах этого окружения (union). Чего нет нигде — 403."""
         ws = self._make_ws(sync_request, admin_cookies)
         # executor уже admin этого окружения
         users = sync_request('GET', '/api/users', cookies=admin_cookies).json()
@@ -138,16 +139,19 @@ class TestWsRoles:
                             cookies=admin_cookies)
         assert resp.status_code == 201, resp.text
 
-        # app-права executor не содержат 'reports' → потолок
+        # users_password_reset нет ни в app executor, ни в rank-defaults → потолок
         resp = self._create_role(sync_request, executor_cookies, ws['id'],
-                                 'Ниже потолка', {'reports': True})
+                                 'Сброс', {'users_password_reset': True})
         assert resp.status_code == 403, resp.text
-        assert 'reports' in resp.text
+        assert 'users_password_reset' in resp.text
 
-        # а имеющееся право — можно
+        # reports в effective-правах админа окружения есть → делегирование разрешено
         resp = self._create_role(sync_request, executor_cookies, ws['id'],
-                                 'Внутри потолка', {'tasks': True, 'notes': True})
+                                 'Делегат', {'reports': True})
         assert resp.status_code == 201, resp.text
+        delegated_id = resp.json()['id']
+        sync_request('DELETE', f"/api/workspaces/{ws['id']}/roles/{delegated_id}",
+                     cookies=admin_cookies)
 
         # superadmin (все права) — потолок не мешает
         resp = self._create_role(sync_request, admin_cookies, ws['id'],
@@ -184,7 +188,8 @@ class TestWsRoles:
             set_feature(True)
 
     def test_default_workspace_rights(self):
-        """owner/admin → полный набор «Работы», member → только базовые."""
+        """owner/admin → полный набор «Работы» (кроме users_password_reset —
+        он opt-in, иначе invite-then-reset), member → только базовые."""
         from app.core.permission_catalog import (
             workspace_default_permissions,
             work_scope_keys,
@@ -195,8 +200,10 @@ class TestWsRoles:
         admin = set(workspace_default_permissions('admin'))
         member = set(workspace_default_permissions('member'))
 
-        assert owner == all_work
-        assert admin == all_work
+        assert owner == all_work - {'users_password_reset'}
+        assert admin == all_work - {'users_password_reset'}
+        assert member < all_work
+        assert 'users_password_reset' not in member
         assert member < all_work
         # базовые (level=basic) у участника есть, расширения — нет
         assert {'dashboard', 'tasks', 'kanban', 'calendar', 'clients'} <= member

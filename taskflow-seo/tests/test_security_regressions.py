@@ -242,6 +242,258 @@ class TestSuperadminPasswordLocked:
         assert login.status_code != 200
 
 
+class TestPasswordResetLadder:
+    """Сброс чужих паролей: право users_password_reset + строго вниз по рангу.
+
+    owner → admin → member; ровесникам, старшим и вне общих окружений — 403.
+    """
+
+    @staticmethod
+    def _login(sync_request, username, password):
+        resp = sync_request(
+            "POST", "/api/auth/login",
+            json={"username": username, "password": password},
+        )
+        assert resp.status_code == 200, resp.text
+        return {"taskflow_user": resp.cookies.get("taskflow_user")}
+
+    @staticmethod
+    def _make_reset_role(sync_request, admin_cookies, name):
+        resp = sync_request(
+            "POST", "/api/roles",
+            json={"name": name, "permissions": {"users_password_reset": True}},
+            cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
+
+    def test_admin_without_key_denied(self, sync_request, admin_cookies):
+        # админ окружения БЕЗ права reset: захват через invite-then-reset мёртв
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("NORST")}, cookies=admin_cookies).json()
+        aname = _uniq("norst_admin")
+        aid, acookies = _make_user(sync_request, admin_cookies, aname)
+        mname = _uniq("norst_member")
+        mid, _ = _make_user(sync_request, admin_cookies, mname)
+        for uid, role in ((aid, "admin"), (mid, "member")):
+            resp = sync_request(
+                "POST", f"/api/workspaces/{ws['id']}/members",
+                json={"user_id": uid, "role": role}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 201, resp.text
+        resp = sync_request(
+            "PUT", f"/api/users/{mid}/password",
+            json={"password": "hacked123"}, cookies=acookies,
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_admin_with_key_resets_member(self, sync_request, admin_cookies):
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("RST")}, cookies=admin_cookies).json()
+        role_id = self._make_reset_role(sync_request, admin_cookies, _uniq("Resetter"))
+        try:
+            aname = _uniq("rst_admin")
+            aid, _ = _make_user(sync_request, admin_cookies, aname)
+            mname = _uniq("rst_member")
+            mid, _ = _make_user(sync_request, admin_cookies, mname)
+            for uid, role in ((aid, "admin"), (mid, "member")):
+                resp = sync_request(
+                    "POST", f"/api/workspaces/{ws['id']}/members",
+                    json={"user_id": uid, "role": role}, cookies=admin_cookies,
+                )
+                assert resp.status_code == 201, resp.text
+            # выдаём право через роль приложения
+            resp = sync_request(
+                "PUT", f"/api/users/{aid}/role",
+                json={"role_id": role_id}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            acookies = self._login(sync_request, aname, "pass1234")
+            resp = sync_request(
+                "PUT", f"/api/users/{mid}/password",
+                json={"password": "reset1234"}, cookies=acookies,
+            )
+            assert resp.status_code == 200, resp.text
+            # новый пароль реально работает
+            login = sync_request(
+                "POST", "/api/auth/login",
+                json={"username": mname, "password": "reset1234"},
+            )
+            assert login.status_code == 200, login.text
+        finally:
+            sync_request("DELETE", f"/api/roles/{role_id}", cookies=admin_cookies)
+
+    def test_peers_denied(self, sync_request, admin_cookies):
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("PEER")}, cookies=admin_cookies).json()
+        role_id = self._make_reset_role(sync_request, admin_cookies, _uniq("PeerReset"))
+        try:
+            a1name = _uniq("peer1")
+            a1, _ = _make_user(sync_request, admin_cookies, a1name)
+            a2name = _uniq("peer2")
+            a2, _ = _make_user(sync_request, admin_cookies, a2name)
+            for uid in (a1, a2):
+                resp = sync_request(
+                    "POST", f"/api/workspaces/{ws['id']}/members",
+                    json={"user_id": uid, "role": "admin"}, cookies=admin_cookies,
+                )
+                assert resp.status_code == 201, resp.text
+                resp = sync_request(
+                    "PUT", f"/api/users/{uid}/role",
+                    json={"role_id": role_id}, cookies=admin_cookies,
+                )
+                assert resp.status_code == 200, resp.text
+            c1 = self._login(sync_request, a1name, "pass1234")
+            resp = sync_request(
+                "PUT", f"/api/users/{a2}/password",
+                json={"password": "hacked123"}, cookies=c1,
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            sync_request("DELETE", f"/api/roles/{role_id}", cookies=admin_cookies)
+
+    def test_member_with_custom_reset_cannot_hit_admin(self, sync_request, admin_cookies):
+        # кастомная роль с reset у участника: ранг всё равно ниже — 403
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("CSTM")}, cookies=admin_cookies).json()
+        aname = _uniq("cstm_admin")
+        aid, acookies = _make_user(sync_request, admin_cookies, aname)
+        mname = _uniq("cstm_member")
+        mid, mcookies = _make_user(sync_request, admin_cookies, mname)
+        for uid, role in ((aid, "admin"), (mid, "member")):
+            resp = sync_request(
+                "POST", f"/api/workspaces/{ws['id']}/members",
+                json={"user_id": uid, "role": role}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 201, resp.text
+        resp = sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/roles",
+            json={"name": _uniq("Reset custom"), "permissions": {"users_password_reset": True}},
+            cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        custom_id = resp.json()["id"]
+        try:
+            resp = sync_request(
+                "PUT", f"/api/workspaces/{ws['id']}/members/{mid}/custom-role",
+                json={"role_id": custom_id}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            resp = sync_request(
+                "PUT", f"/api/users/{aid}/password",
+                json={"password": "hacked123"}, cookies=mcookies,
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            sync_request(
+                "DELETE", f"/api/workspaces/{ws['id']}/roles/{custom_id}",
+                cookies=admin_cookies,
+            )
+
+    def test_no_shared_workspace_denied(self, sync_request, admin_cookies):
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("ISO")}, cookies=admin_cookies).json()
+        role_id = self._make_reset_role(sync_request, admin_cookies, _uniq("IsoReset"))
+        try:
+            aname = _uniq("iso_admin")
+            aid, _ = _make_user(sync_request, admin_cookies, aname)
+            resp = sync_request(
+                "POST", f"/api/workspaces/{ws['id']}/members",
+                json={"user_id": aid, "role": "admin"}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 201, resp.text
+            resp = sync_request(
+                "PUT", f"/api/users/{aid}/role",
+                json={"role_id": role_id}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            # жертва вообще без окружений
+            outsider, _ = _make_user(sync_request, admin_cookies, _uniq("outsider"))
+            acookies = self._login(sync_request, aname, "pass1234")
+            resp = sync_request(
+                "PUT", f"/api/users/{outsider}/password",
+                json={"password": "hacked123"}, cookies=acookies,
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            sync_request("DELETE", f"/api/roles/{role_id}", cookies=admin_cookies)
+
+    def test_owner_resets_admin(self, sync_request, admin_cookies):
+        # владелец выше админа: без права — 403, с правом — 200
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("OWNRST")}, cookies=admin_cookies).json()
+        oname = _uniq("owner_rst")
+        oid, _ = _make_user(sync_request, admin_cookies, oname)
+        aname = _uniq("admin_rst")
+        aid, _ = _make_user(sync_request, admin_cookies, aname)
+        resp = sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/members",
+            json={"user_id": oid, "role": "member"}, cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        # владельцем назначает только суперадмин
+        resp = sync_request(
+            "PATCH", f"/api/workspaces/{ws['id']}/members/{oid}",
+            json={"role": "owner"}, cookies=admin_cookies,
+        )
+        assert resp.status_code == 200, resp.text
+        resp = sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/members",
+            json={"user_id": aid, "role": "admin"}, cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        ocookies = self._login(sync_request, oname, "pass1234")
+        # без права reset — 403 даже владельцу
+        resp = sync_request(
+            "PUT", f"/api/users/{aid}/password",
+            json={"password": "hacked123"}, cookies=ocookies,
+        )
+        assert resp.status_code == 403, resp.text
+        # выдаём право ролью приложения и повторяем
+        role_id = self._make_reset_role(sync_request, admin_cookies, _uniq("OwnerReset"))
+        try:
+            resp = sync_request(
+                "PUT", f"/api/users/{oid}/role",
+                json={"role_id": role_id}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            resp = sync_request(
+                "PUT", f"/api/users/{aid}/password",
+                json={"password": "resetbyowner"}, cookies=ocookies,
+            )
+            assert resp.status_code == 200, resp.text
+        finally:
+            sync_request("DELETE", f"/api/roles/{role_id}", cookies=admin_cookies)
+
+    def test_own_toggle_off(self, sync_request, admin_cookies, executor_cookies):
+        # сняли users_password_own у роли executor (явный False, как шлёт UI):
+        # свой пароль закрыт везде
+        roles = sync_request("GET", "/api/roles", cookies=admin_cookies).json()
+        executor_role = next(r for r in roles if r["name"] == "executor")
+        original = dict(executor_role["permissions"] or {})
+        trimmed = dict(original)
+        trimmed["users_password_own"] = False
+        try:
+            resp = sync_request(
+                "PUT", f"/api/roles/{executor_role['id']}",
+                json={"permissions": trimmed}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            me = sync_request("GET", "/api/auth/me", cookies=executor_cookies).json()
+            uid = me["user"]["id"]
+            resp = sync_request(
+                "PUT", f"/api/users/{uid}/password",
+                json={"password": "newpass123"}, cookies=executor_cookies,
+            )
+            assert resp.status_code == 403, resp.text
+            resp = sync_request(
+                "POST", "/api/users/change-password",
+                data={"current_password": "testpass", "new_password": "newpass123"},
+                cookies=executor_cookies,
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            resp = sync_request(
+                "PUT", f"/api/roles/{executor_role['id']}",
+                json={"permissions": original}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+
+
 class TestContractReminders:
     def test_created_once_and_idempotent(self, sync_request, admin_cookies, event_loop):
         from datetime import datetime, timedelta, timezone

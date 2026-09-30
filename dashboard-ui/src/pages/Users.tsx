@@ -286,7 +286,9 @@ export function Users() {
                 />
               )}
               <div className="flex justify-end gap-1.5">
-                {!hasSuperadmin && (
+                {!hasSuperadmin && (currentUser?.id === user.id
+                  ? currentUser?.permissions?.users_password_own !== false
+                  : (isSuperadminActor || currentUser?.permissions?.users_password_reset === true)) && (
                   <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
                 )}
                 {isSuperadminActor && currentUser?.id !== user.id && !protectedUser && (

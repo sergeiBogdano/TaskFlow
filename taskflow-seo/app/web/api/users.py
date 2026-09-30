@@ -18,6 +18,7 @@ from app.core.permissions import (
     get_current_user,
     get_user_permissions,
     get_user_role_names,
+    get_workspace_role,
     require_permission,
     require_role,
     resolve_workspace,
@@ -106,20 +107,46 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
                 # ни чужими, ни им самим. Своя смена — только через
                 # POST /api/users/change-password с проверкой текущего пароля.
                 raise HTTPException(status_code=403, detail='Cannot change the superadmin password')
+        actor_permissions = await get_user_permissions(user.id)
         if user.id == user_id:
-            pass  # свой пароль менять можно всегда
-        else:
-            # чужой пароль — только суперадмин (см. выше: суперадмина — никогда).
-            # Проверки через роли окружения здесь запрещены осознанно:
-            # владелец окружения может добавить любого пользователя к себе
-            # без его согласия и тем самым получить право на смену пароля —
-            # это захват чужого аккаунта.
-            role_names = await get_user_role_names(user.id)
-            if not user_is_superadmin(role_names):
-                raise HTTPException(status_code=403, detail='Forbidden')
+            # свой пароль — запрет только при явном False (снятая галочка).
+            # Отсутствие ключа = разрешено: не ломаем legacy-роли и юзеров
+            # вообще без ролей; миграция всем ставит True.
+            if not (actor_permissions.get('all') or actor_permissions.get('users_password_own', True) is not False):
+                raise HTTPException(status_code=403, detail='Нет права "users_password_own"')
+        elif not await _can_reset_password(session, user, actor_permissions, user_id):
+            raise HTTPException(status_code=403, detail='Forbidden')
         target.password_hash = hash_password(password)
         await session.commit()
     return JSONResponse({'ok': True})
+
+
+async def _can_reset_password(session, actor, actor_permissions: dict, target_id: int) -> bool:
+    """Может ли actor сбросить чужой пароль (не суперадмина — проверено выше).
+
+    - суперадмин (`all`) — всегда;
+    - иначе: общее окружение, где у actor есть право users_password_reset
+      (кастомная роль окружения или роль приложения), и базовый rank actor
+      строго выше rank цели (owner → admin → member). Ровесникам и старшим —
+      нельзя, вне общих окружений — нельзя.
+    """
+    if actor_permissions.get('all'):
+        return True
+    from app.core.models import WorkspaceMember
+    from app.core.permissions import get_workspace_permissions, workspace_role_rank
+    memberships = (await session.execute(
+        select(WorkspaceMember).where(WorkspaceMember.user_id == actor.id)
+    )).scalars().all()
+    for membership in memberships:
+        target_role = await get_workspace_role(session, target_id, membership.workspace_id)
+        if target_role is None:
+            continue
+        if workspace_role_rank(membership.role) <= workspace_role_rank(target_role):
+            continue
+        ws_permissions = await get_workspace_permissions(actor.id, membership.workspace_id) or {}
+        if ws_permissions.get('users_password_reset') or actor_permissions.get('users_password_reset'):
+            return True
+    return False
 
 
 @router.put('/{user_id}/role')

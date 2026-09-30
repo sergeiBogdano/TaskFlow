@@ -348,7 +348,7 @@ export function WorkspaceSettings() {
                   ) : (
                     <span className="tf-chip">{member.role === 'owner' ? 'владелец' : member.role === 'admin' ? 'админ' : 'участник'}</span>
                   )}
-                  {canTouch && (
+                  {canTouch && (isSuperadmin || user?.id === member.user_id || user?.permissions?.users_password_reset === true) && (
                     <button type="button" onClick={() => setPwdUserId(pwdUserId === member.user_id ? null : member.user_id)} className="tf-button h-9 px-2 text-xs" title="Сменить пароль">
                       <KeyRound size={14} />Пароль
                     </button>

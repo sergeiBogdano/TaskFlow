@@ -63,6 +63,10 @@ async def api_change_password(request: Request, current_password: str = Form('')
     user = await _current_user(request)
     if not user:
         return JSONResponse({'error': 'auth'}, status_code=401)
+    from app.core.permissions import get_user_permissions
+    permissions = await get_user_permissions(user.id)
+    if not (permissions.get('all') or permissions.get('users_password_own', True) is not False):
+        return JSONResponse({'error': 'Нет права "users_password_own"'}, status_code=403)
     if not verify_password(current_password, user.password_hash):
         return JSONResponse({'error': 'Неверный текущий пароль'}, status_code=400)
     if not new_password or len(new_password) < 4:

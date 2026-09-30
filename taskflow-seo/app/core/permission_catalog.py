@@ -66,16 +66,27 @@ PERMISSION_GROUPS = [
         'items': [
             {'key': 'users', 'label': 'Пользователи и роли', 'hint': 'Создание пользователей, назначение ролей, настройка прав', 'level': 'sensitive'},
             {'key': 'settings', 'label': 'Настройки', 'hint': 'Системные настройки приложения', 'level': 'sensitive'},
+            {'key': 'users_password_own', 'label': 'Смена своего пароля', 'hint': 'Пользователь может менять свой собственный пароль'},
+        ],
+    },
+    {
+        'id': 'workspace_security',
+        'scope': SCOPE_WORK,
+        'title': 'Пароли участников',
+        'description': 'Кто в окружении может сбрасывать чужие пароли. Действует только вниз по рангу (owner → admin → member), ровесникам и старшим — нельзя.',
+        'items': [
+            {'key': 'users_password_reset', 'label': 'Сброс чужих паролей', 'hint': 'Сбрасывать пароли участников младше по рангу в этом окружении', 'level': 'sensitive'},
         ],
     },
 ]
 
 ROLE_PRESETS = {
-    'executor': ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace'],
+    'executor': ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'users_password_own'],
     'manager': [
         'dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'kanban', 'calendar', 'clients',
         'modules', 'reports', 'notifications', 'notes', 'ai', 'workspace',
         'client_tab_contacts', 'client_tab_contracts', 'client_tab_related', 'client_tab_activity',
+        'users_password_own',
     ],
     'admin': [
         'dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'tasks_view_others', 'kanban',
@@ -83,6 +94,7 @@ ROLE_PRESETS = {
         'settings', 'users',
         'client_tab_contacts', 'client_tab_access', 'client_tab_contracts', 'client_tab_notes',
         'client_tab_related', 'client_tab_activity', 'client_delete',
+        'users_password_own',
     ],
 }
 
@@ -94,10 +106,12 @@ DEFAULT_ROLE_PERMISSIONS = {
 
 # Идемпотентное дозаполнение существующих ролей новыми ключами:
 # добавляются только отсутствующие ключи (значение True), ничего не удаляется.
+# users_password_reset здесь НЕТ осознанно: сброс чужих паролей — opt-in,
+# выдаётся явно (роль приложения или кастомная роль окружения).
 ROLE_MIGRATION_DEFAULTS = {
-    'admin': ['users', 'notes', 'ai', 'workspace'],
-    'manager': ['notes', 'ai', 'workspace'],
-    'executor': ['notes', 'workspace'],
+    'admin': ['users', 'notes', 'ai', 'workspace', 'users_password_own'],
+    'manager': ['notes', 'ai', 'workspace', 'users_password_own'],
+    'executor': ['notes', 'workspace', 'users_password_own'],
 }
 
 
@@ -110,12 +124,16 @@ def work_scope_keys() -> list[str]:
 def workspace_default_permissions(rank: str) -> dict:
     """Права по умолчанию в окружении (Ф7).
 
-    owner/admin → полный набор «Работы»; member → только базовые
+    owner/admin → полный набор «Работы», member → только базовые
     (без расширений advanced/sensitive).
+    users_password_reset исключён из rank-defaults осознанно: иначе любой
+    владелец окружения сбрасывал бы пароли добавляемым участникам
+    (invite-then-reset) без ведома суперадмина. Право выдаётся явно —
+    ролью приложения или кастомной ролью окружения.
     """
     keys = work_scope_keys()
     if rank in ('owner', 'admin'):
-        return {key: True for key in keys}
+        return {key: True for key in keys if key != 'users_password_reset'}
     basic = {item['key'] for group in PERMISSION_GROUPS if group['scope'] == SCOPE_WORK
              for item in group['items'] if item.get('level') == 'basic'}
     return {key: True for key in keys if key in basic}
