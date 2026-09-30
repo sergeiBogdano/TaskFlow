@@ -978,7 +978,7 @@ async def restore_report(report_id: int, user=Depends(get_current_user)):
     await _ensure_reports_access(user)
     async with async_session() as session:
         report = await session.get(GeneratedReport, report_id)
-        if not report or report.deleted_at:
+        if not report or not report.deleted_at:
             raise HTTPException(status_code=404, detail="Отчет не найден")
         report.deleted_at = None
         await session.commit()

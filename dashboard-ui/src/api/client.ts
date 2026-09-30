@@ -241,16 +241,6 @@ export type ClientWorkSummary = {
   last_activity: string | null;
 };
 
-export type ReportsData = {
-  labels: string[];
-  created: number[];
-  done: number[];
-  overdue: number[];
-  status_dist: Record<string, number>;
-  client_funnel: { total: number; active: number; paused: number; closed: number };
-  client_tasks: { name: string; active: number; done: number }[];
-};
-
 export type ClientAnalytics = {
   period: { start: string; end: string };
   summary: { organizations: number; total: number; completed: number; other: number; overdue: number; without_modules?: number };
@@ -726,7 +716,6 @@ export const api = {
   deleteQuickTask: (id: number) => request<{ ok: boolean }>(`/api/quick-tasks/${id}`, { method: 'DELETE' }),
 
   // Reports (existing endpoint)
-  getReports: (months = 12) => request<ReportsData>(`/api/reports/data?months=${months}`),
   getGeneratedReports: () => request<GeneratedReport[]>('/api/reports'),
   getGeneratedReport: (id: number) => request<GeneratedReport>(`/api/reports/${id}`),
   generateReport: (data: ReportGeneratePayload) =>

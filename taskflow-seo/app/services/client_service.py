@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from sqlalchemy import and_, select
@@ -9,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.models import Client
+from app.core.utils.crypto import encrypt_accesses_value
 from app.core.utils.timezone import to_utc, utc_now
 
 
@@ -43,7 +43,7 @@ class ClientService:
             status=status,
             org_data=org_data,
             client_warning=client_warning,
-            accesses=json.dumps(accesses, ensure_ascii=False) if accesses else None,
+            accesses=encrypt_accesses_value(accesses),
         )
         self.session.add(client)
         await self.session.commit()
@@ -98,6 +98,7 @@ class ClientService:
                 Client.contract_end <= end_date,
                 Client.contract_end >= now,
                 Client.status == 'active',
+                Client.deleted_at.is_(None),
             )
         )
         result = await self.session.execute(query)

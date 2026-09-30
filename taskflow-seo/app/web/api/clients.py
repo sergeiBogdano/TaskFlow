@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import async_session
 from app.core.models import Client, ClientContact, ClientResponsible, Contract, FileAttachment, Module, User, UserClientAccess
 from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, require_role, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
-from app.core.utils.crypto import decrypt_accesses, encrypt_accesses
+from app.core.utils.crypto import decrypt_accesses_value, encrypt_accesses_value
 from app.core.utils.timezone import format_datetime, safe_dt, to_utc, utc_now
 from app.core.config import settings
 from app.services.activity_service import list_activity, log_activity
@@ -354,13 +354,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
         responsible_rows = (await session.execute(select(ClientResponsible).where(ClientResponsible.client_id == c.id))).scalars().all()
         accesses = []
         if c.accesses and user_can_view_client_tab(role_names, permissions, 'access'):
-            try:
-                if isinstance(c.accesses, str):
-                    accesses = json.loads(c.accesses)
-                else:
-                    accesses = c.accesses
-            except json.JSONDecodeError:
-                accesses = []
+            accesses = decrypt_accesses_value(c.accesses)
         return JSONResponse(_client_to_dict(c, contacts, contracts, accesses, [row.user_id for row in access_rows], [row.user_id for row in responsible_rows], role_names, permissions))
 
 
@@ -501,7 +495,7 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
         if data.get('status'):
             c.status = data['status']
         if 'accesses' in data:
-            c.accesses = json.dumps(data['accesses'], ensure_ascii=False) if data['accesses'] else None
+            c.accesses = encrypt_accesses_value(data['accesses'])
         if 'contacts' in data:
             existing = (await session.execute(select(ClientContact).where(ClientContact.client_id == client_id))).scalars().all()
             for item in existing:
@@ -793,6 +787,11 @@ async def upload_client_file(client_id: int, file: UploadFile, user=Depends(get_
         data = await file.read()
         if not data:
             raise HTTPException(status_code=400, detail='File is empty')
+        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
+            )
         original_name = file.filename or 'file'
         attachment = FileAttachment(
             client_id=client_id,
@@ -830,6 +829,11 @@ async def upload_contract_file(client_id: int, contract_id: int, file: UploadFil
         data = await file.read()
         if not data:
             raise HTTPException(status_code=400, detail='File is empty')
+        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
+            )
         original_name = file.filename or 'file'
         attachment = FileAttachment(
             client_id=client_id,
@@ -971,7 +975,7 @@ async def decrypt_client_accesses(client_id: int, user=Depends(require_role(['su
         role_names = await get_user_role_names(user.id)
         await _assert_client_workspace(session, c, user, role_names)
         try:
-            decrypted = decrypt_accesses(c.accesses)
+            decrypted = decrypt_accesses_value(c.accesses)
             return JSONResponse(decrypted)
         except Exception:
             return JSONResponse({'error': 'Failed to decrypt'}, status_code=400)

@@ -21,9 +21,10 @@ from app.core.permissions import (
     user_is_superadmin,
 )
 from app.core.utils.timezone import format_datetime, safe_dt, to_utc, utc_now
+from app.core.utils.crypto import decrypt_accesses_value
 from app.core.config import settings
 from app.services.activity_service import list_activity, log_activity
-from app.services.task_service import TaskService
+from app.services.task_service import TaskService, dump_checklist, load_checklist
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -230,7 +231,7 @@ def _task_to_dict(t: Task) -> dict:
         'comment': t.comment or '',
         'deadline': dl.isoformat() if dl else None,
         'completion_date': cd.isoformat() if cd else None,
-        'checklist': t.checklist or [],
+        'checklist': load_checklist(t.checklist),
         'sort_order': t.sort_order or 0,
         'created_at': safe_dt(t.created_at).isoformat() if t.created_at else '',
         'updated_at': safe_dt(t.updated_at).isoformat() if t.updated_at else '',
@@ -274,12 +275,8 @@ def _client_accesses_for_task(task: Task) -> list[dict]:
             selected_ids = set()
     if not task.client or not task.client.accesses or not selected_ids:
         return []
-    try:
-        raw_accesses = json.loads(task.client.accesses) if isinstance(task.client.accesses, str) else task.client.accesses
-    except json.JSONDecodeError:
-        return []
     result = []
-    for index, access in enumerate(raw_accesses or [], start=1):
+    for index, access in enumerate(decrypt_accesses_value(task.client.accesses), start=1):
         if not isinstance(access, dict):
             continue
         access_id = int(access.get('id') or index)
@@ -636,6 +633,7 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         next_assignee_id = data['assignee_id'] if 'assignee_id' in data else t.assignee_id
         next_co_executor_ids = _normalize_co_executor_ids(data, [link.user_id for link in t.co_executor_links] or ([t.co_executor_id] if t.co_executor_id else []))
         next_deadline = _parse_iso_datetime(data.get('deadline')) if 'deadline' in data else t.deadline
+        next_checklist = dump_checklist(data.get('checklist')) if 'checklist' in data else t.checklist
         next_completion_date = _parse_iso_datetime(data.get('completion_date')) if 'completion_date' in data else t.completion_date
         changes = []
 
@@ -674,7 +672,7 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         if 'client_access_ids' in data:
             track('client_access_ids', json.loads(t.client_access_ids) if isinstance(t.client_access_ids, str) and t.client_access_ids else [], data.get('client_access_ids') or [])
         if 'checklist' in data:
-            track('checklist', t.checklist, data['checklist'])
+            track('checklist', t.checklist, next_checklist)
         await _ensure_client_access(session, user, role_names, accessible_client_ids, next_client_id)
         await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids)
         _validate_task_dates(next_completion_date, next_deadline)
@@ -709,11 +707,18 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         if 'deadline' in data and not data.get('deadline'):
             t.deadline = None
         if data.get('completion_date'):
-            t.completion_date = _parse_iso_datetime(data['completion_date'])
+            t.completion_date = _parse_iso_datetime(data.get('completion_date'))
         if 'completion_date' in data and not data.get('completion_date'):
             t.completion_date = None
+        if not data.get('status') and t.status == 'overdue':
+            # дедлайн перенесли в будущее (или убрали), а статус никто не менял:
+            # зависший 'overdue' сбрасываем, иначе задача навсегда вне фильтров
+            current_deadline = safe_dt(t.deadline)
+            if current_deadline is None or current_deadline > utc_now():
+                track('status', t.status, 'in_progress')
+                t.status = 'in_progress'
         if 'checklist' in data:
-            t.checklist = data['checklist']
+            t.checklist = next_checklist
         new_assignee_ids = _assignment_user_ids(t.assignee_id, next_co_executor_ids)
         await _add_assignment_notifications(session, t, user.id, new_assignee_ids - old_assignee_ids)
         await session.commit()
@@ -828,6 +833,11 @@ async def upload_file(task_id: int, file: UploadFile, user=Depends(get_current_u
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, t, user, role_names)
         data = await file.read()
+        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
+            )
         att = FileAttachment(
             task_id=task_id,
             filename=file.filename or 'file',

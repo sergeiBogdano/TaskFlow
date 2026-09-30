@@ -68,6 +68,7 @@ async def _migrate():
             'ALTER TABLE file_attachments ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
             'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
             'ALTER TABLE workspace_members ADD COLUMN custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
+            'CREATE TABLE IF NOT EXISTS workspace_removals (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE NOT NULL, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)',
         ]:
             try:
                 await conn.execute(text(col))
@@ -139,30 +140,63 @@ async def _migrate():
 
 
 async def _ensure_indexes():
+    # NB: PG-ветка ниже должна покрывать те же колонки, что и sqlite _migrate().
+    # Списки разъезжались (custom_role_id падал прод) — при добавлении колонки
+    # дописывать в оба места.
+    pg_statements = [
+        'ALTER TABLE file_attachments ALTER COLUMN task_id DROP NOT NULL',
+        'ALTER TABLE file_attachments ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS org_data TEXT',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_warning TEXT',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_notes TEXT',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS competitors TEXT',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS favicon_url VARCHAR(500)',
+        'ALTER TABLE file_attachments ADD COLUMN IF NOT EXISTS contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
+        'ALTER TABLE generated_reports ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
+        'CREATE TABLE IF NOT EXISTS client_responsibles (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE)',
+        'ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_priority VARCHAR(20) DEFAULT \'medium\'',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_notes_template TEXT',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS client_ids TEXT',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS last_generated_at TIMESTAMP WITH TIME ZONE',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_title_templates TEXT',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS completion_offset_days INTEGER DEFAULT 0',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS deadline_offset_days INTEGER',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS comment TEXT',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20)',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurring_count INTEGER',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurring_remaining INTEGER',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurring_parent_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS creator_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS co_executor_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS no_contract BOOLEAN DEFAULT FALSE',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT \'public\'',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cycle_id INTEGER REFERENCES cycles(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_access_ids TEXT',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+        'ALTER TABLE clients ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+        'ALTER TABLE notes ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+        'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
+        'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\'',
+        'ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
+        'CREATE TABLE IF NOT EXISTS workspace_removals (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMP WITH TIME ZONE DEFAULT now())',
+        'CREATE UNIQUE INDEX IF NOT EXISTS ix_workspace_removal_unique ON workspace_removals(workspace_id, user_id)',
+        'ALTER TABLE saved_views ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
+        'ALTER TABLE client_contacts ADD COLUMN IF NOT EXISTS contact_role VARCHAR(50)',
+    ]
     async with engine.begin() as conn:
-        try:
-            if settings.DATABASE_URL.startswith('postgresql'):
-                await conn.execute(text('ALTER TABLE file_attachments ALTER COLUMN task_id DROP NOT NULL'))
-                await conn.execute(text('ALTER TABLE file_attachments ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE'))
-                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_warning TEXT'))
-                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_notes TEXT'))
-                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS competitors TEXT'))
-                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS favicon_url VARCHAR(500)'))
-                await conn.execute(text('ALTER TABLE file_attachments ADD COLUMN IF NOT EXISTS contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL'))
-                await conn.execute(text('ALTER TABLE generated_reports ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE'))
-                await conn.execute(text('CREATE TABLE IF NOT EXISTS client_responsibles (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE)'))
-                await conn.execute(text('ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL'))
-                await conn.execute(text("ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_priority VARCHAR(20) DEFAULT 'medium'"))
-                await conn.execute(text('ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_notes_template TEXT'))
-                await conn.execute(text('ALTER TABLE modules ADD COLUMN IF NOT EXISTS client_ids TEXT'))
-                await conn.execute(text('ALTER TABLE tasks ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
-                await conn.execute(text('ALTER TABLE clients ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
-                await conn.execute(text('ALTER TABLE notes ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
-                await conn.execute(text('ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE'))
-                await conn.execute(text('ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\''))
-                await conn.execute(text('ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL'))
-        except Exception as e:
-            logger.warning('Column migration error for client_warning: %s', e)
+        if settings.DATABASE_URL.startswith('postgresql'):
+            for stmt in pg_statements:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as e:
+                    # per-statement: одна упавшая миграция не должна отменять остальные
+                    logger.warning('Column migration error for "%s": %s', stmt[:60], e)
 
     indexes = [
         'CREATE INDEX IF NOT EXISTS ix_tasks_status_active ON tasks(status, deleted_at)',
@@ -230,54 +264,6 @@ async def _ensure_admin():
             logger.info('Default superadmin user created (4dmin:4dmin)')
             return
 
-            testuser = User(username='testuser', password_hash=hash_password('testpass'))
-            session.add(testuser)
-            await session.commit()
-            await session.refresh(testuser)
-            er = await session.execute(select(Role).where(Role.name == 'executor'))
-            executor_role = er.scalar_one_or_none()
-            if executor_role:
-                session.add(UserRole(user_id=testuser.id, role_id=executor_role.id))
-
-            from app.core.models import Client, ClientContact, Contract, Task, Module
-            from datetime import datetime, timedelta
-            now = datetime.utcnow()
-
-            c1 = Client(org_name='ООО Ромашка', domain='romashka.ru', contract_start=now - timedelta(days=365), contract_end=now + timedelta(days=30), status='active', org_data='Данные организации', accesses='[{"title":"Сайт","url":"https://romashka.ru","login":"admin","password":"pass123"}]')
-            c2 = Client(org_name='ИП Иванов', domain='ivanov.ru', contract_start=now - timedelta(days=180), contract_end=now + timedelta(days=60), status='active')
-            c3 = Client(org_name='ЗАО ТехноСервис', domain='tehno.ru', contract_start=now - timedelta(days=90), contract_end=now - timedelta(days=5), status='active')
-            session.add_all([c1, c2, c3])
-            await session.commit()
-            await session.refresh(c1)
-            await session.refresh(c2)
-            await session.refresh(c3)
-
-            session.add(ClientContact(client_id=c1.id, fio='Иван Петров', position='Директор', phone='+7-999-111-22-33', email='ivan@romashka.ru', contact_role='руководитель'))
-            session.add(Contract(client_id=c1.id, contract_type='сопровождение', start_date=now - timedelta(days=365), end_date=now + timedelta(days=30), amount=120000, status='active'))
-            session.add(Contract(client_id=c2.id, contract_type='создание', start_date=now - timedelta(days=180), end_date=now + timedelta(days=60), amount=80000, status='active'))
-            session.add(Contract(client_id=c3.id, contract_type='продвижение', start_date=now - timedelta(days=90), end_date=now - timedelta(days=5), amount=50000, status='expired'))
-
-            tasks_data = [
-                {'title': 'Настройка SEO', 'client_id': c1.id, 'task_type': 'seo', 'status': 'in_progress', 'priority': 'high', 'deadline': now + timedelta(days=3)},
-                {'title': 'Написание статьи', 'client_id': c1.id, 'task_type': 'article', 'status': 'todo', 'priority': 'medium', 'deadline': now + timedelta(days=7)},
-                {'title': 'Аудит сайта', 'client_id': c2.id, 'task_type': 'seo', 'status': 'done', 'priority': 'high', 'deadline': now - timedelta(days=2)},
-                {'title': 'Разработка лендинга', 'client_id': c2.id, 'task_type': 'dev', 'status': 'todo', 'priority': 'high', 'deadline': now + timedelta(days=14)},
-                {'title': 'Оптимизация скорости', 'client_id': c3.id, 'task_type': 'seo', 'status': 'overdue', 'priority': 'medium', 'deadline': now - timedelta(days=5)},
-                {'title': 'Дизайн макета', 'client_id': c3.id, 'task_type': 'dev', 'status': 'in_progress', 'priority': 'low', 'deadline': now + timedelta(days=10)},
-                {'title': 'Техническое задание', 'client_id': c1.id, 'task_type': 'custom', 'status': 'todo', 'priority': 'medium', 'deadline': now + timedelta(days=5)},
-                {'title': 'Отчёт за месяц', 'client_id': c2.id, 'task_type': 'custom', 'status': 'done', 'priority': 'low', 'deadline': now - timedelta(days=1)},
-            ]
-            for td in tasks_data:
-                session.add(Task(**td))
-
-            session.add(Module(name='Ежемесячный SEO-отчёт', description='Генерация отчёта по SEO', client_id=c1.id, task_type='seo', recurring_interval='monthly', is_active=True))
-            session.add(Module(name='Контент-план', description='Создание контента', client_id=c2.id, task_type='article', recurring_interval='weekly', is_active=True))
-
-            await session.commit()
-            logger.info('Default admin user created (admin:admin)')
-            logger.info('Test user created (testuser:testpass)')
-            logger.info('Seed data created: clients, contracts, tasks, modules')
-
 
 async def _migrate_role_permissions():
     """Идемпотентно дозаполняет новые ключи прав в существующих ролях.
@@ -327,6 +313,7 @@ async def _ensure_workspaces():
         Role,
         Workspace,
         WorkspaceMember,
+        WorkspaceRemoval,
     )
     async with async_session() as session:
         ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
@@ -354,9 +341,19 @@ async def _ensure_workspaces():
                 update(model).where(model.workspace_id.is_(None)).values(workspace_id=wid)
             )
         members = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceMember))).scalars().all()}
+        removed = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceRemoval))).scalars().all()}
         users = (await session.execute(select(User))).scalars().all()
+        user_ws_ids: dict[int, set[int]] = {}
+        for workspace_id, user_id in members:
+            user_ws_ids.setdefault(user_id, set()).add(workspace_id)
         for user in users:
             if (wid, user.id) in members:
+                continue
+            if (wid, user.id) in removed:
+                # явно удалён из окружения — не возвращать при рестарте
+                continue
+            if user_ws_ids.get(user.id):
+                # участник других окружений — не тянуть в первое
                 continue
             role_rows = (await session.execute(
                 select(Role.name).join(UserRole, UserRole.role_id == Role.id)

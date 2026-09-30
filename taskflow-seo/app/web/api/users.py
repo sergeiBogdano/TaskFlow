@@ -18,7 +18,6 @@ from app.core.permissions import (
     get_current_user,
     get_user_permissions,
     get_user_role_names,
-    get_workspace_role,
     require_permission,
     require_role,
     resolve_workspace,
@@ -100,27 +99,14 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
         if user.id == user_id:
             pass  # свой пароль менять можно всегда
         else:
+            # чужой пароль — только суперадмин (и никогда — суперадмина).
+            # Проверки через роли окружения здесь запрещены осознанно:
+            # владелец окружения может добавить любого пользователя к себе
+            # без его согласия и тем самым получить право на смену пароля —
+            # это захват чужого аккаунта.
             role_names = await get_user_role_names(user.id)
-            if user_is_superadmin(role_names):
-                pass
-            else:
-                # админ воркспейса — только участникам своих воркспейсов, но не владельцу
-                allowed = False
-                memberships = (await session.execute(
-                    select(WorkspaceMember).where(WorkspaceMember.user_id == user.id)
-                )).scalars().all()
-                for membership in memberships:
-                    if membership.role not in ('owner', 'admin'):
-                        continue
-                    target_role = await get_workspace_role(session, user_id, membership.workspace_id)
-                    if target_role is None:
-                        continue
-                    if target_role == 'owner':
-                        continue
-                    allowed = True
-                    break
-                if not allowed:
-                    raise HTTPException(status_code=403, detail='Forbidden')
+            if not user_is_superadmin(role_names):
+                raise HTTPException(status_code=403, detail='Forbidden')
             target_roles = (await session.execute(
                 select(UserRole).where(UserRole.user_id == user_id)
             )).scalars().all()

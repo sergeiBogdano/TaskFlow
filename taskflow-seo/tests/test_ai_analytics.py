@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.web.api import ai_analytics as analytics
-pytestmark = pytest.mark.skip(reason="AI analytics tests temporarily disabled")
 
 @pytest.fixture
 def llm_calls(monkeypatch):
@@ -28,11 +27,15 @@ def seed_ai_data(admin_cookies, executor_cookies, event_loop):
         async with async_session() as session:
             admin = (await session.execute(select(User).where(User.username == "4dmin"))).scalar_one()
             executor = (await session.execute(select(User).where(User.username == "testexec"))).scalar_one()
+            from app.core.models import Workspace
+            ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+            ws_id = ws.id if ws else None
             client = Client(
                 org_name="AI Test Client",
                 status="active",
                 contract_start=datetime(2026, 1, 1),
                 contract_end=datetime(2027, 12, 31),
+                workspace_id=ws_id,
             )
             session.add(client)
             await session.flush()
@@ -40,15 +43,19 @@ def seed_ai_data(admin_cookies, executor_cookies, event_loop):
             session.add_all([
                 Task(title="AI overdue exec", status="todo", priority="high",
                      client_id=client.id, assignee_id=executor.id,
+                     workspace_id=ws_id,
                      deadline=now - timedelta(days=20)),
                 Task(title="AI overdue admin", status="in_progress", priority="medium",
                      client_id=client.id, assignee_id=admin.id,
+                     workspace_id=ws_id,
                      deadline=now - timedelta(days=5)),
                 Task(title="AI active future", status="todo", priority="low",
                      client_id=client.id, assignee_id=executor.id,
+                     workspace_id=ws_id,
                      deadline=now + timedelta(days=10)),
                 Task(title="AI done task", status="done", priority="medium",
                      client_id=client.id, assignee_id=executor.id,
+                     workspace_id=ws_id,
                      deadline=now - timedelta(days=2),
                      completion_date=now - timedelta(hours=2)),
             ])

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -60,22 +60,48 @@ class ReminderService:
             await self.session.commit()
 
     async def create_contract_reminders(self, client: Client):
+        from app.core.utils.timezone import safe_dt
+
         days = settings.CONTRACT_REMINDER_DAYS
+        contract_end = safe_dt(client.contract_end)
+        if contract_end is None:
+            return
+        contract_end = contract_end.astimezone(ZoneInfo('UTC'))
 
         for days_before in days:
-            trigger = client.contract_end - timedelta(days=days_before)
-            if trigger > utc_now():
-                task_count = len([t for t in client.tasks if t.status in ('todo', 'in_progress', 'overdue')])
-                message = (
-                    f'📜 Договор с "{client.org_name}" заканчивается через {days_before} дн.\n'
-                    f'Активных задач: {task_count}'
+            trigger = contract_end - timedelta(days=days_before)
+            if trigger <= utc_now():
+                continue
+            # идемпотентность: одно несработанное напоминание на (клиент, days_before).
+            # Без этого ежедневный крон плодит дубликаты.
+            dup = (await self.session.execute(
+                select(Reminder.id).where(
+                    Reminder.reminder_type == 'contract',
+                    Reminder.client_id == client.id,
+                    Reminder.sent.is_(False),
+                    func.date(Reminder.trigger_at) == trigger.date().isoformat(),
+                ).limit(1)
+            )).scalar_one_or_none()
+            if dup is not None:
+                continue
+            # считаем запросом: ленивый доступ client.tasks в async падает MissingGreenlet
+            task_count = (await self.session.execute(
+                select(func.count(Task.id)).where(
+                    Task.client_id == client.id,
+                    Task.deleted_at.is_(None),
+                    Task.status.in_(['todo', 'in_progress', 'overdue']),
                 )
-                await self.create_reminder(
-                    trigger_at=trigger,
-                    message=message,
-                    reminder_type='contract',
-                    client_id=client.id,
-                )
+            )).scalar() or 0
+            message = (
+                f'📜 Договор с "{client.org_name}" заканчивается через {days_before} дн.\n'
+                f'Активных задач: {task_count}'
+            )
+            await self.create_reminder(
+                trigger_at=trigger,
+                message=message,
+                reminder_type='contract',
+                client_id=client.id,
+            )
 
     async def create_publish_check_reminder(
         self,

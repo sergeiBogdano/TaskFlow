@@ -24,6 +24,7 @@ from app.core.models import (
     Workspace,
     WorkspaceKnowledge,
     WorkspaceMember,
+    WorkspaceRemoval,
     WorkspaceRole,
 )
 from app.core.permissions import (
@@ -160,16 +161,56 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
     }
 
 
+async def _purge_client(session, client_id: int) -> None:
+    """Безвозвратное удаление клиента и его данных.
+
+    Порядок важен для PostgreSQL: таблицы без ON DELETE (комментарии,
+    договоры, контакты) чистятся явно до родителей. Работает и на SQLite
+    без FK-enforcement (не оставляет сирот).
+    """
+    from app.core.models import ClientContact, Contract, FileAttachment, TaskComment
+    task_ids = select(Task.id).where(Task.client_id == client_id)
+    contract_ids = select(Contract.id).where(Contract.client_id == client_id)
+    await session.execute(TaskComment.__table__.delete().where(TaskComment.task_id.in_(task_ids)))
+    await session.execute(FileAttachment.__table__.delete().where(
+        (FileAttachment.task_id.in_(task_ids))
+        | (FileAttachment.client_id == client_id)
+        | (FileAttachment.contract_id.in_(contract_ids))
+    ))
+    await session.execute(Contract.__table__.delete().where(Contract.client_id == client_id))
+    await session.execute(ClientContact.__table__.delete().where(ClientContact.client_id == client_id))
+    await session.execute(Task.__table__.delete().where(Task.client_id == client_id))
+    await session.execute(Client.__table__.delete().where(Client.id == client_id))
+
+
 async def _purge_workspace(session, workspace_id: int) -> None:
-    """Безвозвратное удаление окружения и всех его данных."""
-    from app.core.models import WorkspaceKnowledge
+    """Безвозвратное удаление окружения и всех его данных.
+
+    Порядок важен для PostgreSQL: таблицы без ON DELETE чистятся явно.
+    """
+    from app.core.models import (
+        ClientContact,
+        Contract,
+        FileAttachment,
+        TaskComment,
+        WorkspaceKnowledge,
+    )
+    ws_tasks = select(Task.id).where(Task.workspace_id == workspace_id)
+    ws_clients = select(Client.id).where(Client.workspace_id == workspace_id)
+    await session.execute(TaskComment.__table__.delete().where(TaskComment.task_id.in_(ws_tasks)))
+    await session.execute(FileAttachment.__table__.delete().where(
+        (FileAttachment.task_id.in_(ws_tasks)) | (FileAttachment.client_id.in_(ws_clients))
+    ))
+    for model, column in ((Contract, Contract.client_id), (ClientContact, ClientContact.client_id)):
+        await session.execute(model.__table__.delete().where(column.in_(ws_clients)))
     await session.execute(SprintTask.__table__.delete().where(
         SprintTask.sprint_id.in_(select(Sprint.id).where(Sprint.workspace_id == workspace_id))))
     for model, column in ((Sprint, Sprint.workspace_id), (Task, Task.workspace_id),
                           (Client, Client.workspace_id), (Note, Note.workspace_id),
                           (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
                           (WorkspaceRole, WorkspaceRole.workspace_id),
-                          (WorkspaceMember, WorkspaceMember.workspace_id)):
+                          (WorkspaceMember, WorkspaceMember.workspace_id),
+                          (WorkspaceRemoval, WorkspaceRemoval.workspace_id)):
         await session.execute(model.__table__.delete().where(column == workspace_id))
     await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
 
@@ -392,6 +433,28 @@ def _can_manage(actor_role: str, actor_is_super: bool, target_role: str | None, 
     return None
 
 
+async def _owner_count(session, workspace_id: int) -> int:
+    from sqlalchemy import func
+    return (await session.execute(
+        select(func.count(WorkspaceMember.id)).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.role == WS_ROLE_OWNER,
+        )
+    )).scalar() or 0
+
+
+async def _can_leave_ownership(session, workspace_id: int, actor_id: int, target_id: int) -> str | None:
+    """Владелец может сложить полномочия/выйти, только если останется другой владелец.
+
+    Иначе окружение станет бесхозным: никто не сможет управлять составом и удалением.
+    """
+    if actor_id != target_id:
+        return "Владельца может менять только суперадмин"
+    if await _owner_count(session, workspace_id) < 2:
+        return "Нельзя: вы единственный владелец. Сначала передайте владение другому участнику"
+    return None
+
+
 @router.post("/{workspace_id}/members", status_code=201)
 async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(require_workspace_role("owner", "admin"))):
     if payload.role not in (WS_ROLE_ADMIN, WS_ROLE_MEMBER):
@@ -415,6 +478,13 @@ async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(requi
             return JSONResponse({"error": "Уже участник"}, status_code=400)
         member = WorkspaceMember(workspace_id=ctx["workspace"].id, user_id=payload.user_id, role=payload.role)
         session.add(member)
+        # повторное приглашение стирает tombstone явного удаления
+        await session.execute(
+            WorkspaceRemoval.__table__.delete().where(
+                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
+                WorkspaceRemoval.user_id == payload.user_id,
+            )
+        )
         await session.commit()
         await session.refresh(member)
     return JSONResponse(_member_to_dict(member, target.username), status_code=201)
@@ -441,7 +511,10 @@ async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, 
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
-        err = _can_manage(ctx["role"], actor_is_super, member.role, payload.role)
+        if member.role == WS_ROLE_OWNER and payload.role != WS_ROLE_OWNER and not actor_is_super:
+            err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
+        else:
+            err = _can_manage(ctx["role"], actor_is_super, member.role, payload.role)
         if err:
             return JSONResponse({"error": err}, status_code=403)
         member.role = payload.role
@@ -463,10 +536,22 @@ async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_wor
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
-        err = _can_manage(ctx["role"], actor_is_super, member.role)
+        if member.role == WS_ROLE_OWNER and not actor_is_super:
+            err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
+        else:
+            err = _can_manage(ctx["role"], actor_is_super, member.role)
         if err:
             return JSONResponse({"error": err}, status_code=403)
         await session.delete(member)
+        # tombstone: автодобавление при рестарте не должно возвращать удалённых
+        existing_mark = (await session.execute(
+            select(WorkspaceRemoval).where(
+                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
+                WorkspaceRemoval.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if existing_mark is None:
+            session.add(WorkspaceRemoval(workspace_id=ctx["workspace"].id, user_id=user_id))
         await session.commit()
     return JSONResponse({"ok": True})
 

@@ -11,7 +11,14 @@ from sqlalchemy import select
 
 from app.core.database import async_session
 from app.core.models import Sprint, SprintTask, Task
-from app.core.permissions import get_current_user, get_user_role_names, resolve_workspace, user_is_superadmin
+from app.core.permissions import (
+    get_accessible_client_ids,
+    get_current_user,
+    get_user_role_names,
+    resolve_workspace,
+    task_is_visible_to_user,
+    user_is_superadmin,
+)
 
 router = APIRouter(prefix="/api/sprints", tags=["sprints"])
 
@@ -119,8 +126,14 @@ async def get_sprint(sprint_id: int, user=Depends(get_current_user)):
             .where(SprintTask.sprint_id == sprint.id, Task.deleted_at.is_(None))
             .order_by(Task.id)
         )).scalars().all()
+        role_names = await get_user_role_names(user.id)
+        accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
+        visible = [
+            t for t in tasks
+            if task_is_visible_to_user(t, user, role_names, accessible_client_ids)
+        ]
         data = _sprint_to_dict(sprint, await _progress(session, sprint))
-        data["tasks"] = [{"id": t.id, "title": t.title, "status": t.status} for t in tasks]
+        data["tasks"] = [{"id": t.id, "title": t.title, "status": t.status} for t in visible]
         return JSONResponse(data)
 
 

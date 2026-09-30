@@ -26,7 +26,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     referenceCache.invalidate();
     const res = await api.login(username, password);
-    document.cookie = `taskflow_user=${res.token}; path=/; max-age=2592000`;
+    // Куку сессии ставит бэкенд (HttpOnly, SameSite=Lax). Через document.cookie
+    // её писать нельзя — кука станет читаемой из JS и HttpOnly-защита пропадёт.
     setUser(res.user);
     // права активного окружения (Ф8) /me считает по workspace_id — перечитываем
     api.getMe()
@@ -37,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await api.logout().catch(() => {});
     referenceCache.invalidate();
-    document.cookie = 'taskflow_user=; path=/; max-age=0';
+    // Куку стирает бэкенд (delete_cookie). Локально чистить нечего.
     setUser(null);
   }, []);
 

@@ -428,12 +428,18 @@ def workspace_role_rank(role: str | None) -> int:
 
 
 def require_workspace_role(*allowed: str):
-    """Проверка роли внутри воркспейса (workspace_id из query)."""
+    """Проверка роли внутри воркспейса.
+
+    workspace_id берётся из пути (id ресурса важнее), иначе из query —
+    как в workspace_id_from_request. Query НЕ должен затенять путь:
+    иначе запрос к /api/workspaces/{B}/... с ?workspace_id={A}
+    молча применяется к окружению A.
+    """
     async def check(request: Request, user=Depends(get_current_user)):
         from sqlalchemy import select
         from app.core.database import async_session
         from app.core.models import Workspace
-        raw = request.query_params.get("workspace_id") or request.path_params.get("workspace_id")
+        raw = request.path_params.get("workspace_id") or request.query_params.get("workspace_id")
         workspace_id = int(raw) if raw and str(raw).isdigit() else None
         async with async_session() as session:
             role_names = await get_user_role_names(user.id)

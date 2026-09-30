@@ -107,14 +107,17 @@ async def set_group_members(group_id: int, request: Request, user=Depends(requir
         group = await session.get(Group, group_id)
         if not group:
             raise HTTPException(status_code=404, detail='Group not found')
+        try:
+            wanted_ids = [int(item) for item in user_ids]
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail='user_ids: только числа')
         existing_users = {
             row[0] for row in (await session.execute(
-                select(User.id).where(User.id.in_([int(i) for i in user_ids] or [0]))
+                select(User.id).where(User.id.in_(wanted_ids or [0]))
             )).all()
         }
         await session.execute(UserGroup.__table__.delete().where(UserGroup.group_id == group_id))
-        for raw in user_ids:
-            uid = int(raw)
+        for uid in wanted_ids:
             if uid in existing_users:
                 session.add(UserGroup(group_id=group_id, user_id=uid))
         await session.commit()

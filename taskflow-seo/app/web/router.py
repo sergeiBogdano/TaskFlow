@@ -14,13 +14,15 @@ from app.core.auth import COOKIE_NAME, make_session_token, verify_session_token
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.models import Client, FileAttachment, Reminder, Task, User, UserSettings
-from app.core.permissions import get_user_role_names, resolve_workspace
+from app.core.permissions import get_user_role_names, resolve_workspace, task_is_visible_to_user
+from app.core.permissions import get_accessible_client_ids
 from app.core.utils.timezone import format_datetime, to_utc, utc_now
 from app.services.activity_service import list_activity, log_activity
 from app.services.client_service import ClientService
 from app.services.notification_service import NotificationService
 from app.services.tag_service import TagService
 from app.services.task_service import TaskService
+from app.services.task_service import dump_checklist, load_checklist
 from app.services.user_service import authenticate, get_user
 from app.web.templates_setup import templates
 
@@ -553,7 +555,7 @@ async def task_edit(
                     changes.append(f'статус: {task.status} → {status}')
                 task.status = status
                 if checklist is not None:
-                    task.checklist = checklist
+                    task.checklist = dump_checklist(checklist)
                     changes.append('чек-лист')
                 await session.commit()
                 if changes:
@@ -750,9 +752,10 @@ async def api_tasks(request: Request, start: str = '', end: str = ''):
             client_name = t.client.org_name if t.client else ''
             notes = (t.notes[:100] + '...') if t.notes and len(t.notes) > 100 else (t.notes or '')
             checklist_progress = ''
-            if t.checklist:
-                done_items = sum(1 for ci in t.checklist if ci.get('done'))
-                checklist_progress = f'{done_items}/{len(t.checklist)}'
+            checklist_items = load_checklist(t.checklist)
+            if checklist_items:
+                done_items = sum(1 for ci in checklist_items if ci.get('done'))
+                checklist_progress = f'{done_items}/{len(checklist_items)}'
             events.append({
                 'id': str(t.id), 'title': f'#{t.id} {t.title}',
                 'start': day_start.strftime('%Y-%m-%d'), 'end': None, 'allDay': True,
@@ -761,8 +764,8 @@ async def api_tasks(request: Request, start: str = '', end: str = ''):
                 'notes': notes, 'checklist': checklist_progress, 'task_type': t.task_type,
                 'has_deadline': bool(t.deadline),
             })
-            if t.checklist:
-                for ci_idx, ci in enumerate(t.checklist):
+            if checklist_items:
+                for ci_idx, ci in enumerate(checklist_items):
                     reminder_raw = ci.get('reminder')
                     if reminder_raw and not ci.get('done'):
                         try:
@@ -800,13 +803,13 @@ async def api_task_update(task_id: str, request: Request):
                 task = await session.get(Task, real_task_id)
                 if not task:
                     return JSONResponse({'error': 'Задача не найдена'}, status_code=404)
-                checklist = task.checklist or []
+                checklist = load_checklist(task.checklist)
                 if 0 <= ci_idx < len(checklist):
                     if body.get('deadline'):
                         dl = parse_web_deadline(body['deadline'])
                         if dl:
                             checklist[ci_idx]['reminder'] = dl.isoformat()
-                    task.checklist = checklist
+                    task.checklist = dump_checklist(checklist)
                     await session.commit()
                 return JSONResponse({'ok': True, 'id': task_id})
     real_task_id = int(task_id)
@@ -843,7 +846,7 @@ async def api_task_update(task_id: str, request: Request):
                 task.comment = body['comment']
                 changes.append('комментарий')
         if 'checklist' in body and isinstance(body['checklist'], list):
-            task.checklist = body['checklist']
+            task.checklist = dump_checklist(body['checklist'])
             changes.append('чек-лист')
         if 'recurring_interval' in body:
             task.recurring_interval = body['recurring_interval'] or None
@@ -858,9 +861,10 @@ async def api_task_update(task_id: str, request: Request):
             if task.status == 'todo':
                 task.status = 'in_progress'
                 changes.append('автостарт')
-        if task.checklist:
-            done_count = sum(1 for ci in task.checklist if ci.get('done'))
-            total_count = len(task.checklist)
+        _checklist_items = load_checklist(task.checklist)
+        if _checklist_items:
+            done_count = sum(1 for ci in _checklist_items if ci.get('done'))
+            total_count = len(_checklist_items)
             if done_count == total_count and total_count > 0:
                 if task.status != 'done':
                     task.status = 'done'
@@ -880,14 +884,20 @@ async def api_task_update(task_id: str, request: Request):
 @router.get('/api/tasks/all')
 async def api_tasks_all(request: Request):
     user = await current_user(request)
+    if not user:
+        return JSONResponse({'error': 'auth'}, status_code=401)
     async with async_session() as session:
         ts = TaskService(session)
         all_tasks = await ts.list_tasks()
         ws_filter = await _legacy_ws_filter(session, request)
+        role_names = await get_user_role_names(user.id)
+        accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         tz = settings.tz
         result = []
         for t in all_tasks:
             if not _legacy_in_ws(t.workspace_id, ws_filter):
+                continue
+            if not task_is_visible_to_user(t, user, role_names, accessible_client_ids):
                 continue
             dl = safe_dt(t.deadline).astimezone(tz) if t.deadline else None
             cd = safe_dt(t.completion_date).astimezone(tz) if t.completion_date else None
@@ -900,7 +910,7 @@ async def api_tasks_all(request: Request):
                 'status': t.status, 'priority': t.priority, 'task_type': t.task_type,
                 'client': client_name, 'client_id': client_id,
                 'notes': t.notes or '', 'comment': t.comment or '',
-                'checklist': t.checklist or [], 'sort_order': t.sort_order or 0,
+                'checklist': load_checklist(t.checklist), 'sort_order': t.sort_order or 0,
                 'recurring_interval': t.recurring_interval,
                 'recurring_count': t.recurring_count,
                 'recurring_remaining': t.recurring_remaining,
@@ -912,14 +922,20 @@ async def api_tasks_all(request: Request):
 @router.get('/api/tasks/export/csv')
 async def api_tasks_export_csv(request: Request):
     user = await current_user(request)
+    if not user:
+        return JSONResponse({'error': 'auth'}, status_code=401)
     async with async_session() as session:
         ts = TaskService(session)
         tasks = await ts.list_tasks()
         ws_filter = await _legacy_ws_filter(session, request)
+        role_names = await get_user_role_names(user.id)
+        accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
     tz = settings.tz
     lines = ['ID,Задача,Клиент,Статус,Приоритет,Срок,Дата выполнения,Тип,Заметка']
     for t in tasks:
         if not _legacy_in_ws(t.workspace_id, ws_filter):
+            continue
+        if not task_is_visible_to_user(t, user, role_names, accessible_client_ids):
             continue
         dl = format_datetime(t.deadline, tz) if t.deadline else ''
         cd = format_datetime(t.completion_date, tz) if t.completion_date else ''
@@ -938,14 +954,20 @@ async def api_tasks_export_csv(request: Request):
 @router.get('/api/tasks/export/pdf')
 async def api_tasks_export_pdf(request: Request):
     user = await current_user(request)
+    if not user:
+        return JSONResponse({'error': 'auth'}, status_code=401)
     async with async_session() as session:
         ts = TaskService(session)
         tasks = await ts.list_tasks()
         ws_filter = await _legacy_ws_filter(session, request)
+        role_names = await get_user_role_names(user.id)
+        accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
     tz = settings.tz
     rows = ''
     for t in tasks:
         if not _legacy_in_ws(t.workspace_id, ws_filter):
+            continue
+        if not task_is_visible_to_user(t, user, role_names, accessible_client_ids):
             continue
         dl = format_datetime(t.deadline, tz) if t.deadline else '—'
         client = t.client.org_name if t.client else '—'
@@ -1000,7 +1022,7 @@ async def api_checklist_item_update(task_id: int, request: Request):
         denied = await _legacy_assert_task(session, request, task)
         if denied:
             return denied
-        checklist = task.checklist or []
+        checklist = load_checklist(task.checklist)
         if idx is None or idx < 0 or idx >= len(checklist):
             return JSONResponse({'error': 'Неверный индекс'}, status_code=400)
         if 'done' in body:
@@ -1012,7 +1034,7 @@ async def api_checklist_item_update(task_id: int, request: Request):
                 checklist[idx]['reminder'] = body['reminder']
             else:
                 checklist[idx].pop('reminder', None)
-        task.checklist = checklist
+        task.checklist = dump_checklist(checklist)
         old_status = task.status
         done_count = sum(1 for ci in checklist if ci.get('done'))
         total_count = len(checklist)
@@ -1626,6 +1648,8 @@ async def api_client_hard_delete(client_id: int, request: Request):
 
 @router.get('/tasks/{task_id}/print')
 async def task_print(task_id: int, request: Request):
+    if not await require_auth(request):
+        return RedirectResponse(url='/login')
     async with async_session() as session:
         t = await session.get(Task, task_id)
         if not t:
@@ -1639,7 +1663,7 @@ async def task_print(task_id: int, request: Request):
         created = safe_dt(t.created_at).astimezone(settings.tz).strftime('%d.%m.%Y %H:%M') if t.created_at else ''
         status_label = {'todo':'К выполнению','in_progress':'В работе','done':'Выполнено','overdue':'Просрочено'}.get(t.status, t.status)
         priority_label = {'low':'Низкий','medium':'Средний','high':'Высокий'}.get(t.priority, t.priority)
-        checklist = t.checklist or []
+        checklist = load_checklist(t.checklist)
     html = f'''<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Задача #{t.id}</title>
 <style>
@@ -1686,7 +1710,9 @@ async def task_print(task_id: int, request: Request):
 
 
 @router.get('/clients/{client_id}/print')
-async def client_print(client_id: int):
+async def client_print(client_id: int, request: Request):
+    if not await require_auth(request):
+        return RedirectResponse(url='/login')
     async with async_session() as session:
         c = await session.get(Client, client_id)
         if not c:
@@ -1722,7 +1748,10 @@ async def client_print(client_id: int):
         html += f'<h3>Данные организации</h3><pre>{c.org_data}</pre>'
     if c.accesses:
         html += '<h3>Доступы</h3><table><thead><tr><th>Сервис</th><th>URL</th><th>Логин</th><th>Пароль</th></tr></thead><tbody>'
-        for acc in c.accesses:
+        from app.core.utils.crypto import decrypt_accesses_value
+        for acc in decrypt_accesses_value(c.accesses):
+            if not isinstance(acc, dict):
+                continue
             html += f'<tr><td>{acc.get("title","")}</td><td>{acc.get("url","")}</td><td>{acc.get("login","")}</td><td>{acc.get("password","")}</td></tr>'
         html += '</tbody></table>'
     if tasks:
@@ -1752,6 +1781,11 @@ async def api_task_upload(task_id: int, file: UploadFile, request: Request):
         if denied:
             return denied
         data = await file.read()
+        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            return JSONResponse(
+                {'error': f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ'},
+                status_code=413,
+            )
         att = FileAttachment(
             task_id=task_id,
             filename=file.filename or 'file',
@@ -1783,11 +1817,13 @@ async def api_file_download(file_id: int, request: Request):
                 denied = await _legacy_assert_client(session, request, _c)
                 if denied:
                     return denied
+        from urllib.parse import quote as _quote
         from fastapi.responses import Response
+        filename = (att.original_name or 'file').replace('"', '')
         return Response(
             content=att.data,
             media_type=att.content_type or 'application/octet-stream',
-            headers={'Content-Disposition': f'attachment; filename="{att.original_name}"'},
+            headers={'Content-Disposition': f'attachment; filename="file"; filename*=UTF-8\'\'{_quote(filename)}'},
         )
 
 

@@ -135,6 +135,15 @@ async def generate_module_tasks():
                         templates = []
                 if not templates:
                     templates = [module.task_title_template or module.name]
+                # окружение задачи — из её клиента, иначе задача невидима
+                # в списках окружений (Task.workspace_id == workspace.id)
+                client_ws: dict[int | None, int | None] = {}
+                for client_id in (_module_client_ids(module) or [None]):
+                    if client_id is None:
+                        client_ws[None] = None
+                    elif client_id not in client_ws:
+                        row = await session.get(Client, client_id)
+                        client_ws[client_id] = row.workspace_id if row else None
                 for client_id in (_module_client_ids(module) or [None]):
                     for index in range(count):
                         template = templates[index % len(templates)]
@@ -144,6 +153,7 @@ async def generate_module_tasks():
                         generated_task = Task(
                             title=f'{template}{suffix}',
                             client_id=client_id,
+                            workspace_id=client_ws.get(client_id),
                             assignee_id=module.assignee_id,
                             module_id=module.id,
                             task_type=module.task_type or 'custom',
@@ -205,10 +215,9 @@ async def autopurge_trash():
             clients = (await session.execute(
                 select(Client).where(Client.deleted_at.is_not(None), Client.deleted_at < cutoff)
             )).scalars().all()
+            from app.web.api.workspaces import _purge_client, _purge_workspace
             for c in clients:
-                await session.execute(sa_delete(Task).where(Task.client_id == c.id))
-                await session.delete(c)
-            from app.web.api.workspaces import _purge_workspace
+                await _purge_client(session, c.id)
             from app.core.models import Workspace
             old_workspaces = (await session.execute(
                 select(Workspace).where(Workspace.deleted_at.is_not(None), Workspace.deleted_at < cutoff)

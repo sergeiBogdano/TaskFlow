@@ -1,14 +1,53 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.models import Client, Reminder, Task
 from app.core.utils.timezone import to_utc, utc_now
+
+
+def dump_checklist(value) -> str | None:
+    """Чек-лист в TEXT-колонку: список/словарь -> JSON-строка.
+
+    Сырой list/dict роняет DBAPI-биндинг (InterfaceError -> 500),
+    поэтому всё приводим к строке здесь, в одном месте.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            json.loads(stripped)
+            return stripped
+        except ValueError:
+            return json.dumps(value, ensure_ascii=False)
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_checklist(value) -> list:
+    """Чек-лист из TEXT-колонки: JSON-строка -> список. Терпим мусор."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
 
 
 class TaskService:
@@ -47,7 +86,7 @@ class TaskService:
             completion_date=completion_date,
             priority=priority,
             status='todo',
-            checklist=checklist,
+            checklist=dump_checklist(checklist),
         )
         self.session.add(task)
         await self.session.flush()
@@ -117,43 +156,11 @@ class TaskService:
         await self.session.commit()
         return task
 
-    async def snooze(self, task_id: int, new_deadline: datetime) -> Task | None:
-        task = await self.get_task(task_id)
-        if not task:
-            return None
-
-        if new_deadline.tzinfo is None:
-            new_deadline = new_deadline.replace(tzinfo=settings.tz)
-        task.deadline = to_utc(new_deadline)
-
-        if task.status == 'todo':
-            task.status = 'in_progress'
-
-        await self.session.execute(
-            delete(Reminder).where(
-                and_(Reminder.task_id == task_id, Reminder.sent.is_(False))
-            )
-        )
-
-        offset = timedelta(hours=settings.DEFAULT_REMINDER_OFFSET_HOURS)
-        reminder_time = task.deadline - offset
-        if reminder_time > utc_now():
-            reminder = Reminder(
-                task_id=task_id,
-                client_id=task.client_id,
-                trigger_at=reminder_time,
-                reminder_type='deadline',
-                message=f'🔔 Напоминание: "{task.title}" — новый дедлайн через {settings.DEFAULT_REMINDER_OFFSET_HOURS} ч.',
-            )
-            self.session.add(reminder)
-
-        await self.session.commit()
-        return task
-
     async def get_overdue_tasks(self) -> list[Task]:
         now = utc_now()
         query = select(Task).options(selectinload(Task.client)).where(
             and_(
+                Task.deleted_at.is_(None),
                 Task.deadline < now,
                 Task.status != 'done',
                 Task.status != 'overdue',
