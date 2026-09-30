@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.models import Client, GeneratedReport, Module, Task, TaskCoExecutor
-from app.core.permissions import get_current_user, get_user_permissions, get_user_role_names, user_is_superadmin
+from app.core.permissions import get_current_user, get_user_role_names, request_permissions, user_is_superadmin
 from app.core.utils.timezone import safe_dt, utc_now
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -54,7 +54,7 @@ def _dt_end(value: date):
 
 async def _ensure_reports_access(user):
     role_names = await get_user_role_names(user.id)
-    permissions = await get_user_permissions(user.id)
+    permissions = await request_permissions(user)
     if user_is_superadmin(role_names) or permissions.get("all") or permissions.get("reports"):
         return role_names
     raise HTTPException(status_code=403, detail="Нет доступа к отчетам")
@@ -802,7 +802,7 @@ async def _generate_report(report_id: int):
 @router.post('/analytics')
 async def report_analytics(payload: AnalyticsPayload, user=Depends(get_current_user)):
     role_names = await _ensure_reports_access(user)
-    permissions = await get_user_permissions(user.id)
+    permissions = await request_permissions(user)
     if payload.period_start > payload.period_end:
         raise HTTPException(status_code=400, detail='Начало периода не может быть позже окончания')
     period_start, period_end = _dt_start(payload.period_start), _dt_end(payload.period_end)

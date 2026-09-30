@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.models import Client, Task, TaskCoExecutor
-from app.core.permissions import get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, resolve_workspace, task_is_editable_by_user, task_is_visible_to_user, user_is_superadmin
+from app.core.permissions import get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, resolve_workspace, task_is_editable_by_user, task_is_visible_to_user, user_is_superadmin
 from app.core.utils.timezone import safe_dt, to_utc
 
 router = APIRouter(prefix="/api/calendar", tags=["calendar"])
@@ -96,7 +96,7 @@ async def calendar_events(
                 )
             except (ValueError, TypeError):
                 pass
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         scope_condition = _task_scope_condition(scope, user.id, role_names, permissions, scope_user_id)
         if scope_condition is not None:

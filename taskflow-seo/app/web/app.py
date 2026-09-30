@@ -71,6 +71,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# work-права активного окружения → 403 для закрытых разделов API (Ф8)
+from app.web.middleware import work_permission_middleware  # noqa: E402
+
+app.middleware("http")(work_permission_middleware)
+
 
 @app.get("/health")
 async def health():

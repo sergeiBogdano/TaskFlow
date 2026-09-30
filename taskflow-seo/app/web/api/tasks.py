@@ -13,8 +13,8 @@ from app.core.permissions import (
     client_is_visible_to_user,
     get_accessible_client_ids,
     get_current_user,
-    get_user_permissions,
     get_user_role_names,
+    request_permissions,
     resolve_workspace,
     task_is_editable_by_user,
     task_is_visible_to_user,
@@ -326,7 +326,7 @@ async def list_tasks(
 ):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
@@ -534,7 +534,7 @@ async def get_task_accesses(task_id: int, user=Depends(get_current_user)):
         if not task:
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, permissions):
             raise HTTPException(status_code=403, detail='Forbidden')

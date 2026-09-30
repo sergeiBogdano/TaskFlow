@@ -1,5 +1,18 @@
 from fastapi import Depends, HTTPException, Request
 
+from contextvars import ContextVar
+
+# effective-права текущего запроса: middleware (Ф8) кладёт их один раз,
+# эндпоинты читают через request_permissions() — один и тот же набор на запрос
+_REQUEST_PERMISSIONS: ContextVar[tuple[int, dict] | None] = ContextVar(
+    'request_permissions', default=None
+)
+
+
+def set_request_permissions(user_id: int, permissions: dict) -> None:
+    _REQUEST_PERMISSIONS.set((user_id, dict(permissions)))
+
+
 
 async def get_current_user(request: Request):
     from app.web.router import current_user
@@ -53,6 +66,74 @@ async def get_user_permissions(user_id: int) -> dict:
             )
             permissions.update(group_permissions)
         return permissions
+
+
+async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> dict | None:
+    """Work-права участника окружения: база по rank + кастомная роль (Ф7/Ф8).
+
+    None — пользователь не участник окружения (или окружение не задано).
+    """
+    if not workspace_id:
+        return None
+    import json
+
+    from sqlalchemy import select
+
+    from app.core.database import async_session
+    from app.core.models import WorkspaceMember, WorkspaceRole
+    from app.core.permission_catalog import work_scope_keys, workspace_default_permissions
+
+    async with async_session() as session:
+        member = (await session.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if member is None:
+            return None
+        perms = dict(workspace_default_permissions(member.role))
+        if member.custom_role_id:
+            role = await session.get(WorkspaceRole, member.custom_role_id)
+            if role:
+                raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
+                allowed = set(work_scope_keys())
+                perms.update({key: True for key, value in raw.items() if value and key in allowed})
+        return perms
+
+
+async def effective_permissions(user, workspace_id: int | None = None) -> dict:
+    """Effective-набор прав пользователя (Ф8).
+
+    - app-ключи (scope=app) — как раньше, из ролей и групп;
+    - work-ключи (scope=work) — из активного окружения: база по rank + кастомная роль;
+      окружение заменяет app-права на «Работу». Если окружения нет или пользователь
+      не участник — остаются app-права (legacy/вне окружения);
+    - superadmin (`all`) — полный доступ, без изменений.
+    """
+    from app.core.permission_catalog import work_scope_keys
+
+    app_perms = await get_user_permissions(user.id)
+    if app_perms.get('all'):
+        return app_perms
+    ws_perms = await get_workspace_permissions(user.id, workspace_id)
+    if ws_perms is None:
+        return app_perms
+    work_keys = set(work_scope_keys())
+    merged = {key: value for key, value in app_perms.items() if key not in work_keys}
+    merged.update(ws_perms)
+    return merged
+
+
+async def request_permissions(user, workspace_id: int | None = None) -> dict:
+    """Права текущего запроса: из контекста middleware (Ф8), иначе пересчёт.
+
+    Возвращает копию — можно безопасно мутировать.
+    """
+    cached = _REQUEST_PERMISSIONS.get()
+    if cached is not None and cached[0] == user.id:
+        return dict(cached[1])
+    return await effective_permissions(user, workspace_id)
 
 
 async def user_can_manage_all_tasks(user) -> bool:
@@ -154,9 +235,19 @@ def require_permission(key: str):
 
 
 def workspace_id_from_request(request: Request | None) -> int | None:
-    """workspace_id из query (фронт подставляет его на всех /api/* кроме auth)."""
+    """workspace_id активного окружения: путь /api/workspaces/{id}/…, иначе query.
+
+    Фронт подставляет query на всех /api/* кроме auth; управление окружением
+    идёт по пути — id ресурса в пути важнее query.
+    """
     if request is None:
         return None
+    path = request.url.path
+    prefix = '/api/workspaces/'
+    if path.startswith(prefix):
+        segment = path[len(prefix):].split('/', 1)[0]
+        if segment.isdigit():
+            return int(segment)
     raw = request.query_params.get('workspace_id')
     if raw and str(raw).isdigit():
         return int(raw)

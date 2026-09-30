@@ -28,6 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.login(username, password);
     document.cookie = `taskflow_user=${res.token}; path=/; max-age=2592000`;
     setUser(res.user);
+    // права активного окружения (Ф8) /me считает по workspace_id — перечитываем
+    api.getMe()
+      .then(({ user }) => setUser(user))
+      .catch(() => {});
   }, []);
 
   const logout = useCallback(async () => {

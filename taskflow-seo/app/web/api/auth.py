@@ -80,8 +80,10 @@ async def me(request: Request):
             .where(UserRole.user_id == user.id)
         )
         roles = r.scalars().all()
-    from app.core.permissions import get_effective_features, get_user_permissions, workspace_id_from_request
-    payload = _get_user_data(user, roles, await get_user_permissions(user.id))
-    # карта доступности функций (кран Ф6): false = выключена, отсутствие ключа = доступна
-    payload['features'] = await get_effective_features(user, workspace_id_from_request(request))
+    from app.core.permissions import effective_permissions, get_effective_features, workspace_id_from_request
+    # Права считаются для активного окружения (Ф8): work-ключи — из окружения
+    workspace_id = workspace_id_from_request(request)
+    payload = _get_user_data(user, roles, await effective_permissions(user, workspace_id))
+    # Эффективные функции (кран, Ф6): false = отключено, отсутствие = доступно
+    payload['features'] = await get_effective_features(user, workspace_id)
     return JSONResponse({'user': payload})

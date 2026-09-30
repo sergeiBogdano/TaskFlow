@@ -9,7 +9,7 @@ from app.core.cache import dashboard_cache
 from app.core.config import settings
 from app.core.database import async_session
 from app.core.models import Client, ClientResponsible, Task, TaskCoExecutor, User
-from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, resolve_workspace, task_co_executor_ids, task_is_visible_to_user, user_is_superadmin
+from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, resolve_workspace, task_co_executor_ids, task_is_visible_to_user, user_is_superadmin
 from app.core.utils.timezone import safe_dt, to_utc, utc_now
 from app.services.client_service import ClientService
 from app.services.task_service import TaskService
@@ -214,7 +214,7 @@ async def organization_overview(
             Task.created_at, Task.updated_at, Task.creator_id, Task.assignee_id,
         ).where(Task.deleted_at.is_(None), Task.workspace_id == workspace.id))).all()
         co_executor_rows = (await session.execute(select(TaskCoExecutor.task_id, TaskCoExecutor.user_id))).all()
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         can_view_team = user_is_superadmin(role_names) or permissions.get('all') or permissions.get('dashboard_team')
         if (scope == 'all' or user_id is not None) and not can_view_team:

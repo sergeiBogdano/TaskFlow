@@ -12,10 +12,12 @@ function activeWorkspaceId(): string | null {
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   let finalUrl = url;
-  // Активный воркспейс подмешивается ко всем API-запросам (кроме auth).
+  // Активный воркспейс подмешивается ко всем API-запросам (кроме логина/логаута).
+  // /api/auth/me тоже получает workspace_id: права и функции считаются для окружения (Ф8).
   // Бэкенд неизвестные query-параметры игнорирует, так что безопасно везде.
   const ws = activeWorkspaceId();
-  if (ws && url.startsWith('/api/') && !url.startsWith('/api/auth')) {
+  const isSessionWrite = url.startsWith('/api/auth/login') || url.startsWith('/api/auth/logout');
+  if (ws && url.startsWith('/api/') && !isSessionWrite) {
     finalUrl += (url.includes('?') ? '&' : '?') + `workspace_id=${encodeURIComponent(ws)}`;
   }
   const res = await fetch(`${API_BASE}${finalUrl}`, {

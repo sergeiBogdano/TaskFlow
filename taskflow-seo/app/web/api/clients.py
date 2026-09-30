@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.models import Client, ClientContact, ClientResponsible, Contract, FileAttachment, Module, User, UserClientAccess
-from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_permissions, get_user_role_names, require_role, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
+from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, require_role, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
 from app.core.utils.crypto import decrypt_accesses, encrypt_accesses
 from app.core.utils.timezone import format_datetime, safe_dt, to_utc, utc_now
 from app.core.config import settings
@@ -213,7 +213,7 @@ async def list_clients(workspace_id: int = Query(None), user=Depends(get_current
         cs = ClientService(session)
         clients = await cs.list_clients()
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         clients = [c for c in clients if (c.workspace_id or workspace.id) == workspace.id]
@@ -281,7 +281,7 @@ async def bulk_clients(data: dict, user=Depends(require_role(['superadmin', 'adm
 
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if action == 'delete' and not (permissions.get('all') or permissions.get('client_delete') or 'superadmin' in role_names):
             raise HTTPException(status_code=403, detail='No access to delete clients')
@@ -343,7 +343,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
         if not c:
             raise HTTPException(status_code=404, detail='Client not found')
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
@@ -369,7 +369,7 @@ async def create_client(data: dict, workspace_id: int = Query(None), user=Depend
     async with async_session() as session:
         cs = ClientService(session)
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
         if 'contacts' in data and not user_can_view_client_tab(role_names, permissions, 'contacts'):
             raise HTTPException(status_code=403, detail='No access to contacts tab')
@@ -463,7 +463,7 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
         before['accesses'] = before_accesses
         before['allowed_user_ids'] = sorted(row.user_id for row in before_access_rows)
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
@@ -600,7 +600,7 @@ async def delete_client(client_id: int, user=Depends(require_role(['superadmin',
         if not c:
             raise HTTPException(status_code=404, detail='Client not found')
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not client_is_visible_to_user(c.id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
@@ -618,7 +618,7 @@ async def delete_client(client_id: int, user=Depends(require_role(['superadmin',
 async def client_activity(client_id: int, user=Depends(get_current_user)):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not user_can_view_client_tab(role_names, permissions, 'activity'):
             raise HTTPException(status_code=403, detail='Forbidden')
@@ -650,7 +650,7 @@ async def client_health(client_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_client_workspace(session, client, user, role_names)
         tasks = await TaskService(session).list_tasks()
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         can_view_team_health = 'superadmin' in role_names or permissions.get('all') or permissions.get('dashboard_team')
         if can_view_team_health:
             tasks = [task for task in tasks if task.client_id == client_id]
@@ -717,7 +717,7 @@ async def client_health(client_id: int, user=Depends(get_current_user)):
 async def client_modules(client_id: int, user=Depends(get_current_user)):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not user_can_view_client_tab(role_names, permissions, 'related'):
             raise HTTPException(status_code=403, detail='Forbidden')
