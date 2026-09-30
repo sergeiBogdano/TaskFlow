@@ -1,4 +1,6 @@
-﻿import pytest
+﻿import uuid
+
+import pytest
 
 
 class TestPermissions:
@@ -192,17 +194,23 @@ class TestRoleCeiling:
         assert resp.status_code == 201, resp.text
         tall_role_id = resp.json()['id']
         cookies = self._app_admin_cookies(sync_request, admin_cookies)
-        users = sync_request('GET', '/api/users', cookies=admin_cookies).json()
-        target = next(u for u in users if u['username'] not in ('4dmin', 'superadmin'))
+        # отдельный пользователь: set_role заменяет все связи ролей,
+        # shared testexec трогать нельзя (см. test_superadmin_can_assign_any_role)
+        uname = f"assign_{uuid.uuid4().hex[:8]}"
+        resp = sync_request('POST', '/api/users',
+                            json={'username': uname, 'password': 'pass1234'},
+                            cookies=admin_cookies)
+        assert resp.status_code == 201, resp.text
+        target_id = resp.json()['id']
 
-        resp = sync_request('PUT', f'/api/users/{target["id"]}/role',
+        resp = sync_request('PUT', f'/api/users/{target_id}/role',
                             json={'role_id': tall_role_id}, cookies=cookies)
         assert resp.status_code == 403, resp.text
 
         # тот же пользователь с правом users, чья роль даёт меньше — 403 на superadmin
         roles = sync_request('GET', '/api/roles', cookies=cookies).json()
         executor_role = next(r for r in roles if r['name'] == 'executor')
-        resp = sync_request('PUT', f'/api/users/{target["id"]}/role',
+        resp = sync_request('PUT', f'/api/users/{target_id}/role',
                             json={'role_id': executor_role['id']}, cookies=cookies)
         assert resp.status_code == 200, resp.text
 
@@ -219,9 +227,18 @@ class TestRoleCeiling:
                                  {'dashboard': True, 'tasks_view_all': True})
         assert resp.status_code == 201, resp.text
         role_id = resp.json()['id']
+        # ВАЖНО: отдельный пользователь, а не shared testexec — назначение роли
+        # заменяет все связи (set_role), а удаление роли чистит их же.
+        # Иначе testexec останется без ролей и уронит поздние тесты.
         users = sync_request('GET', '/api/users', cookies=admin_cookies).json()
-        target = next(u for u in users if u['username'] not in ('4dmin', 'superadmin'))
-        resp = sync_request('PUT', f'/api/users/{target["id"]}/role',
+        uname = f"assign_{uuid.uuid4().hex[:8]}"
+        assert not any(u['username'] == uname for u in users)
+        resp = sync_request('POST', '/api/users',
+                            json={'username': uname, 'password': 'pass1234'},
+                            cookies=admin_cookies)
+        assert resp.status_code == 201, resp.text
+        target_id = resp.json()['id']
+        resp = sync_request('PUT', f'/api/users/{target_id}/role',
                             json={'role_id': role_id}, cookies=admin_cookies)
         assert resp.status_code == 200, resp.text
         self._delete_role(sync_request, admin_cookies, role_id)
