@@ -160,6 +160,7 @@ async def _ensure_indexes():
                 await conn.execute(text('ALTER TABLE notes ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE'))
                 await conn.execute(text('ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE'))
                 await conn.execute(text('ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\''))
+                await conn.execute(text('ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL'))
         except Exception as e:
             logger.warning('Column migration error for client_warning: %s', e)
 
