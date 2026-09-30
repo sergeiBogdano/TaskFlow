@@ -286,7 +286,9 @@ export function Users() {
                 />
               )}
               <div className="flex justify-end gap-1.5">
-                <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
+                {!hasSuperadmin && (
+                  <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
+                )}
                 {isSuperadminActor && currentUser?.id !== user.id && !protectedUser && (
                   <button onClick={() => handleDelete(user)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Удалить"><Trash2 size={15} /></button>
                 )}

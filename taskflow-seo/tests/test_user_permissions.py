@@ -49,18 +49,45 @@ class TestSuperadminUserProtection:
         )
         assert resp.status_code == 403
 
-    def test_superadmin_can_change_own_password(self, sync_request, admin_cookies):
+    def test_superadmin_password_only_via_current_proof(self, sync_request, admin_cookies):
+        # через PUT пароль суперадмина не меняется вообще — даже им самим
         resp = sync_request(
             "PUT", "/api/users/1/password",
             json={"password": "newpass123"}, cookies=admin_cookies,
         )
-        assert resp.status_code == 200
-        # возвращаем пароль, иначе следующая сессия тестов не залогинится
+        assert resp.status_code == 403
+        # через change-password с неверным текущим — 400, пароль цел
         resp = sync_request(
-            "PUT", "/api/users/1/password",
-            json={"password": "4dmin"}, cookies=admin_cookies,
+            "POST", "/api/users/change-password",
+            data={"current_password": "wrong", "new_password": "newpass123"},
+            cookies=admin_cookies,
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 400
+        bad_login = sync_request(
+            "POST", "/api/auth/login",
+            json={"username": "4dmin", "password": "newpass123"},
+        )
+        assert bad_login.status_code != 200
+        # с верным текущим — 200, затем возвращаем обратно
+        try:
+            resp = sync_request(
+                "POST", "/api/users/change-password",
+                data={"current_password": "4dmin", "new_password": "newpass123"},
+                cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            good_login = sync_request(
+                "POST", "/api/auth/login",
+                json={"username": "4dmin", "password": "newpass123"},
+            )
+            assert good_login.status_code == 200
+        finally:
+            resp = sync_request(
+                "POST", "/api/users/change-password",
+                data={"current_password": "newpass123", "new_password": "4dmin"},
+                cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
 
     def test_other_user_cannot_change_superadmin_password(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]

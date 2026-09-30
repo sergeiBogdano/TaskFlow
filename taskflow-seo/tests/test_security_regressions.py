@@ -218,6 +218,30 @@ class TestSprintVisibility:
         assert all("Private task" not in t for t in titles), "УТЕЧКА через спринт!"
 
 
+class TestSuperadminPasswordLocked:
+    def test_put_self_forbidden(self, sync_request, admin_cookies):
+        # пароль суперадмина через PUT не меняется вообще — даже им самим
+        resp = sync_request(
+            "PUT", "/api/users/1/password",
+            json={"password": "newpass123"}, cookies=admin_cookies,
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_change_password_requires_current(self, sync_request, admin_cookies):
+        # без верного текущего пароля — 400, состояние не меняется
+        resp = sync_request(
+            "POST", "/api/users/change-password",
+            data={"current_password": "definitely-wrong", "new_password": "newpass123"},
+            cookies=admin_cookies,
+        )
+        assert resp.status_code == 400, resp.text
+        login = sync_request(
+            "POST", "/api/auth/login",
+            json={"username": "4dmin", "password": "newpass123"},
+        )
+        assert login.status_code != 200
+
+
 class TestContractReminders:
     def test_created_once_and_idempotent(self, sync_request, admin_cookies, event_loop):
         from datetime import datetime, timedelta, timezone

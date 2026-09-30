@@ -96,10 +96,20 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
         target = await session.get(User, user_id)
         if not target:
             raise HTTPException(status_code=404, detail='User not found')
+        target_roles = (await session.execute(
+            select(UserRole).where(UserRole.user_id == user_id)
+        )).scalars().all()
+        for ur_ in target_roles:
+            r = await session.get(Role, ur_.role_id)
+            if r and r.name == 'superadmin':
+                # пароль суперадмина через этот эндпоинт не меняется вообще:
+                # ни чужими, ни им самим. Своя смена — только через
+                # POST /api/users/change-password с проверкой текущего пароля.
+                raise HTTPException(status_code=403, detail='Cannot change the superadmin password')
         if user.id == user_id:
             pass  # свой пароль менять можно всегда
         else:
-            # чужой пароль — только суперадмин (и никогда — суперадмина).
+            # чужой пароль — только суперадмин (см. выше: суперадмина — никогда).
             # Проверки через роли окружения здесь запрещены осознанно:
             # владелец окружения может добавить любого пользователя к себе
             # без его согласия и тем самым получить право на смену пароля —
@@ -107,13 +117,6 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
             role_names = await get_user_role_names(user.id)
             if not user_is_superadmin(role_names):
                 raise HTTPException(status_code=403, detail='Forbidden')
-            target_roles = (await session.execute(
-                select(UserRole).where(UserRole.user_id == user_id)
-            )).scalars().all()
-            for ur_ in target_roles:
-                r = await session.get(Role, ur_.role_id)
-                if r and r.name == 'superadmin':
-                    raise HTTPException(status_code=403, detail='Cannot change the superadmin password')
         target.password_hash = hash_password(password)
         await session.commit()
     return JSONResponse({'ok': True})
