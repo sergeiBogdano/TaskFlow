@@ -86,7 +86,7 @@
       </div>
     </nav>
 
-    <main class="flex-grow-1 p-4" style="overflow-x: auto;">
+    <main class="flex-grow-1 p-4">
       {% set error = request.query_params.get('error', '') %}
       {% set success = request.query_params.get('success', '') %}
       {% if error %}
