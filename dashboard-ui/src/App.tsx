@@ -20,6 +20,7 @@ const AiAnalytics = lazy(() => import('./pages/AiAnalytics').then(module => ({ d
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })));
 const Sprints = lazy(() => import('./pages/Sprints').then(module => ({ default: module.Sprints })));
 const WorkspaceSettings = lazy(() => import('./pages/WorkspaceSettings').then(module => ({ default: module.WorkspaceSettings })));
+const Wiki = lazy(() => import('./pages/Wiki').then(module => ({ default: module.Wiki })));
 
 function PageLoader() {
   return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка раздела...</div>;
@@ -35,6 +36,7 @@ export default function App() {
             <Route element={<PrivateRoute />}>
               <Route element={<Layout />}>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/wiki" element={<Wiki />} />
                 <Route path="/tasks" element={<PermissionRoute permission="tasks"><Tasks /></PermissionRoute>} />
                 <Route path="/kanban" element={<PermissionRoute permission="kanban"><Kanban /></PermissionRoute>} />
                 <Route path="/clients" element={<PermissionRoute permission="clients"><Clients /></PermissionRoute>} />

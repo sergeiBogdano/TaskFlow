@@ -5,6 +5,7 @@ import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@d
 import { CSS } from '@dnd-kit/utilities';
 import {
   BarChart3,
+  BookOpen,
   Bell,
   CalendarDays,
   CheckSquare,
@@ -40,6 +41,10 @@ const TaskModal = lazy(() => import('../pages/Tasks').then(module => ({ default:
 
 const nav = [
   {
+    section: 'Помощь',
+    items: [{ to: '/wiki', icon: BookOpen, label: 'Вики', hint: 'Как всё устроено', permission: 'wiki' }],
+  },
+  {
     section: 'Работа',
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Дашборд', hint: 'Обзор команды', permission: 'dashboard' },
@@ -72,6 +77,7 @@ const nav = [
 ];
 
 const titles: Record<string, string> = {
+  '/wiki': 'Вики · справка по TaskFlow',
   '/': 'Командный обзор',
   '/tasks': 'Задачи',
   '/kanban': 'Канбан',
@@ -193,6 +199,7 @@ export function Layout() {
   const role = roleMeta[primaryRole] || roleMeta.executor;
   const isSuperadmin = hasRole('superadmin');
   const canSee = (permission: string) => {
+    if (permission === 'wiki') return true;
     if (user?.is_root) return true;
     // кран доступности (Ф6) действует и на суперадмина: функция выключена — пункта нет
     if (user?.features && user.features[permission] === false) return false;
@@ -270,7 +277,7 @@ export function Layout() {
             const visibleItems = group.items.filter(item => canSee(item.permission));
             if (!visibleItems.length) return null;
             const shownItems = orderedItems(group.section, visibleItems)
-              .filter(item => isNavVisible(item.to))
+              .filter(item => item.to === '/wiki' || isNavVisible(item.to))
               .map(item => {
                 const override = navOverride(item.to);
                 const label = override?.label?.trim() || (item.to === '/clients' ? clientsLabel : item.label);
