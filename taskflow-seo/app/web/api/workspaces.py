@@ -427,11 +427,19 @@ def _can_manage(actor_role: str, actor_is_super: bool, target_role: str | None, 
         return None
     if target_role == WS_ROLE_OWNER:
         return "Владельца может менять только суперадмин"
-    if actor_role not in (WS_ROLE_OWNER, WS_ROLE_ADMIN):
-        return "Недостаточно прав в воркспейсе"
-    if new_role == WS_ROLE_OWNER:
-        return "Назначить владельцем может только суперадмин"
-    return None
+    if actor_role == WS_ROLE_OWNER:
+        if new_role == WS_ROLE_OWNER:
+            return "Назначить владельцем может только суперадмин"
+        return None
+    if actor_role == WS_ROLE_ADMIN:
+        # Администратор окружения управляет только участниками ниже себя.
+        # Равные администраторы и повышение до администратора — зона владельца.
+        if target_role not in (None, WS_ROLE_MEMBER):
+            return "Администратор окружения может управлять только участниками"
+        if new_role == WS_ROLE_ADMIN:
+            return "Назначать администраторов может только владелец окружения"
+        return None
+    return "Недостаточно прав в воркспейсе"
 
 
 async def _owner_count(session, workspace_id: int) -> int:

@@ -21,6 +21,7 @@ from app.core.permissions import (
     get_user_permissions,
     require_workspace_role,
     is_root_user,
+    workspace_role_rank,
 )
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspace-roles"])
@@ -204,6 +205,12 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
         target = await session.get(User, user_id)
         if target is not None and target.is_root and not is_root_user(ctx["user"]):
             raise HTTPException(status_code=403, detail="Нельзя изменять root-пользователя")
+        if not is_root_user(ctx["user"]):
+            if workspace_role_rank(member.role) >= workspace_role_rank(ctx["role"]):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Профиль доступа можно назначать только участнику ниже вашей роли",
+                )
         role_name = None
         if role_id is not None:
             role = await session.get(WorkspaceRole, int(role_id))

@@ -93,6 +93,11 @@ async def create_user(request: Request, user=Depends(get_current_user)):
             target_ws, actor_ws_role = await resolve_workspace(session, user, role_names, int(workspace_id))
             if not actor_is_super and actor_ws_role not in ('owner', 'admin'):
                 raise HTTPException(status_code=403, detail='Forbidden')
+            if not actor_is_super and actor_ws_role == 'admin' and ws_role != 'member':
+                raise HTTPException(
+                    status_code=403,
+                    detail='Администратор окружения может создавать только участников',
+                )
         elif not actor_is_super:
             raise HTTPException(status_code=403, detail='Forbidden')
         existing = await session.execute(select(User).where(User.username == username))
