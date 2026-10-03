@@ -20,6 +20,7 @@ from app.core.permissions import (
     get_effective_features,
     get_user_permissions,
     require_workspace_role,
+    is_root_user,
 )
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspace-roles"])
@@ -200,6 +201,9 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
         )).scalar_one_or_none()
         if member is None:
             raise HTTPException(status_code=404, detail="Участник не найден")
+        target = await session.get(User, user_id)
+        if target is not None and target.is_root and not is_root_user(ctx["user"]):
+            raise HTTPException(status_code=403, detail="Нельзя изменять root-пользователя")
         role_name = None
         if role_id is not None:
             role = await session.get(WorkspaceRole, int(role_id))

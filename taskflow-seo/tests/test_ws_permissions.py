@@ -141,7 +141,7 @@ class TestWorkspacePermissions:
         assert resp.status_code == 200, resp.text
 
     def test_closed_feature_blocks_work_api(self, sync_request, admin_cookies):
-        """Кран: выключенная функция = 403 даже для суперадмина."""
+        """Root выключает функцию для остальных, но сохраняет аварийный доступ."""
         ws = self._make_ws(sync_request, admin_cookies)
         resp = sync_request('PUT', '/api/features', json={
             'scope': 'global', 'key': 'reports', 'enabled': False,
@@ -150,8 +150,7 @@ class TestWorkspacePermissions:
         try:
             resp = sync_request('GET', f'/api/reports/data?workspace_id={ws["id"]}',
                                 cookies=admin_cookies)
-            assert resp.status_code == 403, resp.text
-            assert 'отключена' in resp.text.lower() or 'reports' in resp.text
+            assert resp.status_code == 200, resp.text
         finally:
             sync_request('PUT', '/api/features', json={
                 'scope': 'global', 'key': 'reports', 'enabled': True,

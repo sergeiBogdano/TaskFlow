@@ -140,7 +140,7 @@ async def generate_module_tasks():
                 client_ws: dict[int | None, int | None] = {}
                 for client_id in (_module_client_ids(module) or [None]):
                     if client_id is None:
-                        client_ws[None] = None
+                        client_ws[None] = module.workspace_id
                     elif client_id not in client_ws:
                         row = await session.get(Client, client_id)
                         client_ws[client_id] = row.workspace_id if row else None

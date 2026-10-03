@@ -121,6 +121,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(200), nullable=False)
+    # Immutable platform identity.  The first account is promoted to root at
+    # startup and is never manageable through the user/workspace APIs.
+    is_root = Column(Boolean, nullable=False, default=False, server_default='0', index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -286,6 +289,7 @@ class ActivityLog(Base):
 
 
 class UserSettings(Base):
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=True, index=True)
     __tablename__ = 'user_settings'
 
     id = Column(Integer, primary_key=True)
@@ -307,6 +311,7 @@ class Tag(Base):
 
 
 class Module(Base):
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
     __tablename__ = 'modules'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -388,6 +393,7 @@ class SavedView(Base):
 
 
 class QuickTaskTemplate(Base):
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
     __tablename__ = 'quick_task_templates'
 
     id = Column(Integer, primary_key=True, autoincrement=True)

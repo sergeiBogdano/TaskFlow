@@ -150,6 +150,11 @@ def user_is_superadmin(role_names: set[str]) -> bool:
     return 'superadmin' in role_names
 
 
+def is_root_user(user) -> bool:
+    """Return the immutable platform-root marker without a database query."""
+    return bool(getattr(user, 'is_root', False))
+
+
 async def get_accessible_client_ids(session, user_id: int, role_names: set[str]) -> set[int]:
     if user_is_superadmin(role_names):
         return set()
@@ -219,6 +224,17 @@ def require_role(roles: list[str]):
                 if r and r.name in roles:
                     return user
         raise HTTPException(status_code=403, detail="Forbidden")
+    check._tf_guard = 'role'
+    return check
+
+
+def require_root():
+    """Dependency for operations reserved for the first platform account."""
+    async def check(user=Depends(get_current_user)):
+        if not is_root_user(user):
+            raise HTTPException(status_code=403, detail='Только root-пользователь может выполнить эту операцию')
+        return user
+    # Keep endpoint protection visible to the existing protection matrix.
     check._tf_guard = 'role'
     return check
 
@@ -324,6 +340,8 @@ async def get_effective_features(user, workspace_id: int | None = None,
 
 
 async def is_feature_available(user, key: str, workspace_id: int | None = None) -> bool:
+    if is_root_user(user):
+        return True
     state = await get_effective_features(user, workspace_id, keys=[key])
     return state.get(key, True)
 

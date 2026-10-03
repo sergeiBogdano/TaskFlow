@@ -752,6 +752,9 @@ async def attach_module(client_id: int, data: dict, user=Depends(require_role(['
         if _attach_client is None:
             raise HTTPException(status_code=404, detail='Client not found')
         await _assert_client_workspace(session, _attach_client, user, await get_user_role_names(user.id))
+        if m.workspace_id is not None and m.workspace_id != _attach_client.workspace_id:
+            raise HTTPException(status_code=400, detail='Модуль и организация должны быть в одном окружении')
+        m.workspace_id = _attach_client.workspace_id
         m.client_id = client_id
         await session.commit()
     return JSONResponse({'ok': True})
@@ -767,6 +770,8 @@ async def detach_module(client_id: int, module_id: int, user=Depends(require_rol
         if _detach_client is None:
             raise HTTPException(status_code=404, detail='Client not found')
         await _assert_client_workspace(session, _detach_client, user, await get_user_role_names(user.id))
+        if m.workspace_id is not None and m.workspace_id != _detach_client.workspace_id:
+            raise HTTPException(status_code=400, detail='Модуль и организация должны быть в одном окружении')
         if m.client_id == client_id:
             m.client_id = None
             await session.commit()

@@ -22,6 +22,8 @@ from app.core.permissions import (
     require_permission,
     require_role,
     resolve_workspace,
+    is_root_user,
+    workspace_id_from_request,
     user_is_superadmin,
 )
 
@@ -29,9 +31,27 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.get('')
-async def list_users(user=Depends(get_current_user)):
+async def list_users(request: Request, user=Depends(get_current_user)):
     async with async_session() as session:
-        r = await session.execute(select(User).order_by(User.id))
+        if is_root_user(user):
+            user_query = select(User)
+        else:
+            roles = await get_user_role_names(user.id)
+            try:
+                workspace, _ = await resolve_workspace(
+                    session, user, roles, workspace_id_from_request(request)
+                )
+            except HTTPException as exc:
+                if exc.status_code != 403:
+                    raise
+                # A newly created account may not have been invited yet.
+                # It can see itself, but never a global account directory.
+                user_query = select(User).where(User.id == user.id)
+            else:
+                user_query = select(User).join(
+                    WorkspaceMember, WorkspaceMember.user_id == User.id
+                ).where(WorkspaceMember.workspace_id == workspace.id)
+        r = await session.execute(user_query.order_by(User.id))
         users = r.scalars().all()
         all_links = (await session.execute(select(UserGroup))).scalars().all()
         groups_by_user: dict[int, list[int]] = {}
@@ -44,6 +64,7 @@ async def list_users(user=Depends(get_current_user)):
             result.append({
                 'id': u.id,
                 'username': u.username,
+                'is_root': bool(u.is_root),
                 'created_at': u.created_at.isoformat() if u.created_at else '',
                 'roles': [{'id': ur.role_id, 'name': (await session.get(Role, ur.role_id)).name} for ur in roles if await session.get(Role, ur.role_id)],
                 'group_ids': groups_by_user.get(u.id, []),
@@ -97,6 +118,8 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
         target = await session.get(User, user_id)
         if not target:
             raise HTTPException(status_code=404, detail='User not found')
+        if target.is_root:
+            raise HTTPException(status_code=403, detail='Нельзя менять пароль root через административный API')
         target_roles = (await session.execute(
             select(UserRole).where(UserRole.user_id == user_id)
         )).scalars().all()
@@ -157,6 +180,8 @@ async def set_role(user_id: int, request: Request, user=Depends(require_permissi
         u = await session.get(User, user_id)
         if not u:
             raise HTTPException(status_code=404, detail='User not found')
+        if u.is_root:
+            raise HTTPException(status_code=403, detail='Нельзя менять роль root-пользователя')
         ur_check = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id)
         )
@@ -196,6 +221,8 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
         u = await session.get(User, user_id)
         if not u:
             raise HTTPException(status_code=404, detail='User not found')
+        if u.is_root:
+            raise HTTPException(status_code=403, detail='Нельзя удалить root-пользователя')
         ur_check = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id)
         )

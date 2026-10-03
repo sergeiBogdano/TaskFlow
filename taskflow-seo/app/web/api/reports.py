@@ -812,6 +812,7 @@ async def report_analytics(payload: AnalyticsPayload, user=Depends(get_current_u
         from app.core.models import WorkspaceMember
         from app.core.permissions import resolve_workspace, user_is_superadmin as _is_super
         ws_ids: set[int] = set()
+        allowed_module_ws: set[int] | None = None
         for cid in (payload.client_ids or []):
             client = await session.get(Client, cid)
             if client is None or client.deleted_at is not None:
@@ -829,6 +830,7 @@ async def report_analytics(payload: AnalyticsPayload, user=Depends(get_current_u
                     select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user.id)
                 )).all()
             }
+            allowed_module_ws = member_ws
             if not member_ws:
                 return JSONResponse({'period': {'start': payload.period_start.isoformat(), 'end': payload.period_end.isoformat()}, 'summary': {'organizations': 0, 'total': 0, 'completed': 0, 'other': 0, 'overdue': 0, 'without_modules': 0}, 'by_type': [], 'by_client': [], 'modules': []})
             client_query = client_query.where(Client.workspace_id.in_(member_ws))
@@ -879,7 +881,12 @@ async def report_analytics(payload: AnalyticsPayload, user=Depends(get_current_u
             .order_by(Task.client_id, work_date.desc(), Task.id.desc())
         )
         tasks = result.scalars().unique().all()
-        module_rows = (await session.execute(select(Module).where(Module.is_active.is_(True)))).scalars().all()
+        module_query = select(Module).where(Module.is_active.is_(True))
+        if ws_ids:
+            module_query = module_query.where(Module.workspace_id.in_(ws_ids))
+        elif allowed_module_ws is not None:
+            module_query = module_query.where(Module.workspace_id.in_(allowed_module_ws))
+        module_rows = (await session.execute(module_query)).scalars().all()
 
     modules_by_client: dict[int, list[str]] = {client_id: [] for client_id in client_id_set}
     for module in module_rows:

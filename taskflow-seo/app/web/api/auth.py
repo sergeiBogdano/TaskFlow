@@ -27,6 +27,7 @@ def _get_user_data(user: User, roles_list: list = None, permissions: dict | None
     return {
         'id': user.id,
         'username': user.username,
+        'is_root': bool(user.is_root),
         'created_at': user.created_at.isoformat() if user.created_at else '',
         'roles': [{'id': ur.role.id, 'name': ur.role.name} for ur in (roles_list or [])],
         'permissions': permissions,

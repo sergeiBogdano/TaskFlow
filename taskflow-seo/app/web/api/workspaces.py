@@ -31,6 +31,7 @@ from app.core.permissions import (
     get_current_user,
     get_user_role_names,
     get_workspace_role,
+    is_root_user,
     require_workspace_role,
     resolve_workspace,
     user_is_superadmin,
@@ -511,6 +512,9 @@ async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, 
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
+        target = await session.get(User, user_id)
+        if target is not None and target.is_root and not is_root_user(ctx["user"]):
+            return JSONResponse({"error": "Нельзя изменять root-пользователя"}, status_code=403)
         if member.role == WS_ROLE_OWNER and payload.role != WS_ROLE_OWNER and not actor_is_super:
             err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
         else:
@@ -536,6 +540,9 @@ async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_wor
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
+        target = await session.get(User, user_id)
+        if target is not None and target.is_root and not is_root_user(ctx["user"]):
+            return JSONResponse({"error": "Нельзя удалять root-пользователя из окружения"}, status_code=403)
         if member.role == WS_ROLE_OWNER and not actor_is_super:
             err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
         else:
