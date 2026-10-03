@@ -320,7 +320,7 @@ export function WorkspaceSettings() {
             <SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />
             <select className="tf-input" value={addRole} onChange={event => setAddRole(event.target.value)}>
               <option value="member">Участник окружения</option>
-              <option value="admin">Администратор окружения</option>
+              {(isOwner || isSuperadmin) && <option value="admin">Администратор окружения</option>}
             </select>
             <button type="button" onClick={addMember} disabled={!addUserId} className="tf-button tf-button-primary"><Plus size={15} />Добавить</button>
           </div>
@@ -335,7 +335,7 @@ export function WorkspaceSettings() {
         <div className="space-y-2">
           {members.map(member => {
             const protectedOwner = member.role === 'owner';
-            const canTouch = canManage && (isSuperadmin || !protectedOwner);
+            const canTouch = canManage && (isSuperadmin || (isOwner && !protectedOwner) || (detail.role === 'admin' && member.role === 'member'));
             return (
               <div key={member.user_id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -350,7 +350,7 @@ export function WorkspaceSettings() {
                       onChange={event => changeRole(member.user_id, event.target.value)}
                     >
                       <option value="member">Участник окружения</option>
-                      <option value="admin">Администратор окружения</option>
+                      {(isOwner || isSuperadmin) && <option value="admin">Администратор окружения</option>}
                       {isSuperadmin && <option value="owner">Владелец окружения</option>}
                     </select>
                   ) : (
@@ -383,7 +383,7 @@ export function WorkspaceSettings() {
                 )}
                 {(wsRoles.length > 0 || member.custom_role) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-secondary)]">Роль окружения:</span>
+                    <span className="text-xs text-[var(--color-text-secondary)]">Дополнительный профиль:</span>
                     {canTouch && wsRoles.length > 0 ? (
                       <select
                         className="tf-input h-8 w-auto py-0 text-xs"

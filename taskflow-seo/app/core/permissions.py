@@ -100,7 +100,7 @@ async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> d
         perms = dict(workspace_default_permissions(member.role))
         if member.custom_role_id:
             role = await session.get(WorkspaceRole, member.custom_role_id)
-            if role:
+            if role and role.workspace_id == workspace_id:
                 raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
                 allowed = set(work_scope_keys())
                 perms.update({key: True for key, value in raw.items() if value and key in allowed})
@@ -119,14 +119,16 @@ async def effective_permissions(user, workspace_id: int | None = None) -> dict:
     from app.core.permission_catalog import work_scope_keys
 
     app_perms = await get_user_permissions(user.id)
+    if is_root_user(user):
+        return {'all': True}
     if app_perms.get('all'):
         return app_perms
     ws_perms = await get_workspace_permissions(user.id, workspace_id)
-    if ws_perms is None:
+    if ws_perms is None and workspace_id is None:
         return app_perms
     work_keys = set(work_scope_keys())
     merged = {key: value for key, value in app_perms.items() if key not in work_keys}
-    merged.update(ws_perms)
+    merged.update(ws_perms or {})
     return merged
 
 

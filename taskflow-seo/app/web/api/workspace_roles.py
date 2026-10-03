@@ -216,6 +216,7 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
             role = await session.get(WorkspaceRole, int(role_id))
             if role is None or role.workspace_id != ctx["workspace"].id:
                 raise HTTPException(status_code=404, detail="Роль не найдена")
+            await _assert_grantable(ctx["user"], ctx["workspace"].id, _role_permissions(role))
             member.custom_role_id = role.id
             role_name = role.name
         else:

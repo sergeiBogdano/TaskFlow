@@ -35,6 +35,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export type User = {
+  is_root?: boolean;
   id: number;
   username: string;
   created_at: string;

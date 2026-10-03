@@ -364,6 +364,7 @@ async def _ensure_workspaces():
     )
     async with async_session() as session:
         ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+        bootstrap_memberships = ws is None
         if ws is None:
             superadmin = (await session.execute(
                 select(User).join(UserRole, UserRole.user_id == User.id).join(Role, Role.id == UserRole.role_id)
@@ -405,6 +406,10 @@ async def _ensure_workspaces():
         for workspace_id, user_id in members:
             user_ws_ids.setdefault(user_id, set()).add(workspace_id)
         for user in users:
+            # Import legacy accounts only while creating the initial workspace.
+            # A restart must never invite newly created accounts into another team.
+            if not bootstrap_memberships:
+                continue
             if (wid, user.id) in members:
                 continue
             if (wid, user.id) in removed:
