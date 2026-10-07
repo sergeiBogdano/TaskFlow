@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -67,7 +67,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="TaskFlow-SEO",
+    title="TaskFlow",
+    version="1.0.0-alpha.1",
     lifespan=lifespan,
 )
 

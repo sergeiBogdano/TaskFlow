@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from app.web.api.access_validation import read_object
 from app.core.database import async_session
 from app.core.models import FeatureOverride
 from app.core.permissions import (
     get_current_user,
     get_effective_features,
+    get_global_feature_state,
     require_root,
     workspace_id_from_request,
 )
@@ -35,17 +37,38 @@ def _features_payload() -> list[dict]:
 
 
 @router.get('')
-async def get_features(request: Request, user=Depends(require_root())):
+async def get_features(request: Request, scope: str = 'global', target_id: int | None = Query(default=None), user=Depends(require_root())):
     """Эффективный набор функций текущего пользователя/окружения + записи крана."""
     workspace_id = workspace_id_from_request(request)
     effective = await get_effective_features(user, workspace_id)
+    if scope not in SCOPES:
+        raise HTTPException(status_code=400, detail='Неизвестная область функций')
+    scope_state = await get_global_feature_state()
     async with async_session() as session:
         rows = (await session.execute(
             select(FeatureOverride).order_by(FeatureOverride.id)
         )).scalars().all()
+        if scope != 'global':
+            from app.core.models import Group, Workspace, User
+            model = {'group': Group, 'workspace': Workspace, 'user': User}[scope]
+            target = await session.get(model, target_id) if target_id is not None else None
+            if target is None:
+                raise HTTPException(status_code=404, detail='Объект настройки функций не найден')
+            if scope == 'user':
+                scope_state = await get_effective_features(target, workspace_id)
+            else:
+                for row in rows:
+                    if row.scope == scope and row.target_id == target_id:
+                        scope_state[row.key] = bool(row.enabled) and scope_state.get(row.key, False)
+                if scope == 'workspace':
+                    import json
+                    from app.core.workspace_modules import module_for_permission
+                    modules = json.loads(target.enabled_modules or '[]')
+                    scope_state = {key: value and (not module_for_permission(key) or module_for_permission(key) in modules) for key, value in scope_state.items()}
     return JSONResponse({
         'catalog': _features_payload(),
         'effective': effective,
+        'scope_effective': scope_state,
         'overrides': [{
             'id': row.id,
             'scope': row.scope,
@@ -59,7 +82,7 @@ async def get_features(request: Request, user=Depends(require_root())):
 @router.put('')
 async def set_feature(request: Request, user=Depends(require_root())):
     """Тумблер крана: upsert записи global|workspace|group|user (приоритет user>ws>group>global), enabled=null → убрать запись."""
-    data = await request.json()
+    data = await read_object(request)
     scope = data.get('scope') or 'global'
     key = (data.get('key') or '').strip()
     # enabled=null → убрать запись крана (вернуться к более верхнему уровню)
@@ -79,13 +102,14 @@ async def set_feature(request: Request, user=Depends(require_root())):
     else:
         if target_id is None:
             raise HTTPException(status_code=400, detail='target_id обязателен для этой области')
-        target_id = int(target_id)
+        if isinstance(target_id, bool) or not isinstance(target_id, int) or target_id < 1:
+            raise HTTPException(status_code=400, detail='target_id должен быть положительным целым числом')
         if scope in ('group', 'workspace', 'user'):
             from app.core.models import Group, Workspace, User
             async with async_session() as session:
                 model = {'group': Group, 'workspace': Workspace, 'user': User}[scope]
                 if not await session.get(model, target_id):
-                    raise HTTPException(status_code=404, detail='Группа не найдена')
+                    raise HTTPException(status_code=404, detail='Объект настройки функций не найден')
     async with async_session() as session:
         stmt = select(FeatureOverride).where(
             FeatureOverride.scope == scope,

@@ -24,6 +24,7 @@ from app.core.permissions import (
     require_root,
     resolve_workspace,
     is_root_user,
+    is_feature_available,
     workspace_id_from_request,
     user_is_superadmin,
 )
@@ -35,7 +36,10 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 async def list_users(request: Request, user=Depends(get_current_user)):
     async with async_session() as session:
         app_permissions = await get_user_permissions(user.id)
-        if (is_root_user(user) or app_permissions.get('users_manage')) and (workspace_id_from_request(request) is None or request.query_params.get('scope') == 'platform'):
+        can_manage_accounts = is_root_user(user) or (
+            app_permissions.get('users_manage') and await is_feature_available(user, 'users_manage')
+        )
+        if can_manage_accounts and (workspace_id_from_request(request) is None or request.query_params.get('scope') == 'platform'):
             user_query = select(User)
         else:
             roles = await get_user_role_names(user.id)
@@ -156,18 +160,14 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
 
 
 async def _can_reset_password(session, actor, actor_permissions: dict, target_id: int) -> bool:
-    """Может ли actor сбросить чужой пароль (не суперадмина — проверено выше).
-
-    - суперадмин (`all`) — всегда;
-    - иначе: общее окружение, где у actor есть право users_password_reset
-      (кастомная роль окружения или роль приложения), и базовый rank actor
-      строго выше rank цели (owner → admin → member). Ровесникам и старшим —
-      нельзя, вне общих окружений — нельзя.
+    """Root resets ordinary accounts; account administrators require both global
+    account-management and password-reset capabilities. Space membership alone
+    never permits taking over a platform account.
     """
     if actor_permissions.get('all'):
         return True
     from app.core.permissions import is_feature_available
-    if actor_permissions.get('users_manage') and await is_feature_available(actor, 'users_manage'):
+    if actor_permissions.get('users_manage') and actor_permissions.get('users_password_reset') and await is_feature_available(actor, 'users_manage') and await is_feature_available(actor, 'users_password_reset'):
         target_permissions = await get_user_permissions(target_id)
         return not (target_permissions.get('all') or target_permissions.get('users_manage') or target_permissions.get('users'))
     # Space administrators cannot take over platform accounts by inviting them.
@@ -266,7 +266,8 @@ async def change_password(request: Request, user=Depends(get_current_user)):
     if user.is_root:
         raise HTTPException(status_code=403, detail='Пароль суперадмина меняется только командой на сервере')
     permissions = await get_user_permissions(user.id)
-    if not user.must_change_password and not (permissions.get('all') or permissions.get('users_password_own', True)):
+    from app.core.permissions import is_feature_available
+    if not user.must_change_password and not (permissions.get('users_password_own', True) and await is_feature_available(user, 'users_password_own')):
         raise HTTPException(status_code=403, detail='Нет права смены своего пароля')
     data = await request.json() if 'application/json' in request.headers.get('content-type', '') else await request.form()
     if not verify_password(data.get('current_password', ''), user.password_hash):
@@ -321,4 +322,6 @@ async def explain_access(user_id: int, actor=Depends(require_permission('users_m
                        'custom_role_id': member.custom_role_id,
                        'permissions': await get_workspace_permissions(user_id, member.workspace_id),
                        'features': await get_effective_features(account, member.workspace_id)})
-    return {'app_permissions': await get_user_permissions(user_id), 'spaces': spaces}
+    from app.core.permission_catalog import work_scope_keys
+    app_permissions = {key: value for key, value in (await get_user_permissions(user_id)).items() if key not in set(work_scope_keys())}
+    return {'app_permissions': app_permissions, 'spaces': spaces}

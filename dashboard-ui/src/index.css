@@ -180,6 +180,7 @@ a:hover {
   background: transparent;
 }
 
+@layer components {
 .tf-panel {
   background:
     linear-gradient(180deg, var(--color-sheen), rgba(255, 255, 255, 0)),
@@ -236,6 +237,17 @@ select.tf-input.tf-select-sm {
   border-radius: 10px;
 }
 
+select.tf-input.h-8,
+select.tf-input.h-9,
+select.tf-input.h-10 {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+input, textarea, select { min-width: 0; }
+.tf-modal-shell { max-width: 100%; }
+.tf-table td { overflow-wrap: anywhere; }
+
 select.tf-input option {
   background: var(--color-surface);
   color: var(--color-text);
@@ -243,14 +255,15 @@ select.tf-input option {
 
 /* Portalled select menus are above every panel, sidebar and modal layer. */
 .tf-floating-menu {
-  min-width: var(--tf-menu-width, 180px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   max-width: calc(100vw - 20px);
-  max-height: calc(100vh - 20px);
   overscroll-behavior: contain;
 }
 
-.tf-floating-menu > div:last-child {
-  max-height: min(360px, calc(100vh - 20px));
+.tf-menu-options {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -517,3 +530,5 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
 .tf-table tbody tr:hover { background: var(--color-surface-2); }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+}

@@ -176,6 +176,7 @@ export type FeatureOverride = {
 export type FeaturesResponse = {
   catalog: PermissionGroup[];
   effective: Record<string, boolean>;
+  scope_effective: Record<string, boolean>;
   overrides: FeatureOverride[];
 };
 
@@ -527,7 +528,7 @@ export const api = {
   getPermissionCatalog: () => request<PermissionCatalog>('/api/permissions/catalog'),
 
   // Features (кран доступности, Ф6)
-  getFeatures: () => request<FeaturesResponse>('/api/features'),
+  getFeatures: (scope: 'global' | 'workspace' | 'group' | 'user' = 'global', targetId?: number) => request<FeaturesResponse>(`/api/features?scope=${scope}${targetId == null ? '' : `&target_id=${targetId}`}`),
   setFeature: (data: {
     scope: 'global' | 'workspace' | 'group' | 'user';
     target_id?: number | null;

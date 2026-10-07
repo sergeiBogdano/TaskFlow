@@ -311,7 +311,8 @@ async def create_workspace(payload: WorkspaceCreate, user=Depends(get_current_us
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         permissions = await get_user_permissions(user.id)
-        if not (is_root_user(user) or permissions.get('workspaces_create')):
+        from app.core.permissions import is_feature_available
+        if not (is_root_user(user) or (permissions.get('workspaces_create') and await is_feature_available(user, 'workspaces_create'))):
             raise HTTPException(status_code=403, detail='Нет права создавать пространства')
         from app.core.workspace_modules import PRESET_MODULES
         ws = Workspace(

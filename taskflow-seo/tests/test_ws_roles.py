@@ -142,7 +142,7 @@ class TestWsRoles:
         # users_password_reset нет ни в app executor, ни в rank-defaults → потолок
         resp = self._create_role(sync_request, executor_cookies, ws['id'],
                                  'Сброс', {'users_password_reset': True})
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 400, resp.text
         assert 'users_password_reset' in resp.text
 
         # Явно возвращаем доступ после глобального выключения в предыдущих сценариях.

@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from app.web.api.access_validation import read_object
 from app.core.database import async_session
 from app.core.models import Group, User, UserGroup
+from app.web.api.access_validation import validate_name, validate_permissions
 from app.core.permissions import (
     assert_features_grantable,
     assert_within_ceiling,
@@ -48,11 +50,9 @@ async def list_groups(user=Depends(require_role(['superadmin']))):
 
 @router.post('')
 async def create_group(request: Request, user=Depends(require_role(['superadmin']))):
-    data = await request.json()
-    name = (data.get('name') or '').strip()
-    if not name:
-        raise HTTPException(status_code=400, detail='Название группы обязательно')
-    permissions = data.get('permissions') or {}
+    data = await read_object(request)
+    name = validate_name(data.get('name'), 'Название группы')
+    permissions = validate_permissions(data.get('permissions', {}))
     # даже суперадмин создаёт группу с правами из каталога — потолок не нужен (all)
     assert_within_ceiling(await get_user_permissions(user.id), permissions)
     await assert_features_grantable(permissions)
@@ -69,17 +69,22 @@ async def create_group(request: Request, user=Depends(require_role(['superadmin'
 
 @router.put('/{group_id}')
 async def update_group(group_id: int, request: Request, user=Depends(require_role(['superadmin']))):
-    data = await request.json()
+    data = await read_object(request)
     async with async_session() as session:
         group = await session.get(Group, group_id)
         if not group:
             raise HTTPException(status_code=404, detail='Group not found')
-        if data.get('name'):
-            group.name = data['name'].strip()
+        if 'name' in data:
+            name = validate_name(data['name'], 'Название группы')
+            clash = (await session.execute(select(Group).where(Group.name == name, Group.id != group_id))).scalar_one_or_none()
+            if clash:
+                raise HTTPException(status_code=400, detail='Группа с таким названием уже есть')
+            group.name = name
         if 'permissions' in data:
-            permissions = data.get('permissions') or {}
+            permissions = validate_permissions(data['permissions'])
             assert_within_ceiling(await get_user_permissions(user.id), permissions)
-            await assert_features_grantable(permissions)
+            previous = _group_payload(group)['permissions']
+            await assert_features_grantable({key: True for key, value in permissions.items() if value and not previous.get(key)})
             group.permissions = json.dumps(permissions, ensure_ascii=False)
         await session.commit()
     return JSONResponse({'ok': True})
@@ -101,7 +106,7 @@ async def delete_group(group_id: int, user=Depends(require_role(['superadmin']))
 
 @router.put('/{group_id}/members')
 async def set_group_members(group_id: int, request: Request, user=Depends(require_role(['superadmin']))):
-    data = await request.json()
+    data = await read_object(request)
     user_ids = data.get('user_ids')
     if not isinstance(user_ids, list):
         raise HTTPException(status_code=400, detail='user_ids: список')
@@ -110,7 +115,7 @@ async def set_group_members(group_id: int, request: Request, user=Depends(requir
         if not group:
             raise HTTPException(status_code=404, detail='Group not found')
         try:
-            wanted_ids = [int(item) for item in user_ids]
+            wanted_ids = list(dict.fromkeys(int(item) for item in user_ids))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail='user_ids: только числа')
         existing_users = {

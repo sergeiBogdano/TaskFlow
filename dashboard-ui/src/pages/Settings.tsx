@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Bell, Download, FolderOpen, HardDrive, Info, Palette, ShieldCheck } from 'lucide-react';
+import { APP_VERSION } from '../lib/version';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
 import { applyTheme, getTheme, type ThemeName } from '../lib/theme';
@@ -147,7 +148,7 @@ export function Settings() {
       </section>
 
       <section className="tf-panel-flat p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Info size={16} />TaskFlow</h3>
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Info size={16} />TaskFlow <span className="tf-chip ml-auto">{APP_VERSION}</span></h3>
         <p className="text-sm text-[var(--color-text-secondary)]">Рабочее пространство для задач, клиентов, календаря, модулей и отчётов команды.</p>
       </section>
 

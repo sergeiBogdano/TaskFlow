@@ -19,6 +19,9 @@ export function PasswordChange({ required = false }: { required?: boolean }) {
     finally { setBusy(false); }
   };
   if (user?.is_root) return <section className="tf-panel-flat p-5"><h3 className="font-bold">Пароль суперадмина</h3><p className="mt-2 text-sm text-[var(--color-text-secondary)]">Изменение доступно только администратору сервера через защищённую команду обслуживания. Через интерфейс и API пароль изменить нельзя.</p></section>;
+  if (!required && (user?.permissions?.users_password_own === false || user?.features?.users_password_own === false)) {
+    return <section className="tf-panel-flat p-5"><h3 className="font-bold">Смена пароля</h3><p className="mt-2 text-sm text-[var(--color-text-secondary)]">Смена пароля отключена администратором приложения. Обратитесь к нему для восстановления доступа.</p></section>;
+  }
   return <section className="tf-panel-flat mx-auto w-full max-w-md p-6">
     <KeyRound className="mb-3 text-[var(--color-accent)]" />
     <h2 className="text-xl font-bold">{required ? 'Задайте постоянный пароль' : 'Смена пароля'}</h2>

@@ -10,8 +10,9 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 
+from app.web.api.access_validation import read_object
 from app.core.database import async_session
 from app.core.models import User, WorkspaceMember, WorkspaceRole
 from app.core.permission_catalog import work_scope_keys
@@ -49,12 +50,9 @@ def _role_to_dict(role: WorkspaceRole) -> dict:
 
 
 def _validate_payload(data: dict) -> tuple[str, dict]:
-    name = (data.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Укажите название роли")
-    if len(name) > 100:
-        raise HTTPException(status_code=400, detail="Название роли длиннее 100 символов")
-    raw = data.get("permissions") or {}
+    from app.web.api.access_validation import validate_name
+    name = validate_name(data.get('name'), 'Название роли')
+    raw = data.get("permissions", {})
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="permissions должен быть объектом")
     unknown = sorted(key for key in raw if key not in _WORK_KEYS)
@@ -92,6 +90,18 @@ async def _assert_grantable(user, workspace_id: int, permissions: dict) -> None:
         )
 
 
+async def _assert_role_editable(session, ctx, role_id: int) -> None:
+    """Changing a shared profile must obey the same rank ladder as assignment."""
+    if is_root_user(ctx['user']):
+        return
+    members = (await session.execute(select(WorkspaceMember).where(
+        WorkspaceMember.workspace_id == ctx['workspace'].id,
+        WorkspaceMember.custom_role_id == role_id,
+    ))).scalars().all()
+    if any(workspace_role_rank(member.role) >= workspace_role_rank(ctx['role']) for member in members):
+        raise HTTPException(status_code=403, detail='Роль назначена вам или участнику не ниже вас. Изменить её может старший администратор.')
+
+
 @router.get("/{workspace_id}/roles")
 async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_role("owner", "admin"))):
     """Роли окружения + эффективные фичи (чекбоксы, отключённые краном, скрыты)."""
@@ -111,7 +121,7 @@ async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_role("o
 @router.post("/{workspace_id}/roles", status_code=201)
 async def create_ws_role(workspace_id: int, request: Request,
                          ctx=Depends(require_workspace_role("owner", "admin"))):
-    name, permissions = _validate_payload(await request.json())
+    name, permissions = _validate_payload(await read_object(request))
     await _assert_grantable(ctx["user"], ctx["workspace"].id, permissions)
     async with async_session() as session:
         existing = (await session.execute(
@@ -136,18 +146,22 @@ async def create_ws_role(workspace_id: int, request: Request,
 @router.put("/{workspace_id}/roles/{role_id}")
 async def update_ws_role(workspace_id: int, role_id: int, request: Request,
                          ctx=Depends(require_workspace_role("owner", "admin"))):
-    data = await request.json()
+    data = await read_object(request)
     async with async_session() as session:
         role = await session.get(WorkspaceRole, role_id)
         if role is None or role.workspace_id != ctx["workspace"].id:
             raise HTTPException(status_code=404, detail="Роль не найдена")
+        await _assert_role_editable(session, ctx, role_id)
         if "name" in data or "permissions" in data:
-            name = (data.get("name") or role.name).strip()
-            if not name:
-                raise HTTPException(status_code=400, detail="Укажите название роли")
+            name, _ = _validate_payload({'name': data.get('name', role.name)})
             if "permissions" in data:
                 _, permissions = _validate_payload({"name": name, "permissions": data.get("permissions")})
-                await _assert_grantable(ctx["user"], ctx["workspace"].id, permissions)
+                from app.core.permissions import get_workspace_permissions
+                ceiling = {'all': True} if is_root_user(ctx['user']) else await get_workspace_permissions(ctx['user'].id, workspace_id) or {}
+                assert_within_ceiling(ceiling, permissions)
+                previous = _role_permissions(role)
+                added = {key: True for key in permissions if not previous.get(key)}
+                await _assert_grantable(ctx["user"], ctx["workspace"].id, added)
             else:
                 permissions = _role_permissions(role)
             if name != role.name:
@@ -175,12 +189,11 @@ async def delete_ws_role(workspace_id: int, role_id: int,
         role = await session.get(WorkspaceRole, role_id)
         if role is None or role.workspace_id != ctx["workspace"].id:
             raise HTTPException(status_code=404, detail="Роль не найдена")
-        # снятие назначений до удаления (sqlite может не применять ON DELETE SET NULL)
-        await session.execute(
-            update(WorkspaceMember)
-            .where(WorkspaceMember.custom_role_id == role_id)
-            .values(custom_role_id=None)
-        )
+        assigned = (await session.execute(select(WorkspaceMember.user_id).where(
+            WorkspaceMember.custom_role_id == role_id,
+        ))).first()
+        if assigned:
+            raise HTTPException(status_code=409, detail='Роль назначена участникам. Сначала явно смените их профили доступа, затем удалите роль.')
         await session.delete(role)
         await session.commit()
     return JSONResponse({"ok": True})
@@ -190,8 +203,10 @@ async def delete_ws_role(workspace_id: int, role_id: int,
 async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
                          ctx=Depends(require_workspace_role("owner", "admin"))):
     """Назначение/снятие кастомной роли участнику (role_id=null → снять)."""
-    data = await request.json()
+    data = await read_object(request)
     role_id = data.get("role_id")
+    if role_id is not None and (isinstance(role_id, bool) or not isinstance(role_id, int) or role_id < 1):
+        raise HTTPException(status_code=400, detail='role_id должен быть положительным целым числом или null')
     async with async_session() as session:
         member = (await session.execute(
             select(WorkspaceMember).where(
@@ -221,6 +236,11 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
             member.custom_role_id = role.id
             role_name = role.name
         else:
+            # Returning to rank defaults is also a grant, not merely removing a link.
+            from app.core.permission_catalog import workspace_default_permissions
+            from app.core.permissions import get_workspace_permissions
+            ceiling = {'all': True} if is_root_user(ctx['user']) else await get_workspace_permissions(ctx['user'].id, workspace_id) or {}
+            assert_within_ceiling(ceiling, workspace_default_permissions(member.role))
             member.custom_role_id = None
         await session.commit()
         username = (await session.get(User, user_id)).username

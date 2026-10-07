@@ -165,6 +165,8 @@ export function Layout() {
   const [clientsLabel, setClientsLabel] = useState(() => workspaceClientsLabel());
   const [, setUiTick] = useState(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const notificationsAvailable = Boolean(user?.is_root || (user?.features?.notifications !== false && (user?.permissions?.all || user?.permissions?.notifications)));
+  const voiceAvailable = ['ai', 'tasks'].every(key => user?.features?.[key] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[key]));
 
   useEffect(() => {
     const sync = () => {
@@ -186,6 +188,7 @@ export function Layout() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!notificationsAvailable) { setUnreadCount(0); return; }
     const load = () => api.getUnreadCount().then(result => setUnreadCount(result.count)).catch(() => {});
     load();
     const intervalId = window.setInterval(load, 30000);
@@ -196,7 +199,7 @@ export function Layout() {
       window.removeEventListener('taskflow:notifications-updated', load);
       window.removeEventListener('focus', load);
     };
-  }, []);
+  }, [notificationsAvailable]);
 
   const primaryRole = user?.roles?.[0]?.name || 'executor';
   const role = roleMeta[primaryRole] || roleMeta.executor;
@@ -204,6 +207,8 @@ export function Layout() {
   const canSee = (permission: string) => {
     if (permission === 'wiki') return true;
     if (permission === 'settings') return true;
+    if (permission === 'workspace') return true;
+    if (permission === 'users') return Boolean(user?.is_root || user?.permissions?.all || user?.permissions?.users || user?.permissions?.users_manage);
     if (user?.is_root && !['crm', 'clients', 'tasks', 'kanban', 'calendar', 'notes', 'reports', 'modules', 'ai'].includes(permission)) return true;
     // кран доступности (Ф6) действует и на суперадмина: функция выключена — пункта нет
     if (user?.features && user.features[permission] === false) return false;
@@ -339,16 +344,18 @@ export function Layout() {
             <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
             <p className="text-xs text-[var(--color-text-secondary)]">Задачи и инструменты текущего пространства</p>
           </div>
-          <button onClick={() => setVoiceOpen(true)} className="tf-button ml-auto w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+          {voiceAvailable && <button onClick={() => setVoiceOpen(true)} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
             <Mic size={16} />
-          </button>
-          <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
+          </button>}
+          {notificationsAvailable && <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
             <Bell size={16} />
             {unreadCount > 0 && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-danger)]" />}
-          </button>
+          </button>}
           <button onClick={handleLogout} className="tf-button w-10 px-0 lg:hidden" aria-label="Выйти">
             <LogOut size={16} />
           </button>
+          </div>
         </header>
 
         <main className="min-h-[calc(100vh-64px)] p-4 sm:p-8">
@@ -372,7 +379,7 @@ export function Layout() {
           </div>
         </main>
       </div>
-      {voiceOpen && <VoiceTaskAssistant onClose={() => setVoiceOpen(false)} />}
+      {voiceOpen && voiceAvailable && <VoiceTaskAssistant onClose={() => setVoiceOpen(false)} />}
     </div>
   );
 }

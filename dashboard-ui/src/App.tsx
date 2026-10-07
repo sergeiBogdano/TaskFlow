@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AuthProvider } from './hooks/useAuth';
+import { AuthProvider } from './components/AuthProvider';
 import { AdminRoute, PermissionRoute, PrivateRoute } from './components/PrivateRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -36,7 +36,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route element={<PrivateRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<PermissionRoute permission="dashboard"><Dashboard /></PermissionRoute>} />
                 <Route path="/wiki" element={<Wiki />} />
                 <Route path="/tasks" element={<PermissionRoute permission="tasks"><Tasks /></PermissionRoute>} />
                 <Route path="/kanban" element={<PermissionRoute permission="kanban"><Kanban /></PermissionRoute>} />
@@ -52,8 +52,8 @@ export default function App() {
                 <Route path="/ai" element={<PermissionRoute permission="ai"><AiAnalytics /></PermissionRoute>} />
                 <Route path="/notes" element={<PermissionRoute permission="notes"><Notes /></PermissionRoute>} />
                 <Route path="/sprints" element={<PermissionRoute permission="kanban"><Sprints /></PermissionRoute>} />
-                <Route path="/workspace" element={<PermissionRoute permission="workspace"><WorkspaceSettings /></PermissionRoute>} />
-                <Route path="/settings" element={<PermissionRoute permission="users_password_own"><Settings /></PermissionRoute>} />
+                <Route path="/workspace" element={<WorkspaceSettings />} />
+                <Route path="/settings" element={<Settings />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" />} />

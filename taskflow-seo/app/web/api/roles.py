@@ -4,13 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from app.web.api.access_validation import read_object
 from app.core.database import async_session
 from app.core.models import Role, UserRole
+from app.web.api.access_validation import validate_name, validate_permissions
 from app.core.permissions import (
     assert_features_grantable,
     assert_within_ceiling,
     get_user_permissions,
     require_permission,
+    require_any_permission,
     require_root,
 )
 
@@ -27,7 +30,7 @@ def _role_permissions(role) -> dict:
 
 
 @router.get('')
-async def list_roles(user=Depends(require_permission('users'))):
+async def list_roles(user=Depends(require_any_permission('users', 'users_manage'))):
     async with async_session() as session:
         r = await session.execute(select(Role).order_by(Role.id))
         roles = r.scalars().all()
@@ -40,9 +43,11 @@ async def list_roles(user=Depends(require_permission('users'))):
 
 @router.post('')
 async def create_role(request: Request, user=Depends(require_root())):
-    data = await request.json()
-    name = (data.get('name') or '').strip()
-    permissions = data.get('permissions') or {}
+    data = await read_object(request)
+    name = validate_name(data.get('name'))
+    if name == 'superadmin':
+        raise HTTPException(status_code=403, detail='Системную роль суперадмина нельзя создавать')
+    permissions = validate_permissions(data.get('permissions', {}))
     granter = await get_user_permissions(user.id)
     assert_within_ceiling(granter, permissions)
     await assert_features_grantable(permissions)
@@ -59,7 +64,7 @@ async def create_role(request: Request, user=Depends(require_root())):
 
 @router.put('/{role_id}')
 async def update_role(role_id: int, request: Request, user=Depends(require_root())):
-    data = await request.json()
+    data = await read_object(request)
     granter = await get_user_permissions(user.id)
     async with async_session() as session:
         role = await session.get(Role, role_id)
@@ -67,15 +72,20 @@ async def update_role(role_id: int, request: Request, user=Depends(require_root(
             raise HTTPException(status_code=404, detail='Role not found')
         if role.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Cannot modify superadmin role')
-        if data.get('name'):
-            next_name = data['name'].strip()
+        if 'name' in data:
+            next_name = validate_name(data['name'])
             if next_name == 'superadmin' and role.name != 'superadmin':
                 raise HTTPException(status_code=403, detail='Нельзя создать или переименовать роль в superadmin')
+            clash = (await session.execute(select(Role).where(Role.name == next_name, Role.id != role_id))).scalar_one_or_none()
+            if clash:
+                raise HTTPException(status_code=400, detail='Роль с таким названием уже есть')
             role.name = next_name
         if 'permissions' in data:
-            assert_within_ceiling(granter, data.get('permissions') or {})
-            await assert_features_grantable(data.get('permissions') or {})
-            role.permissions = json.dumps(data.get('permissions') or {}, ensure_ascii=False)
+            permissions = validate_permissions(data['permissions'])
+            assert_within_ceiling(granter, permissions)
+            previous = _role_permissions(role)
+            await assert_features_grantable({key: True for key, value in permissions.items() if value and not previous.get(key)})
+            role.permissions = json.dumps(permissions, ensure_ascii=False)
         await session.commit()
     return JSONResponse({'ok': True})
 

@@ -1,6 +1,6 @@
-import { Check, ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { cn } from '../lib/taskflow';
 import { useFloatingMenu } from './useFloatingMenu';
 
@@ -9,6 +9,7 @@ export type SelectOption = {
   label: string;
   hint?: string;
   color?: string;
+  searchText?: string;
 };
 
 type SelectProps = {
@@ -23,6 +24,7 @@ type SelectProps = {
   size?: 'md' | 'sm' | 'pill';
   className?: string;
   stopPropagation?: boolean;
+  clearable?: boolean;
 };
 
 /**
@@ -41,10 +43,14 @@ export function Select({
   size = 'md',
   className,
   stopPropagation,
+  clearable,
 }: SelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const menuStyle = useFloatingMenu(open, rootRef, 180);
@@ -52,39 +58,70 @@ export function Select({
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('ru-RU');
-    if (!needle) return options;
-    return options.filter(option =>
-      `${option.label} ${option.hint || ''}`.toLocaleLowerCase('ru-RU').includes(needle),
+    const matches = options.filter(option =>
+      `${option.label} ${option.hint || ''} ${option.searchText || ''}`.toLocaleLowerCase('ru-RU').includes(needle),
     );
-  }, [options, query]);
+    return emptyLabel && !options.some(option => option.value === '')
+      ? [{ value: '', label: emptyLabel }, ...matches] : matches;
+  }, [options, query, emptyLabel]);
+  const active = Math.min(activeIndex, Math.max(0, filtered.length - 1));
 
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => {
+    const close = (event: Event) => {
       const target = event.target as Node;
       if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); setOpen(false); triggerRef.current?.focus();
+      }
     };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('focusin', close);
+    document.addEventListener('keydown', onKey, true);
     return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('focusin', close);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [open ]);
 
   useEffect(() => {
     if (open) {
       setQuery('');
-      requestAnimationFrame(() => inputRef.current?.focus());
+      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
     }
   }, [open ]);
 
   const choose = (nextValue: string) => {
     onChange(nextValue);
     setOpen(false);
+    triggerRef.current?.focus();
+  };
+  useEffect(() => {
+    if (open) menuRef.current?.querySelector(`[data-option-index="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+  const show = () => {
+    setActiveIndex(Math.max(0, filtered.findIndex(option => option.value === value)));
+    setOpen(true);
+  };
+  const keys = (event: KeyboardEvent) => {
+    if (event.key === 'Tab') { setOpen(false); triggerRef.current?.focus(); return; }
+    if (!open && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); show(); return; }
+    if (!open) return;
+    const searching = event.target === inputRef.current;
+    if (searching && ['Home', 'End', ' '].includes(event.key)) return;
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      if (event.key === 'ArrowDown') setActiveIndex(Math.min(active + 1, filtered.length - 1));
+      if (event.key === 'ArrowUp') setActiveIndex(Math.max(active - 1, 0));
+      if (event.key === 'Home') setActiveIndex(0);
+      if (event.key === 'End') setActiveIndex(filtered.length - 1);
+      if (['Enter', ' '].includes(event.key) && filtered[active]) choose(filtered[active].value);
+    }
   };
 
   const triggerSize =
@@ -95,14 +132,24 @@ export function Select({
         : 'min-h-[42px] text-[14px] rounded-[14px] px-3.5 gap-2';
 
   const control = (
-    <div ref={rootRef} className={cn('relative', className)} onClick={stopPropagation ? event => event.stopPropagation() : undefined}>
+    <div ref={rootRef} className={cn('relative min-w-0', className)} onClick={stopPropagation ? event => event.stopPropagation() : undefined}>
+      <div className="flex items-center gap-1">
       <button
+        ref={triggerRef}
+        id={`${id}-trigger`}
+        role="combobox"
+        aria-label={label || selected?.label || (value === '' && emptyLabel) || placeholder}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={`${id}-list`}
+        aria-activedescendant={open && filtered[active] ? `${id}-option-${active}` : undefined}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(previous => !previous)}
+        onKeyDown={keys}
+        onClick={() => open ? setOpen(false) : show()}
         title={selected?.label || placeholder}
         className={cn(
-          'flex w-full items-center border border-[var(--color-border)] bg-[var(--color-input-bg)] text-left transition',
+          'flex min-w-0 w-full items-center border border-[var(--color-border)] bg-[var(--color-input-bg)] text-[var(--color-text)] text-left transition',
           'hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-4 focus:ring-[var(--color-ring)]',
           'disabled:cursor-not-allowed disabled:opacity-60',
           triggerSize,
@@ -110,50 +157,58 @@ export function Select({
         )}
       >
         {selected?.color && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: selected.color }} />}
-        <span className="min-w-0 flex-1 truncate font-medium">{selected?.label || placeholder}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{selected?.label || (value === '' && emptyLabel) || placeholder}</span>
         <ChevronDown size={14} className={cn('shrink-0 text-[var(--color-muted)] transition-transform', open && 'rotate-180')} />
       </button>
+      {clearable && value && <button type="button" disabled={disabled} aria-label={`Очистить ${label || placeholder}`} title="Очистить"
+        className="tf-button h-8 w-8 shrink-0 px-0" onClick={() => choose('')}><X size={14} /></button>}
+      </div>
 
       {open && createPortal(
-        <div ref={menuRef} style={menuStyle} className="anim-modal tf-floating-menu z-[1000] overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-panel)] backdrop-blur-xl">
+        <div ref={menuRef} style={menuStyle} onKeyDown={keys} className="tf-floating-menu z-[1000] rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-text)] shadow-[var(--shadow-panel)]">
           {searchPlaceholder && (
-            <div className="relative border-b border-[var(--color-border)] p-2">
+            <div className="relative shrink-0 border-b border-[var(--color-border)] p-2">
               <Search size={14} className="pointer-events-none absolute left-4 top-[21px] text-[var(--color-muted)]" />
               <input
                 ref={inputRef}
+                role="combobox"
+                aria-label={searchPlaceholder}
+                aria-expanded={open}
+                aria-controls={`${id}-list`}
+                aria-activedescendant={filtered[active] ? `${id}-option-${active}` : undefined}
+                autoComplete="off"
                 value={query}
-                onChange={event => setQuery(event.target.value)}
+                onChange={event => { setQuery(event.target.value); setActiveIndex(0); }}
                 className="tf-input tf-input-icon"
                 placeholder={searchPlaceholder}
               />
             </div>
           )}
-          <div className="max-h-64 overflow-auto p-1.5">
-            {emptyLabel && (
-              <button type="button" onClick={() => choose('')} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-[var(--color-overlay)]">
-                <span className="min-w-0 flex-1 truncate text-[var(--color-text-secondary)]">{emptyLabel}</span>
-                {value === '' && <Check size={14} className="shrink-0 text-[var(--color-text)]" />}
-              </button>
-            )}
-            {filtered.map(option => {
-              const active = option.value === value;
+          <div id={`${id}-list`} role="listbox" aria-label={label || placeholder} className="tf-menu-options p-1.5">
+            {filtered.map((option, index) => {
+              const selectedOption = option.value === value;
               return (
                 <button
                   key={option.value}
+                  id={`${id}-option-${index}`}
+                  data-option-index={index}
+                  role="option"
+                  aria-selected={selectedOption}
+                  tabIndex={-1}
                   type="button"
                   onClick={() => choose(option.value)}
                   title={option.label}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition',
-                    active ? 'bg-[var(--color-overlay-strong)]' : 'hover:bg-[var(--color-overlay)]',
+                    index === active ? 'bg-[var(--color-overlay-strong)]' : 'hover:bg-[var(--color-overlay)]',
                   )}
                 >
                   {option.color && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: option.color }} />}
                   <span className="min-w-0 flex-1">
-                    <span className={cn('block truncate', active ? 'font-semibold' : 'font-medium')}>{option.label}</span>
-                    {option.hint && <span className="block truncate text-xs text-[var(--color-muted)]">{option.hint}</span>}
+                    <span className={cn('block break-words', selectedOption ? 'font-semibold' : 'font-medium')}>{option.label}</span>
+                    {option.hint && <span className="block break-words text-xs text-[var(--color-muted)]">{option.hint}</span>}
                   </span>
-                  {active && <Check size={14} className="shrink-0 text-[var(--color-text)]" />}
+                  {selectedOption && <Check size={14} className="shrink-0 text-[var(--color-text)]" />}
                 </button>
               );
             })}
@@ -167,9 +222,9 @@ export function Select({
 
   if (!label) return control;
   return (
-    <label className="inline-flex items-center gap-2 text-[var(--color-text-secondary)]">
-      <span className="text-[14px]">{label}</span>
+    <div className="flex min-w-0 items-center gap-2 text-[var(--color-text-secondary)]">
+      <label htmlFor={`${id}-trigger`} className="shrink-0 text-[14px]">{label}</label>
       {control}
-    </label>
+    </div>
   );
 }

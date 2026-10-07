@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
 import { api, type WorkspaceDetail, type WorkspaceMember, type WorkspaceRole } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
@@ -39,7 +39,7 @@ export function WorkspaceSettings() {
   const [pwdValue, setPwdValue] = useState('');
   const [trash, setTrash] = useState<{ id: number; name: string; deleted_at: string | null }[]>([]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -78,11 +78,11 @@ export function WorkspaceSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.is_root, user?.permissions?.users_manage]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const loadTrash = async () => {
     try {
@@ -199,8 +199,8 @@ export function WorkspaceSettings() {
   };
 
   const savePassword = async (userId: number) => {
-    if (pwdValue.length < 4) {
-      setError('Пароль минимум 4 символа.');
+    if (pwdValue.length < 8) {
+      setError('Пароль минимум 8 символов.');
       return;
     }
     setError('');
@@ -343,7 +343,7 @@ export function WorkspaceSettings() {
         {(user?.is_root || user?.permissions?.users_manage) && (
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <input className="tf-input" value={newUsername} onChange={event => setNewUsername(event.target.value)} placeholder="Новый логин" />
-            <input className="tf-input" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Пароль от 4 символов" />
+            <input className="tf-input" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Пароль от 8 символов" />
             <button type="button" onClick={createAndAdd} className="tf-button"><Plus size={15} />Создать</button>
           </div>
         )}
@@ -371,7 +371,7 @@ export function WorkspaceSettings() {
                   ) : (
                     <span className="tf-chip">{member.role === 'owner' ? 'владелец' : member.role === 'admin' ? 'админ' : 'участник'}</span>
                   )}
-                  {canTouch && !users.find(account => account.id === member.user_id)?.is_root && !(user?.is_root && user.id === member.user_id) && (isSuperadmin || user?.id === member.user_id || user?.permissions?.users_password_reset === true) && (
+                  {canTouch && !users.find(account => account.id === member.user_id)?.is_root && !(user?.is_root && user.id === member.user_id) && (isSuperadmin || (user?.permissions?.users_manage === true && user?.permissions?.users_password_reset === true)) && (
                     <button type="button" onClick={() => setPwdUserId(pwdUserId === member.user_id ? null : member.user_id)} className="tf-button h-9 px-2 text-xs" title="Сменить пароль">
                       <KeyRound size={14} />Пароль
                     </button>
@@ -391,14 +391,14 @@ export function WorkspaceSettings() {
                       type="password"
                       value={pwdValue}
                       onChange={event => setPwdValue(event.target.value)}
-                      placeholder="Новый пароль от 4 символов"
+                      placeholder="Новый пароль от 8 символов"
                     />
                     <button type="button" onClick={() => savePassword(member.user_id)} className="tf-button h-9 shrink-0 text-xs">OK</button>
                   </div>
                 )}
                 {(wsRoles.length > 0 || member.custom_role) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-secondary)]">Дополнительный профиль:</span>
+                    <span className="text-xs text-[var(--color-text-secondary)]">Профиль доступа (заменяет базовые права):</span>
                     {canTouch && wsRoles.length > 0 ? (
                       <select
                         className="tf-input h-8 w-auto py-0 text-xs"
@@ -438,7 +438,7 @@ export function WorkspaceSettings() {
           scope="workspace"
           targetId={detail.id}
           title="Функции окружения"
-          description="Кран доступности в границах окружения: приоритет user > workspace > group > global. Выключенная функция скрыта и закрыта (403) для всех, кто работает в этом окружении."
+          description="Доступность рабочих функций этого пространства. Она не выдаёт права: назначьте профиль доступа участнику отдельно. Глобальный запрет и отключённый модуль нельзя обойти персональным переключателем."
         />
       )}
 

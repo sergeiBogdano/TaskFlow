@@ -13,7 +13,7 @@ export function SpaceModulesPanel({ id, onSaved }: { id: number; onSaved: () => 
   const toggle = async (key: string) => {
     const next = enabled.includes(key) ? enabled.filter(x => x !== key) : [...enabled, key];
     setBusy(true); setError('');
-    try { await api.setSpaceModules(id, next); setEnabled(next); onSaved(); }
+    try { await api.setSpaceModules(id, next); setEnabled(next); window.dispatchEvent(new Event('taskflow:access-updated')); onSaved(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); }
     finally { setBusy(false); }
   };

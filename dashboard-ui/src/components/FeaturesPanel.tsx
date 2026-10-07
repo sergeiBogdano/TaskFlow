@@ -3,7 +3,7 @@ import { Power } from 'lucide-react';
 import { api, type PermissionGroup } from '../api/client';
 
 type FeaturesPanelProps = {
-  scope: 'global' | 'workspace';
+  scope: 'global' | 'workspace' | 'group' | 'user';
   targetId?: number;
   title?: string;
   description?: string;
@@ -23,16 +23,16 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getFeatures();
-      setGroups(data.catalog || []);
-      setEffective(data.effective || {});
+      const data = await api.getFeatures(scope, targetId);
+      setGroups((data.catalog || []).filter(group => scope !== 'workspace' || group.scope === 'work'));
+      setEffective(data.scope_effective || {});
       const map: Record<string, { id: number; enabled: boolean }> = {};
       data.overrides
         .filter(row => row.scope === scope && (scope === 'global' ? row.target_id == null : row.target_id === targetId))
         .forEach(row => { map[row.key] = { id: row.id, enabled: row.enabled }; });
       setOverrides(map);
     } catch {
-      // не суперадмин — панель просто не показывается
+      setMsg('Не удалось загрузить настройки функций. Обновите страницу.');
       setGroups([]);
     }
   }, [scope, targetId]);
@@ -43,8 +43,9 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
     setBusy(key);
     setMsg('');
     try {
-      await api.setFeature({ scope, target_id: scope === 'workspace' ? targetId : null, key, enabled });
+      await api.setFeature({ scope, target_id: scope === 'global' ? null : targetId, key, enabled });
       await load();
+      window.dispatchEvent(new Event('taskflow:access-updated'));
       setMsg(enabled ? `Функция «${key}» включена` : `Функция «${key}» выключена — она скрыта и закрыта для пользователей`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : 'Не удалось изменить функцию');
@@ -53,7 +54,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
     }
   };
 
-  if (!groups.length) return null;
+  if (!groups.length) return msg ? <p role="alert" className="tf-alert-error">{msg}</p> : null;
 
   return (
     <section className="tf-panel-flat p-5">
@@ -69,7 +70,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
             </div>
             <div className="space-y-1.5">
               {group.items.map(item => {
-                const off = overrides[item.key]?.enabled === false || (!overrides[item.key] && effective[item.key] === false);
+                const off = effective[item.key] !== true;
                 const overridden = overrides[item.key];
                 return (
                   <label key={item.key} className={`flex items-start justify-between gap-3 rounded-lg border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-3 py-2 text-sm ${item.key === 'settings' ? 'opacity-70' : ''}`}>
@@ -85,7 +86,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
                     <input
                       className="mt-1 accent-[var(--color-accent)]"
                       type="checkbox"
-                      disabled={busy === item.key || item.key === 'settings'}
+                      disabled={busy !== null || item.key === 'settings'}
                       checked={!off}
                       onChange={event => toggle(item.key, event.target.checked)}
                       title={item.key === 'settings' ? 'Эту функцию нельзя выключить — на ней держится панель управления' : undefined}

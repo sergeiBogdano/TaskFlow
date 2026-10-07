@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { AlertCircle, CalendarDays, ChevronDown, ChevronUp, EyeOff, GripVertical, Search } from 'lucide-react';
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { SearchSelect } from '../components/SearchSelect';
-import { TaskScopeFilter, taskMatchesScope, type TaskScope } from '../components/TaskScopeFilter';
+import { TaskScopeFilter } from '../components/TaskScopeFilter';
+import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import type { Client, SavedView, Task, User } from '../api/client';
 import { cn, formatDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
@@ -131,7 +132,7 @@ export function Kanban() {
   const [viewName, setViewName] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams();
     params.set('scope', scope);
     if (scope === 'user' && scopeUserId) params.set('scope_user_id', scopeUserId);
@@ -145,11 +146,11 @@ export function Kanban() {
     setClients(clientList);
     setUsers(userList);
     setSavedViews(views);
-  };
+  }, [scope, scopeUserId, currentUser]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
-  }, [scope, scopeUserId, currentUser?.id]);
+  }, [load]);
 
   useEffect(() => {
     localStorage.setItem('taskflow-kanban-collapsed', JSON.stringify([...collapsedColumns]));
@@ -168,7 +169,7 @@ export function Kanban() {
       if (completionDate < periodStart || completionDate > periodEnd) return false;
       return true;
     });
-  }, [clientId, periodEnd, periodMode, periodStart, priority, search, tasks]);
+  }, [clientId, periodEnd, periodStart, priority, search, tasks]);
 
   const toggleColumn = (status: string) => {
     setCollapsedColumns(previous => {

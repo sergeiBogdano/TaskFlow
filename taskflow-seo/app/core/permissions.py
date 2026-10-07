@@ -136,7 +136,7 @@ async def effective_permissions(user, workspace_id: int | None = None) -> dict:
     - app-ключи (scope=app) — как раньше, из ролей и групп;
     - work-ключи (scope=work) — из активного окружения: точный набор
       кастомной роли, если назначена, иначе фиксированная база ранга. Если окружения нет или
-      пользователь не участник — остаются app-права (legacy/вне окружения);
+      пользователь не участник — остаются только глобальные app-права;
     - только фактический root (`all`) — полный доступ.
     """
     from app.core.permission_catalog import work_scope_keys
@@ -218,7 +218,7 @@ def task_co_executor_ids(task) -> set[int]:
 
 def task_is_visible_to_user(task, user, role_names: set[str], accessible_client_ids: set[int] | None = None, permissions: dict | None = None) -> bool:
     permissions = permissions or {}
-    if user_is_superadmin(role_names) or permissions.get('all') or permissions.get('tasks_view_others'):
+    if user_is_superadmin(role_names) or permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others'):
         return True
     if accessible_client_ids is not None and not user_can_access_task_client(task, role_names, accessible_client_ids):
         return False
@@ -295,6 +295,19 @@ def workspace_id_from_request(request: Request | None) -> int | None:
     return None
 
 
+def require_any_permission(*keys: str):
+    """An account manager can read the role directory without role-edit privileges."""
+    async def check(request: Request, user=Depends(get_current_user)):
+        workspace_id = workspace_id_from_request(request)
+        permissions = await request_permissions(user, workspace_id)
+        for key in keys:
+            if (permissions.get('all') or permissions.get(key)) and await is_feature_available(user, key, workspace_id):
+                return user
+        raise HTTPException(status_code=403, detail='Нет права доступа к управлению пользователями')
+    check._tf_guard = 'permission'
+    return check
+
+
 def _catalog_feature_keys() -> set[str]:
     from app.core.permission_catalog import PERMISSION_GROUPS
     return {item['key'] for group in PERMISSION_GROUPS for item in group['items']}
@@ -328,7 +341,7 @@ async def get_effective_features(user, workspace_id: int | None = None,
                                  keys: list[str] | None = None) -> dict[str, bool]:
     """Эффективная доступность функций: приоритет user > workspace > group > global.
 
-    Ключ без записи в кране считается доступным; выключенная функция
+    Новый ключ без явного разрешения выключен; выключенная функция
     приостанавливается (выдачи в ролях не трогаются).
     """
     from sqlalchemy import or_, select
@@ -356,10 +369,12 @@ async def get_effective_features(user, workspace_id: int | None = None,
     from app.core.permission_catalog import WORKSPACE_ADMIN_DEFAULTS
     legacy_keys = set(WORKSPACE_ADMIN_DEFAULTS) | {'settings', 'users', 'users_password_own', 'users_password_reset', 'users_manage', 'workspaces_create', 'crm', 'crm_edit', 'crm_delete', 'crm_configure'}
     state = {key: is_root_user(user) or key in legacy_keys for key in keys}
-    priority = {'global': 0, 'group': 1, 'workspace': 2, 'user': 3}
-    for row in sorted(rows, key=lambda r: priority.get(r.scope, 0)):
-        if row.key in state and not is_root_user(user):
-            state[row.key] = bool(row.enabled)
+    # At the same group priority, denial wins regardless of database row order.
+    for scope in ('global', 'group', 'workspace', 'user'):
+        for key in keys:
+            values = [bool(row.enabled) for row in rows if row.scope == scope and row.key == key]
+            if values and not is_root_user(user):
+                state[key] = all(values)
     # Global disable and space module disable are hard limits; user overrides cannot reopen them.
     for row in rows:
         if not is_root_user(user) and row.scope == 'global' and not row.enabled and row.key in state:

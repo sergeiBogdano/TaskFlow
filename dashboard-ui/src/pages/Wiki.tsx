@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { BookOpen, ChevronRight, FolderOpen, Lightbulb, Search } from 'lucide-react';
+import { APP_VERSION } from '../lib/version';
 import { wikiArticles, wikiFolders } from '../lib/wiki';
 
 export function Wiki() {
@@ -10,11 +11,11 @@ export function Wiki() {
   const folder = wikiFolders.includes(params.get('folder') || '') ? params.get('folder') : null;
   const needle = query.trim().toLocaleLowerCase('ru');
   const articles = wikiArticles.filter(article => (!folder || article.folder === folder) &&
-    [article.title, article.summary, article.example, ...article.steps].join(' ').toLocaleLowerCase('ru').includes(needle));
+    [article.title, article.folder, article.audience, article.summary, article.example, article.note || '', ...article.steps].join(' ').toLocaleLowerCase('ru').includes(needle));
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="tf-panel-flat relative overflow-hidden p-6 sm:p-8">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--color-accent)]"><BookOpen size={19} />СПРАВОЧНИК TASKFLOW</div>
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--color-accent)]"><BookOpen size={19} />СПРАВОЧНИК TASKFLOW <span className="tf-chip">{APP_VERSION}</span></div>
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Освойтесь. Настройте. Работайте.</h1>
         <p className="mt-3 max-w-2xl text-[var(--color-text-secondary)]">Короткие инструкции, понятные правила и примеры. Для каждого, кто работает в приложении.</p>
         <label className="relative mt-6 block max-w-xl">

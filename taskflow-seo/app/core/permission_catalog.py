@@ -71,12 +71,12 @@ PERMISSION_GROUPS = [
         ],
     },
     {
-        'id': 'workspace_security',
-        'scope': SCOPE_WORK,
-        'title': 'Управление участниками окружения',
-        'description': 'Дополнительные действия с участниками. Базовая иерархия всегда действует: владелец → администратор → участник.',
+        'id': 'account_security',
+        'scope': SCOPE_APP,
+        'title': 'Безопасность учётных записей',
+        'description': 'Глобальные пароли обслуживают только администраторы учётных записей. Ранг пространства не даёт эти права.',
         'items': [
-            {'key': 'users_password_reset', 'label': 'Сброс чужих паролей', 'hint': 'Сбрасывать пароли участников младше по рангу в этом окружении', 'level': 'sensitive'},
+            {'key': 'users_password_reset', 'label': 'Сброс чужих паролей', 'hint': 'Требует управления учётными записями; сброс паролей обычных аккаунтов. Администраторов и root обслуживает только root.', 'level': 'sensitive'},
         ],
     },
 ]
@@ -114,7 +114,7 @@ ROLE_PRESETS = {
     'admin': [
         'dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'tasks_view_others', 'kanban',
         'calendar', 'clients', 'modules', 'reports', 'notifications', 'notes', 'ai', 'workspace',
-        'settings', 'users', 'users_manage', 'workspaces_create',
+        'settings', 'users', 'users_manage', 'users_password_reset', 'workspaces_create',
         'client_tab_contacts', 'client_tab_access', 'client_tab_contracts', 'client_tab_notes',
         'client_tab_related', 'client_tab_activity', 'client_edit', 'client_delete',
         'users_password_own',

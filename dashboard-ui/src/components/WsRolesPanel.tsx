@@ -94,7 +94,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
   };
 
   const remove = async (role: WorkspaceRole) => {
-    if (!confirm(`Удалить роль «${role.name}»? Назначения будут сняты.`)) return;
+    if (!confirm(`Удалить роль «${role.name}»? Если она назначена участникам, сначала смените их профили доступа.`)) return;
     setBusy(true);
     try {
       await api.deleteWsRole(workspaceId, role.id);

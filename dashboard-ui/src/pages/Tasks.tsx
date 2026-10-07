@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, Wand2, X } from 'lucide-react';
@@ -9,7 +9,8 @@ import { RichTextEditor } from '../components/RichTextEditor';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
 import { taskField } from '../lib/uiconfig';
-import { TaskScopeFilter, taskMatchesScope, type TaskScope } from '../components/TaskScopeFilter';
+import { TaskScopeFilter } from '../components/TaskScopeFilter';
+import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import { getActiveWorkspaceId } from '../lib/workspace';
 import { cn, formatDate, formatFullDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
@@ -76,7 +77,7 @@ export function Tasks() {
   })), [clients]);
   const userOptions = useMemo(() => users.map(user => ({ value: String(user.id), label: user.username })), [users]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('page_size', String(pageSize));
@@ -103,12 +104,12 @@ export function Tasks() {
     setUsers(userList);
     setSavedViews(views);
     setSprints(sprintList);
-  };
+  }, [filters, page, pageSize, currentUser]);
 
   useEffect(() => {
     setLoading(true);
     load().finally(() => setLoading(false));
-  }, [filters, page, pageSize, currentUser?.id]);
+  }, [load]);
 
   useEffect(() => {
     const status = searchParams.get('status');
@@ -763,7 +764,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
         setContractEnd('');
       });
     return () => { cancelled = true; };
-  }, [clientId, task?.id]);
+  }, [clientId, task?.id, task?.client_warning]);
 
   useEffect(() => {
     const dateToCheck = [completionDate, deadline].filter(Boolean).sort().at(-1) || '';

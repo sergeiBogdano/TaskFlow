@@ -37,9 +37,20 @@ Root manages platform roles, feature switches and workspace modules. Platform
 administrators can provision accounts and workspaces; they access workspace
 contents through membership. Owners and administrators manage membership inside
 their own workspace and delegate only their actual workspace permissions. They
-cannot reset platform account passwords. Custom workspace roles specify an exact
+cannot reset platform account passwords by workspace rank or a workspace profile.
+Account password resets require both global `users_manage` and
+`users_password_reset` permissions, with both functions enabled. Root password
+changes remain server-only. Custom workspace roles specify an exact
 set of capabilities, independently of the management rank. Restarting the server
 never expands these permissions or invites unassigned users into a team.
+
+Assigned workspace profiles cannot be deleted until explicitly reassigned. A
+restricted administrator cannot edit a profile assigned to themselves or a peer,
+or remove a profile when that would grant permissions above their own ceiling.
+Conflicting feature switches in groups resolve to denial, independently of group
+creation order. Explicit workspace and user switches have higher priority; an
+explicit global denial still blocks ordinary accounts. The feature editor shows
+the selected scope's actual policy rather than root's emergency access.
 
 Workspaces can be hidden, closed or open. Hidden workspaces appear only to members
 and root; closed workspaces appear in the directory but require an invitation;

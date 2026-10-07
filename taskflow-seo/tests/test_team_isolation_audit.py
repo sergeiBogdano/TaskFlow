@@ -54,7 +54,8 @@ def test_admin_cannot_delegate_privileged_profile(sync_request, admin_cookies):
     profile = sync_request('POST', f"/api/workspaces/{ws['id']}/roles",
                            json={'name': 'Reset', 'permissions': {'users_password_reset': True}},
                            cookies=admin_cookies)
-    assert profile.status_code == 201, profile.text
-    response = sync_request('PUT', f"/api/workspaces/{ws['id']}/members/{mid}/custom-role",
-                            json={'role_id': profile.json()['id']}, cookies=actor)
-    assert response.status_code == 403
+    assert profile.status_code == 400, profile.text
+    # A space admin likewise cannot put an application-level capability into a profile.
+    response = sync_request('POST', f"/api/workspaces/{ws['id']}/roles",
+                            json={'name': 'Reset', 'permissions': {'users_password_reset': True}}, cookies=actor)
+    assert response.status_code == 400

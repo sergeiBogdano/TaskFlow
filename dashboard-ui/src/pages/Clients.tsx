@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Activity, AlertTriangle, BarChart3, CalendarDays, CalendarRange, CheckCircle2, ExternalLink, KeyRound, ListFilter, NotebookText, Paperclip, Plus, RefreshCw, Save, Search, Target, Trash2, Upload, UserRoundCheck, X } from 'lucide-react';
 import { api } from '../api/client';
@@ -6,7 +6,8 @@ import type { Client, ClientAnalytics, ClientFile, ClientWorkSummary, Organizati
 import { referenceCache } from '../api/cache';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
-import { TaskScopeFilter, type TaskScope } from '../components/TaskScopeFilter';
+import { TaskScopeFilter } from '../components/TaskScopeFilter';
+import type { TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import { formatDate, statusMeta, taskTypeMeta } from '../lib/taskflow';
 
@@ -320,7 +321,7 @@ function ClientAnalyticsPanel({ clients, users }: { clients: Client[]; users: Us
     setSelectedIds(prev => prev.filter(id => clients.some(client => client.id === id)));
   }, [clients]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -336,9 +337,9 @@ function ClientAnalyticsPanel({ clients, users }: { clients: Client[]; users: Us
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedIds, periodStart, periodEnd, scope, scopeUserId]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const maxType = Math.max(1, ...(data?.by_type.map(item => item.count) || [1]));
   const modules = data?.modules || [];
@@ -694,7 +695,7 @@ function ClientModal({
     updateItem(contracts, setContracts, index, { end_date: isoDate(next), status: 'active' });
   };
 
-  const canSeeTab = (tab: string) => isSuperadmin || permissions.all || tab === 'main' || tab === 'files' || Boolean(permissions[`client_tab_${tab}`]);
+  const canSeeTab = useCallback((tab: string) => isSuperadmin || permissions.all || tab === 'main' || tab === 'files' || Boolean(permissions[`client_tab_${tab}`]), [isSuperadmin, permissions]);
   const tabs = [
     { id: 'main', label: 'Обзор' },
     { id: 'notes', label: 'Заметки' },
@@ -708,7 +709,7 @@ function ClientModal({
 
   useEffect(() => {
     if (!canSeeTab(activeTab)) setActiveTab('main');
-  }, [activeTab, permissions, isSuperadmin]);
+  }, [activeTab, canSeeTab]);
 
   return (
     <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>

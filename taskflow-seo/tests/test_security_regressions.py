@@ -361,24 +361,13 @@ class TestPasswordResetLadder:
             json={"name": _uniq("Reset custom"), "permissions": {"users_password_reset": True}},
             cookies=admin_cookies,
         )
-        assert resp.status_code == 201, resp.text
-        custom_id = resp.json()["id"]
-        try:
-            resp = sync_request(
-                "PUT", f"/api/workspaces/{ws['id']}/members/{mid}/custom-role",
-                json={"role_id": custom_id}, cookies=admin_cookies,
-            )
-            assert resp.status_code == 200, resp.text
-            resp = sync_request(
-                "PUT", f"/api/users/{aid}/password",
-                json={"password": "hacked123"}, cookies=mcookies,
-            )
-            assert resp.status_code == 403, resp.text
-        finally:
-            sync_request(
-                "DELETE", f"/api/workspaces/{ws['id']}/roles/{custom_id}",
-                cookies=admin_cookies,
-            )
+        assert resp.status_code == 400, resp.text
+        # Account password capabilities cannot be delegated through a space profile.
+        resp = sync_request(
+            'PUT', f'/api/users/{aid}/password',
+            json={'password': 'hacked123'}, cookies=mcookies,
+        )
+        assert resp.status_code == 403, resp.text
 
     def test_no_shared_workspace_denied(self, sync_request, admin_cookies):
         ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("ISO")}, cookies=admin_cookies).json()

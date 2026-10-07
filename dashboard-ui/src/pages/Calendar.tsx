@@ -1,10 +1,12 @@
-import { lazy, Suspense, useEffect, useState, type MouseEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api, type Client, type QuickTaskTemplate, type Task, type User } from '../api/client';
 import { referenceCache } from '../api/cache';
-import { TaskScopeFilter, taskMatchesScope, type TaskScope } from '../components/TaskScopeFilter';
+import { TaskScopeFilter } from '../components/TaskScopeFilter';
+import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
+import { dateInputValue, shiftCalendarDate } from '../lib/dates';
 import { cn, statusMeta } from '../lib/taskflow';
 
 const TaskModal = lazy(() => import('./Tasks').then(module => ({ default: module.TaskModal })));
@@ -58,7 +60,7 @@ export function Calendar() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [createDate, setCreateDate] = useState<string | null>(null);
   const [quickTitle, setQuickTitle] = useState('');
-  const [quickDate, setQuickDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [quickDate, setQuickDate] = useState(() => dateInputValue(new Date()));
   const [quickNotice, setQuickNotice] = useState('');
   const [calendarError, setCalendarError] = useState('');
   const [creatingQuickId, setCreatingQuickId] = useState<number | null>(null);
@@ -70,14 +72,14 @@ export function Calendar() {
   const [scopeUserId, setScopeUserId] = useState('');
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  const getRange = () => {
+  const getRange = useCallback(() => {
     const y = currentDate.getFullYear();
     const m = currentDate.getMonth();
-    if (view === 'month') return { start: new Date(y, m, 1).toISOString().slice(0, 10), end: new Date(y, m + 1, 0).toISOString().slice(0, 10) };
-    return { start: currentDate.toISOString().slice(0, 10), end: currentDate.toISOString().slice(0, 10) };
-  };
+    if (view === 'month') return { start: dateInputValue(new Date(y, m, 1)), end: dateInputValue(new Date(y, m + 1, 0)) };
+    return { start: dateInputValue(currentDate), end: dateInputValue(currentDate) };
+  }, [currentDate, view]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { start, end } = getRange();
     const scopeQuery = `scope=${encodeURIComponent(scope)}${scope === 'user' && scopeUserId ? `&scope_user_id=${encodeURIComponent(scopeUserId)}` : ''}`;
     const [eventList, clientList, userList, quickList] = await Promise.all([
@@ -90,18 +92,16 @@ export function Calendar() {
     setClients(clientList);
     setUsers(userList);
     setQuickTemplates(quickList);
-  };
+  }, [getRange, scope, scopeUserId, currentUser]);
 
   useEffect(() => {
     setLoading(true);
-    load().finally(() => setLoading(false));
-  }, [currentDate, view, scope, scopeUserId, currentUser?.id]);
+    setCalendarError('');
+    load().catch(error => setCalendarError(error instanceof Error ? error.message : 'Не удалось загрузить календарь')).finally(() => setLoading(false));
+  }, [load]);
 
   const navigateDate = (dir: number) => {
-    const next = new Date(currentDate);
-    if (view === 'month') next.setMonth(next.getMonth() + dir);
-    else next.setDate(next.getDate() + dir);
-    setCurrentDate(next);
+    setCurrentDate(shiftCalendarDate(currentDate, dir, view === 'month'));
   };
 
   const openTask = async (event: any) => {

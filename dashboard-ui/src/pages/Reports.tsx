@@ -88,7 +88,7 @@ export function Reports() {
       }
     }, 2500);
     return () => window.clearInterval(timer);
-  }, [selectedReport?.id, selectedReport?.status]);
+  }, [selectedReport]);
 
   const currentClient = useMemo(() => clients.find(client => String(client.id) === clientId), [clientId, clients]);
 
