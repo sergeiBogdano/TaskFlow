@@ -17,6 +17,7 @@ const Settings = lazy(() => import('./pages/Settings').then(module => ({ default
 const Modules = lazy(() => import('./pages/Modules').then(module => ({ default: module.Modules })));
 const Trash = lazy(() => import('./pages/Trash').then(module => ({ default: module.Trash })));
 const AiAnalytics = lazy(() => import('./pages/AiAnalytics').then(module => ({ default: module.AiAnalytics })));
+const Crm = lazy(() => import('./pages/Crm').then(module => ({ default: module.Crm })));
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })));
 const Sprints = lazy(() => import('./pages/Sprints').then(module => ({ default: module.Sprints })));
 const WorkspaceSettings = lazy(() => import('./pages/WorkspaceSettings').then(module => ({ default: module.WorkspaceSettings })));
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="/wiki" element={<Wiki />} />
                 <Route path="/tasks" element={<PermissionRoute permission="tasks"><Tasks /></PermissionRoute>} />
                 <Route path="/kanban" element={<PermissionRoute permission="kanban"><Kanban /></PermissionRoute>} />
+                <Route path="/crm" element={<PermissionRoute permission="crm"><Crm /></PermissionRoute>} />
                 <Route path="/clients" element={<PermissionRoute permission="clients"><Clients /></PermissionRoute>} />
                 <Route path="/clients/:id" element={<PermissionRoute permission="clients"><Clients /></PermissionRoute>} />
                 <Route path="/modules" element={<PermissionRoute permission="modules"><Modules /></PermissionRoute>} />
@@ -49,9 +51,9 @@ export default function App() {
                 <Route path="/trash" element={<PermissionRoute permission="tasks"><Trash /></PermissionRoute>} />
                 <Route path="/ai" element={<PermissionRoute permission="ai"><AiAnalytics /></PermissionRoute>} />
                 <Route path="/notes" element={<PermissionRoute permission="notes"><Notes /></PermissionRoute>} />
-                <Route path="/sprints" element={<PermissionRoute permission="tasks"><Sprints /></PermissionRoute>} />
+                <Route path="/sprints" element={<PermissionRoute permission="kanban"><Sprints /></PermissionRoute>} />
                 <Route path="/workspace" element={<PermissionRoute permission="workspace"><WorkspaceSettings /></PermissionRoute>} />
-                <Route path="/settings" element={<PermissionRoute permission="settings"><Settings /></PermissionRoute>} />
+                <Route path="/settings" element={<PermissionRoute permission="users_password_own"><Settings /></PermissionRoute>} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" />} />

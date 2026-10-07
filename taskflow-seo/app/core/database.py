@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 
@@ -37,6 +38,8 @@ async def _migrate():
         return
     async with engine.begin() as conn:
         for col in [
+            'ALTER TABLE tasks ADD COLUMN contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
+            'ALTER TABLE tasks ADD COLUMN crm_deal_id INTEGER REFERENCES crm_deals(id) ON DELETE SET NULL',
             'ALTER TABLE tasks ADD COLUMN comment TEXT',
             'ALTER TABLE clients ADD COLUMN org_data TEXT',
             'ALTER TABLE clients ADD COLUMN client_warning TEXT',
@@ -69,6 +72,12 @@ async def _migrate():
             'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
             'ALTER TABLE workspace_members ADD COLUMN custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
             'ALTER TABLE users ADD COLUMN is_root BOOLEAN NOT NULL DEFAULT 0',
+            'ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1',
+            'ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0',
+            'ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0',
+            'ALTER TABLE users ADD COLUMN account_key VARCHAR(36)',
+            "ALTER TABLE workspaces ADD COLUMN visibility VARCHAR(20) NOT NULL DEFAULT 'hidden'",
+            '''ALTER TABLE workspaces ADD COLUMN enabled_modules TEXT NOT NULL DEFAULT '["tasks","crm","notes","reports","automation","ai"]' ''' ,
             'ALTER TABLE user_settings ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
             'ALTER TABLE modules ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
             'ALTER TABLE quick_task_templates ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
@@ -170,6 +179,8 @@ async def _ensure_indexes():
         'ALTER TABLE modules ADD COLUMN IF NOT EXISTS task_title_templates TEXT',
         'ALTER TABLE modules ADD COLUMN IF NOT EXISTS completion_offset_days INTEGER DEFAULT 0',
         'ALTER TABLE modules ADD COLUMN IF NOT EXISTS deadline_offset_days INTEGER',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
+        'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS crm_deal_id INTEGER REFERENCES crm_deals(id) ON DELETE SET NULL',
         'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS comment TEXT',
         'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0',
         'ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
@@ -192,6 +203,12 @@ async def _ensure_indexes():
         'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\'',
         'ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
         'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS account_key VARCHAR(36)',
+        "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'hidden'",
+        '''ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enabled_modules TEXT NOT NULL DEFAULT '["tasks","crm","notes","reports","automation","ai"]' ''',
         'ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
         'ALTER TABLE modules ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
         'ALTER TABLE quick_task_templates ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
@@ -204,7 +221,8 @@ async def _ensure_indexes():
         if settings.DATABASE_URL.startswith('postgresql'):
             for stmt in pg_statements:
                 try:
-                    await conn.execute(text(stmt))
+                    async with conn.begin_nested():
+                        await conn.execute(text(stmt))
                 except Exception as e:
                     # per-statement: одна упавшая миграция не должна отменять остальные
                     logger.warning('Column migration error for "%s": %s', stmt[:60], e)
@@ -258,14 +276,21 @@ async def _ensure_admin():
                 session.add(Role(name=name, permissions=json.dumps(perms, ensure_ascii=False)))
         await session.commit()
 
-        r = await session.execute(select(User).where(User.username == '4dmin'))
+        username = '4dmin' if os.environ.get('TESTING') else settings.BOOTSTRAP_USERNAME
+        r = await session.execute(select(User).where(User.username == username))
         admin = r.scalar_one_or_none()
         if admin:
             return
         r = await session.execute(text('SELECT COUNT(*) FROM users'))
         count = r.scalar()
         if count == 0:
-            admin = User(username='4dmin', password_hash=hash_password('4dmin'), is_root=True)
+            password = '4dmin' if os.environ.get('TESTING') else settings.BOOTSTRAP_PASSWORD
+            if not password:
+                raise RuntimeError('Задайте BOOTSTRAP_PASSWORD для первого запуска')
+            if not os.environ.get('TESTING') and len(password) < 8:
+                raise RuntimeError('BOOTSTRAP_PASSWORD должен содержать минимум 8 символов')
+            admin = User(username=username, password_hash=hash_password(password), is_root=True,
+                         must_change_password=not bool(os.environ.get('TESTING')))
             session.add(admin)
             await session.commit()
             await session.refresh(admin)
@@ -275,7 +300,7 @@ async def _ensure_admin():
             if superadmin_role:
                 session.add(UserRole(user_id=admin.id, role_id=superadmin_role.id))
             await session.commit()
-            logger.info('Default superadmin user created (4dmin:4dmin)')
+            logger.info('Bootstrap administrator created; password change required')
             return
 
 
@@ -293,6 +318,9 @@ async def _ensure_root():
             return
         root = users[0]
         for account in users:
+            if not account.account_key:
+                import uuid
+                account.account_key = str(uuid.uuid4())
             account.is_root = account.id == root.id
         superadmin = (await session.execute(
             select(Role).where(Role.name == 'superadmin')
@@ -335,7 +363,7 @@ async def _migrate_role_permissions():
             changed = False
             for key in keys:
                 if key not in perms:
-                    perms[key] = True
+                    perms[key] = False
                     changed = True
             if changed:
                 role.permissions = json.dumps(perms, ensure_ascii=False)
@@ -343,79 +371,18 @@ async def _migrate_role_permissions():
 
 
 async def _migrate_custom_roles_exact():
-    """Разовый переход кастомных ролей с аддитивной семантики на точный набор.
-
-    Было: effective = база ранга + роль. Стало: effective = ровно роль.
-    Чтобы никто молча не потерял права: содержимое каждой назначенной роли
-    сливается с базой ранга её участников. Роль на участниках с разным
-    базовым рангом клонируется по группам рангов ("Имя (rank)"), чтобы у
-    каждой группы сохранился ровно прежний effective-набор.
-    Конвергентно: после прогона каждая роль однорангова и покрывает базу —
-    повторный прогон ничего не меняет.
-    """
-    from app.core.models import WorkspaceMember, WorkspaceRole
-    from app.core.permission_catalog import work_scope_keys, workspace_default_permissions
-
+    """Normalize stored roles without broadening permissions on application restarts."""
+    from app.core.models import WorkspaceRole
+    from app.core.permission_catalog import work_scope_keys
     allowed = set(work_scope_keys())
-
-    def _clean(raw) -> dict:
-        try:
-            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except ValueError:
-            data = {}
-        return {key: True for key, value in data.items() if value and key in allowed}
-
     async with async_session() as session:
-        roles = (await session.execute(select(WorkspaceRole))).scalars().all()
-        for role in roles:
-            content = _clean(role.permissions)
-            links = (await session.execute(
-                select(WorkspaceMember).where(WorkspaceMember.custom_role_id == role.id)
-            )).scalars().all()
-            if not links:
-                if content != _clean(role.permissions):
-                    role.permissions = json.dumps(content, ensure_ascii=False)
-                continue
-            by_rank: dict[str, list] = {}
-            for link in links:
-                by_rank.setdefault(link.role, []).append(link)
-            union_base: set[str] = set()
-            for rank in by_rank:
-                union_base |= set(workspace_default_permissions(rank))
-            if set(content) >= union_base:
-                # содержимое уже покрывает базы всех назначенных:
-                # поведение не изменится, только нормализуем
-                if content != _clean(role.permissions):
-                    role.permissions = json.dumps(content, ensure_ascii=False)
-                continue
-            taken = {
-                row[0] for row in (await session.execute(
-                    select(WorkspaceRole.name).where(WorkspaceRole.workspace_id == role.workspace_id)
-                )).all()
-            }
-            for index, rank in enumerate(sorted(by_rank)):
-                merged = dict(workspace_default_permissions(rank))
-                merged.update(content)
-                merged = {key: True for key, value in merged.items() if key in allowed}
-                if index == 0:
-                    role.permissions = json.dumps(merged, ensure_ascii=False)
-                    taken.add(role.name)
-                    continue
-                clone_name = f'{role.name} ({rank})'
-                suffix = 2
-                while clone_name[:100] in taken:
-                    clone_name = f'{role.name} ({rank} {suffix})'
-                    suffix += 1
-                clone = WorkspaceRole(
-                    workspace_id=role.workspace_id,
-                    name=clone_name[:100],
-                    permissions=json.dumps(merged, ensure_ascii=False),
-                )
-                session.add(clone)
-                await session.flush()
-                taken.add(clone.name)
-                for link in by_rank[rank]:
-                    link.custom_role_id = clone.id
+        for role in (await session.execute(select(WorkspaceRole))).scalars():
+            try:
+                raw = json.loads(role.permissions or '{}')
+            except (ValueError, TypeError):
+                raw = {}
+            clean = {key: True for key, value in raw.items() if value is True and key in allowed}
+            role.permissions = json.dumps(clean, ensure_ascii=False)
         await session.commit()
 
 
@@ -456,6 +423,7 @@ async def _ensure_workspaces():
                 .where(Role.name == 'superadmin')
             )).scalars().first()
             ws = Workspace(
+                enabled_modules=json.dumps(['tasks', 'crm', 'notes', 'reports', 'automation'] + (['ai'] if os.environ.get('TESTING') else [])),
                 name='SEO',
                 preset='seo',
                 theme=None,

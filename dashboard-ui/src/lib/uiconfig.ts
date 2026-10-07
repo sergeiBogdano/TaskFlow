@@ -14,8 +14,8 @@ export type UiFieldOverride = {
 export type UiConfig = {
   nav?: Record<string, UiNavOverride>;
   titles?: Record<string, string>;
-  tasks?: { fields?: Record<string, UiFieldOverride> };
-  sprints?: { fields?: Record<string, UiFieldOverride> };
+  tasks?: { order?: string[]; fields?: Record<string, UiFieldOverride> };
+  sprints?: { order?: string[]; fields?: Record<string, UiFieldOverride> };
 };
 
 export function getUiConfig(): UiConfig {
@@ -62,10 +62,11 @@ export const TASK_FIELD_DEFAULTS: Record<string, string> = {
   sprint: 'Спринт',
 };
 
-export function taskField(key: string): { label: string; visible: boolean } {
+export function taskField(key: string): { label: string; visible: boolean; order: number } {
   const cfg = getUiConfig();
   const item = cfg.tasks?.fields?.[key];
   return {
+    order: (cfg.tasks?.order || Object.keys(TASK_FIELD_DEFAULTS)).indexOf(key),
     label: item?.label?.trim() || TASK_FIELD_DEFAULTS[key] || key,
     visible: item?.visible !== false,
   };
@@ -78,10 +79,11 @@ export const SPRINT_FIELD_DEFAULTS: Record<string, string> = {
   end: 'Конец',
 };
 
-export function sprintField(key: string): { label: string; visible: boolean } {
+export function sprintField(key: string): { label: string; visible: boolean; order: number } {
   const cfg = getUiConfig();
   const item = cfg.sprints?.fields?.[key];
   return {
+    order: (cfg.sprints?.order || Object.keys(SPRINT_FIELD_DEFAULTS)).indexOf(key),
     label: item?.label?.trim() || SPRINT_FIELD_DEFAULTS[key] || key,
     visible: item?.visible !== false,
   };

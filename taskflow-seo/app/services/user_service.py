@@ -28,6 +28,6 @@ async def create_user(username: str, password: str) -> User:
 
 async def authenticate(username: str, password: str) -> User | None:
     u = await get_user_by_username(username)
-    if u and verify_password(password, u.password_hash):
+    if u and u.is_active and verify_password(password, u.password_hash):
         return u
     return None

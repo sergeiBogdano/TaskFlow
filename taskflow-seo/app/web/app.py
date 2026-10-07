@@ -110,14 +110,6 @@ app.mount(
 )
 
 
-if os.getenv("TASKFLOW_LEGACY_UI") == "1":
-    from app.web.router import router
-    from app.web.user_routes import router as user_router
-
-    app.include_router(router)
-    app.include_router(user_router)
-
-
 from app.web.api.auth import router as auth_router
 from app.web.api.users import router as users_router
 from app.web.api.roles import router as roles_router
@@ -141,6 +133,28 @@ from app.web.api.features import router as features_router
 from app.web.api.workspace_roles import router as workspace_roles_router
 
 
+from app.web.api.crm import router as crm_router
+# Preserve API helpers that originally lived beside Jinja pages, without letting
+# their duplicate CRUD handlers shadow the production API.
+from fastapi import APIRouter
+from app.web.router import router as legacy_router
+_api_routers = (auth_router, users_router, roles_router, clients_router, tasks_router,
+    modules_router, dashboard_router, calendar_router, notifications_router, saved_views_router,
+    quick_tasks_router, reports_router, ai_router, ai_analytics_router, workspaces_router,
+    sprints_router, notes_router, permissions_router, groups_router, features_router,
+    workspace_roles_router, crm_router)
+_signatures = {(method, route.path) for router in _api_routers for route in router.routes
+               if hasattr(route, 'methods') for method in route.methods}
+helpers = APIRouter()
+for route in legacy_router.routes:
+    if getattr(route, 'path', '').startswith('/api/') and not any(
+            (method, route.path) in _signatures for method in getattr(route, 'methods', [])):
+        helpers.routes.append(route)
+app.include_router(helpers)
+
+
+app.include_router(crm_router)
+
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(roles_router)
@@ -162,3 +176,8 @@ app.include_router(permissions_router)
 app.include_router(groups_router)
 app.include_router(features_router)
 app.include_router(workspace_roles_router)
+
+if os.getenv('TASKFLOW_LEGACY_UI') == '1':
+    from app.web.user_routes import router as user_router
+    app.include_router(legacy_router)
+    app.include_router(user_router)

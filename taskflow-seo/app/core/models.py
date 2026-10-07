@@ -1,3 +1,6 @@
+import secrets
+import uuid
+
 
 from sqlalchemy import (
     Boolean,
@@ -8,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Table,
     Text,
@@ -124,6 +128,10 @@ class User(Base):
     # Immutable platform identity.  The first account is promoted to root at
     # startup and is never manageable through the user/workspace APIs.
     is_root = Column(Boolean, nullable=False, default=False, server_default='0', index=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default='1')
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default='0')
+    account_key = Column(String(36), nullable=True, default=lambda: str(uuid.uuid4()))
+    session_version = Column(Integer, nullable=False, default=lambda: secrets.randbits(30), server_default='0')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -131,6 +139,8 @@ class Task(Base):
     __tablename__ = 'tasks'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    contract_id = Column(Integer, ForeignKey('contracts.id', ondelete='SET NULL'), nullable=True, index=True)
+    crm_deal_id = Column(Integer, ForeignKey('crm_deals.id', ondelete='SET NULL', use_alter=True, name='fk_task_crm_deal'), nullable=True, index=True)
     client_id = Column(Integer, ForeignKey('clients.id', ondelete='SET NULL'), nullable=True)
     title = Column(String(200), nullable=False)
     task_type = Column(String(50), default='custom')
@@ -456,6 +466,8 @@ class Workspace(Base):
     dictionary = Column(Text, nullable=False, default='{}')
     ai_instructions = Column(Text, nullable=True)
     ui_config = Column(Text, nullable=False, default='{}')
+    visibility = Column(String(20), nullable=False, default='hidden', server_default='hidden')
+    enabled_modules = Column(Text, nullable=False, default='["tasks", "notes"]')
     created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -585,3 +597,70 @@ class FeatureOverride(Base):
     key = Column(String(64), nullable=False)
     enabled = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CrmPipeline(Base):
+    __tablename__ = 'crm_pipelines'
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    stages = Column(Text, nullable=False)
+
+
+class CrmContact(Base):
+    __tablename__ = 'crm_contacts'
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    client_id = Column(Integer, ForeignKey('clients.id', ondelete='SET NULL'))
+    name = Column(String(200), nullable=False)
+    email = Column(String(200), default='')
+    phone = Column(String(80), default='')
+    position = Column(String(160), default='')
+    deleted_at = Column(DateTime(timezone=True))
+
+
+class CrmDeal(Base):
+    __tablename__ = 'crm_deals'
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    pipeline_id = Column(Integer, ForeignKey('crm_pipelines.id'), nullable=False, index=True)
+    stage = Column(String(64), nullable=False)
+    title = Column(String(200), nullable=False)
+    amount = Column(Numeric(16, 2), nullable=False, default=0)
+    currency = Column(String(3), nullable=False, default='RUB')
+    client_id = Column(Integer, ForeignKey('clients.id', ondelete='SET NULL'))
+    contact_id = Column(Integer, ForeignKey('crm_contacts.id', ondelete='SET NULL'))
+    contract_id = Column(Integer, ForeignKey('contracts.id', ondelete='SET NULL'))
+    task_id = Column(Integer, ForeignKey('tasks.id', ondelete='SET NULL'))
+    assignee_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'))
+    custom_fields = Column(Text, nullable=False, default='{}')
+    notes = Column(Text, default='')
+    archived = Column(Boolean, nullable=False, default=False)
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CrmActivity(Base):
+    __tablename__ = 'crm_activities'
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    deal_id = Column(Integer, ForeignKey('crm_deals.id', ondelete='CASCADE'), nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    kind = Column(String(20), nullable=False, default='task')
+    due_at = Column(DateTime(timezone=True))
+    completed = Column(Boolean, nullable=False, default=False)
+    created_by = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmField(Base):
+    __tablename__ = 'crm_fields'
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    key = Column(String(64), nullable=False)
+    label = Column(String(120), nullable=False)
+    kind = Column(String(20), nullable=False, default='text')
+    required = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=False, default=0)
+    __table_args__ = (Index('ix_crm_field_unique', 'workspace_id', 'key', unique=True),)

@@ -1,548 +1,60 @@
-﻿import { useEffect, useState, type FormEvent } from 'react';
-import { Building2, KeyRound, LayoutDashboard, ListChecks, Lock, Plus, Save, Search, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react';
-import { api } from '../api/client';
-import type { Group, PermissionCatalog, PermissionGroup, Role, User } from '../api/client';
-import { SearchSelect } from '../components/SearchSelect';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Ban, Check, KeyRound, Plus, Search, ShieldCheck, UsersRound, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { api, type Group, type PermissionCatalog, type Role, type User } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
 
-const groupIcons: Record<string, typeof LayoutDashboard> = {
-  navigation: LayoutDashboard,
-  tasks: ListChecks,
-  clients: Building2,
-  system: Settings2,
-};
-
-const roleLabel = (role: Role) => roleMeta[role.name]?.label || role.name;
-
 export function Users() {
-  const { user: currentUser } = useAuth();
-  const isSuperadminActor = Boolean(currentUser?.permissions?.all);
-  const canGrant = (key: string) =>
-    isSuperadminActor || Boolean(currentUser?.permissions?.[key]);
-  const featureOn = (key: string) => currentUser?.features?.[key] !== false;
-  const canGrantRole = (role: Role) =>
-    isSuperadminActor || Object.entries(role.permissions || {}).every(([key, value]) => !value || canGrant(key));
+  const { user: actor } = useAuth();
+  const root = Boolean(actor?.is_root);
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
-  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
-  const [permissions, setPermissions] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [pwdUserId, setPwdUserId] = useState<number | null>(null);
-  const [pwdValue, setPwdValue] = useState('');
-  const [pwdError, setPwdError] = useState('');
-  const [newRoleName, setNewRoleName] = useState('');
-  const [roleName, setRoleName] = useState('');
-  const [permissionSearch, setPermissionSearch] = useState('');
-  const [permissionTab, setPermissionTab] = useState<'app' | 'work'>('work');
   const [groups, setGroups] = useState<Group[]>([]);
-  const [groupEditorId, setGroupEditorId] = useState<number | null>(null);
-  const [groupName, setGroupName] = useState('');
-  const [groupEditorPermissions, setGroupEditorPermissions] = useState<Record<string, boolean>>({});
-  const [newGroupName, setNewGroupName] = useState('');
-    const [groupError, setGroupError] = useState('');
-
-  const load = async () => {
-    const [userList, roleList, permissionCatalog] = await Promise.all([
-      api.getUsers(),
-      api.getRoles(),
-      api.getPermissionCatalog(),
-    ]);
-    setUsers(userList);
-    setRoles(roleList);
-    setCatalog(permissionCatalog);
-    if (isSuperadminActor) {
-      api.getGroups().then(setGroups).catch(() => setGroups([]));
-    }
-    const firstEditable = roleList.find(role => role.name !== 'superadmin');
-    if (!selectedRoleId && firstEditable) {
-      setSelectedRoleId(firstEditable.id);
-      setPermissions(firstEditable.permissions || {});
-    }
-  };
-
-  useEffect(() => {
-    load().finally(() => setLoading(false));
-  }, []);
-
-  const selectRole = (roleId: number) => {
-    const role = roles.find(item => item.id === roleId);
-    setSelectedRoleId(roleId);
-    setPermissions(role?.permissions || {});
-    setRoleName(role?.name || '');
-  };
-
-  const handleDelete = async (target: User) => {
-    if (isProtectedSuperadmin(target, users)) return;
-    if (!confirm(`Удалить пользователя ${target.username}?`)) return;
-    await api.deleteUser(target.id);
-    setUsers(prev => prev.filter(user => user.id !== target.id));
-  };
-
-  const savePassword = async (userId: number) => {
-    if (pwdValue.length < 4) {
-      setPwdError('Пароль минимум 4 символа.');
-      return;
-    }
-    setPwdError('');
-    try {
-      await api.setUserPassword(userId, pwdValue);
-      setPwdUserId(null);
-      setPwdValue('');
-    } catch (err) {
-      setPwdError(err instanceof Error ? err.message : 'Не удалось сменить пароль.');
-    }
-  };
-
-  const handleSetRole = async (userId: number, roleId: number) => {
-    if (!roleId) return;
-    await api.setUserRole(userId, roleId);
-    await load();
-  };
-
-  const saveRolePermissions = async () => {
-    if (!selectedRoleId) return;
-    const role = roles.find(item => item.id === selectedRoleId);
-    if (!role || role.name === 'superadmin') return;
-    await api.updateRole(role.id, { name: roleName.trim() || role.name, permissions });
-    await load();
-  };
-
-  const handleCreate = async (username: string, password: string, workspaceId?: string, wsRole?: string) => {
-    await api.createUser(
-      username,
-      password,
-      workspaceId ? { workspace_id: Number(workspaceId), role: wsRole || 'member' } : undefined,
-    );
-    setShowModal(false);
-    await load();
-  };
-
-  const createRole = async () => {
-    const name = newRoleName.trim();
-    if (!name) return;
-    const role = await api.createRole({ name, permissions: { dashboard: true, tasks: true, notifications: true } });
-    setNewRoleName('');
-    await load();
-    setSelectedRoleId(role.id);
-    setPermissions(role.permissions || {});
-    setRoleName(role.name);
-  };
-
-  const applyPreset = (preset: string) => {
-    const next: Record<string, boolean> = {};
-    (catalog?.presets[preset] || []).forEach(key => {
-      if (canGrant(key) && featureOn(key)) next[key] = true;
-    });
-    setPermissions(next);
-  };
-
-  const setGroupPermissions = (group: PermissionGroup, enabled: boolean) => {
-    setPermissions(prev => {
-      const next = { ...prev };
-      group.items.forEach(item => {
-        if (enabled && (!canGrant(item.key) || !featureOn(item.key))) return;
-        next[item.key] = enabled;
-      });
-      return next;
-    });
-  };
-
-  const deleteSelectedRole = async () => {
-    if (!selectedRole || selectedRole.name === 'superadmin') return;
-    if (!confirm(`Удалить роль ${selectedRole.name}? Пользователи с этой ролью останутся без роли.`)) return;
-    await api.deleteRole(selectedRole.id);
-    setSelectedRoleId(null);
-    setPermissions({});
-    setRoleName('');
-    await load();
-  };
-
-  const createGroup = async () => {
-    const name = newGroupName.trim();
-    if (!name) return;
-    setGroupError('');
-    try {
-      const group = await api.createGroup({ name, permissions: {} });
-      setNewGroupName('');
-      setGroups(prev => [...prev, { ...group, user_ids: [] }]);
-      setGroupEditorId(group.id);
-      setGroupName(group.name);
-      setGroupEditorPermissions(group.permissions || {});
-    } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Не удалось создать группу.');
-    }
-  };
-
-  const selectGroup = (groupId: number) => {
-    const group = groups.find(item => item.id === groupId);
-    setGroupEditorId(groupId);
-    setGroupName(group?.name || '');
-    setGroupEditorPermissions(group?.permissions || {});
-    setGroupError('');
-  };
-
-  const saveGroup = async () => {
-    if (!groupEditorId) return;
-    setGroupError('');
-    try {
-      await api.updateGroup(groupEditorId, { name: groupName.trim() || groups.find(g => g.id === groupEditorId)?.name, permissions: groupEditorPermissions });
-      await load();
-    } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Не удалось сохранить группу.');
-    }
-  };
-
-  const deleteGroup = async () => {
-    if (!groupEditorId) return;
-    const group = groups.find(item => item.id === groupEditorId);
-    if (!group || !confirm(`Удалить группу ${group.name}?`)) return;
-    await api.deleteGroup(group.id);
-    setGroupEditorId(null);
-    setGroupName('');
-    setGroupEditorPermissions({});
-    await load();
-  };
-
-  const toggleGroupMember = async (groupId: number, userId: number) => {
-    const group = groups.find(item => item.id === groupId);
-    if (!group) return;
-    const current = new Set(group.user_ids || []);
-    if (current.has(userId)) current.delete(userId);
-    else current.add(userId);
-    await api.setGroupMembers(groupId, [...current]);
-    await load();
-  };
-
-  if (loading) return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка пользователей...</div>;
-
-  const selectedRole = roles.find(role => role.id === selectedRoleId);
-  const enabledCount = Object.values(permissions).filter(Boolean).length;
-  const filteredGroups = (catalog?.groups || [])
-    .filter(group => group.scope === permissionTab)
-    .map(group => ({
-      ...group,
-      items: group.items.filter(item => {
-        // кран доступности (Ф6): выключенная функция не показывается в редакторе
-        if (currentUser?.features?.[item.key] === false) return false;
-        const query = permissionSearch.trim().toLocaleLowerCase('ru-RU');
-        return !query || `${item.label} ${item.hint} ${item.key}`.toLocaleLowerCase('ru-RU').includes(query);
-      }),
-    }))
-    .filter(group => group.items.length);
-
-  return (
-    <div className="mx-auto max-w-[1500px] space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-black">Пользователи и права</h2>
-          <p className="text-sm text-[var(--color-text-secondary)]">Здесь настраиваются глобальные роли приложения. Роли «владелец / администратор / участник» назначаются отдельно внутри конкретного окружения.</p>
-        </div>
-        <button onClick={() => setShowModal(true)} className="tf-button tf-button-primary"><Plus size={16} />Создать</button>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(520px,.9fr)_minmax(0,1.35fr)]">
-      <section className="tf-panel-flat overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-3">
-          <UsersRound size={19} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-black">Команда</h3>
-        </div>
-        <div>
-        <div className="grid grid-cols-[minmax(0,1fr)_170px_52px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-semibold text-[var(--color-text-secondary)]">
-          <span>Пользователь</span>
-          <span>Роль</span>
-          <span />
-        </div>
-        {users.map(user => {
-          const protectedUser = isProtectedSuperadmin(user, users);
-          const hasSuperadmin = isSuperadmin(user);
-          const userGroups = groups.filter(g => (g.user_ids || []).includes(user.id));
-          return (
-            <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_170px_96px] items-center gap-3 border-b border-[var(--color-border)]/60 px-4 py-3 last:border-b-0 hover:bg-[var(--color-surface-2)]">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-sm font-semibold">{user.username}</span>
-                  {currentUser?.id === user.id && <span className="tf-chip text-[var(--color-accent)]">это вы</span>}
-                  {hasSuperadmin && <span className="tf-chip text-[var(--color-warning)]"><ShieldCheck size={13} />{protectedUser ? 'защищён' : 'superadmin'}</span>}
-                </div>
-                {userGroups.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {userGroups.map(group => <span key={group.id} className="tf-chip text-[var(--color-muted)]">{group.name}</span>)}
-                  </div>
-                )}
-              </div>
-              {hasSuperadmin ? (
-                <div className="text-sm font-semibold text-[var(--color-text-secondary)]">superadmin</div>
-              ) : (
-                <SearchSelect
-                  value={user.roles?.[0]?.id ? String(user.roles[0].id) : ''}
-                  options={roles.filter(role => role.name !== 'superadmin' && canGrantRole(role)).map(role => ({ value: String(role.id), label: roleLabel(role) }))}
-                  onChange={value => handleSetRole(user.id, Number(value))}
-                  emptyLabel="Без роли"
-                  placeholder="Роль"
-                  searchPlaceholder="Найти роль..."
-                />
-              )}
-              <div className="flex justify-end gap-1.5">
-                {!hasSuperadmin && (currentUser?.id === user.id
-                  ? currentUser?.permissions?.users_password_own !== false
-                  : (isSuperadminActor || currentUser?.permissions?.users_password_reset === true)) && (
-                  <button onClick={() => { setPwdUserId(pwdUserId === user.id ? null : user.id); setPwdValue(''); setPwdError(''); }} className="tf-button h-9 w-9 px-0" title="Сменить пароль"><KeyRound size={15} /></button>
-                )}
-                {isSuperadminActor && currentUser?.id !== user.id && !protectedUser && (
-                  <button onClick={() => handleDelete(user)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Удалить"><Trash2 size={15} /></button>
-                )}
-              </div>
-              {pwdUserId === user.id && (
-                <div className="col-span-3 mt-1 flex gap-2">
-                  <input
-                    type="password"
-                    className="tf-input h-9 text-sm"
-                    value={pwdValue}
-                    onChange={event => setPwdValue(event.target.value)}
-                    placeholder="Новый пароль от 4 символов"
-                  />
-                  <button type="button" onClick={() => savePassword(user.id)} className="tf-button h-9 shrink-0 text-xs">OK</button>
-                </div>
-              )}
-              {pwdUserId === user.id && pwdError && (
-                <div className="col-span-3 text-xs font-semibold text-[var(--color-danger)]">{pwdError}</div>
-              )}
-            </div>
-          );
-        })}
-        </div>
-      </section>
-
-      <section className="tf-panel-flat p-4">
-        <div className="mb-4 grid gap-3 lg:grid-cols-[220px_minmax(180px,1fr)_auto_auto]">
-          <SearchSelect
-            value={selectedRoleId ? String(selectedRoleId) : ''}
-            options={roles.map(role => ({ value: String(role.id), label: roleLabel(role) }))}
-            onChange={value => selectRole(Number(value))}
-            placeholder="Выберите роль"
-            searchPlaceholder="Найти роль..."
-          />
-          <input className="tf-input" value={roleName} onChange={event => setRoleName(event.target.value)} placeholder="Название роли" disabled={!selectedRole || selectedRole.name === 'superadmin'} />
-          <button onClick={saveRolePermissions} disabled={!selectedRole || selectedRole.name === 'superadmin'} className="tf-button tf-button-primary"><Save size={15} />Сохранить</button>
-          <button onClick={deleteSelectedRole} disabled={!selectedRole || selectedRole.name === 'superadmin'} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
-        </div>
-        <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto]">
-          <div className="flex flex-wrap gap-2">
-            <input className="tf-input max-w-xs" value={newRoleName} onChange={event => setNewRoleName(event.target.value)} placeholder="Название новой роли" />
-            <button type="button" onClick={createRole} className="tf-button"><Plus size={15} />Добавить роль</button>
-          </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            <button type="button" className="tf-button" onClick={() => applyPreset('executor')}>Участник приложения</button>
-            <button type="button" className="tf-button" onClick={() => applyPreset('manager')}>Руководитель команды</button>
-            <button type="button" className="tf-button" onClick={() => applyPreset('admin')}>Администратор приложения</button>
-          </div>
-        </div>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button type="button" className={`tf-button ${permissionTab === 'app' ? 'tf-button-primary' : ''}`} onClick={() => setPermissionTab('app')}>Приложение</button>
-          <button type="button" className={`tf-button ${permissionTab === 'work' ? 'tf-button-primary' : ''}`} onClick={() => setPermissionTab('work')}>Работа</button>
-        </div>
-        <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-          <label className="relative">
-            <Search size={15} className="pointer-events-none absolute left-3 top-[12px] text-[var(--color-muted)]" />
-            <input className="tf-input tf-input-icon" value={permissionSearch} onChange={event => setPermissionSearch(event.target.value)} placeholder="Найти право" />
-          </label>
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
-            Включено прав: <span className="font-black text-[var(--color-text)]">{enabledCount}</span>
-          </div>
-        </div>
-        {selectedRole?.name === 'superadmin' ? (
-          <div className="text-sm text-[var(--color-text-secondary)]">Права superadmin не редактируются.</div>
-        ) : (
-          <div className="grid gap-4 2xl:grid-cols-2">
-            {filteredGroups.map(group => {
-              const Icon = groupIcons[group.id] || LayoutDashboard;
-              const groupEnabled = group.items.filter(item => permissions[item.key]).length;
-              return (
-              <div key={group.title} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-black"><Icon size={16} className="text-[var(--color-accent)]" />{group.title}</div>
-                    <div className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">{group.description}</div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button type="button" className="tf-button h-8 px-2 text-xs" onClick={() => setGroupPermissions(group, true)}>Все</button>
-                    <button type="button" className="tf-button h-8 px-2 text-xs" onClick={() => setGroupPermissions(group, false)}>Нет</button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {group.items.map(item => {
-                    const overCeiling = !canGrant(item.key);
-                    return (
-                    <label key={item.key} className={`flex items-start gap-3 rounded-lg border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-3 py-2 text-sm ${overCeiling ? 'opacity-60' : ''}`}>
-                      <input className="mt-1 accent-[var(--color-accent)]" type="checkbox" disabled={overCeiling} checked={Boolean(permissions[item.key])} onChange={event => setPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2 font-semibold">
-                          {item.label}
-                          {item.level === 'sensitive' && <span className="tf-chip text-[var(--color-warning)]"><Lock size={12} />важное</span>}
-                          {item.level === 'advanced' && <span className="tf-chip text-[var(--color-accent)]">расширенное</span>}
-                          {overCeiling && <span className="tf-chip text-[var(--color-danger)]">нет у вас прав</span>}
-                        </span>
-                        <span className="mt-1 block text-xs leading-5 text-[var(--color-text-secondary)]">{item.hint}</span>
-                      </span>
-                    </label>
-                    );
-                  })}
-                </div>
-                <div className="mt-3 text-xs text-[var(--color-muted)]">Включено в группе: {groupEnabled} из {group.items.length}</div>
-              </div>
-            );})}
-          </div>
-        )}
-      </section>
-      </div>
-
-      {isSuperadminActor && (
-        <section className="tf-panel-flat p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-black"><UsersRound size={16} className="text-[var(--color-accent)]" />Группы</div>
-              <div className="mt-1 text-xs text-[var(--color-text-secondary)]">Глобальные группы: additive-набор прав поверх роли. Назначает только superadmin.</div>
-            </div>
-          </div>
-          <div className="mb-4 flex flex-wrap gap-2">
-            <input className="tf-input max-w-xs" value={newGroupName} onChange={event => setNewGroupName(event.target.value)} placeholder="Название новой группы" />
-            <button type="button" onClick={createGroup} className="tf-button"><Plus size={15} />Добавить группу</button>
-            {groups.length === 0 && <span className="self-center text-xs text-[var(--color-muted)]">Групп пока нет</span>}
-          </div>
-          {groups.length > 0 && (
-            <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
-              <div className="space-y-1">
-                {groups.map(group => (
-                  <button
-                    key={group.id}
-                    type="button"
-                    onClick={() => selectGroup(group.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${groupEditorId === group.id ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]' : 'border-[var(--color-border)] hover:bg-[var(--color-surface-2)]'}`}
-                  >
-                    <span className="truncate font-semibold">{group.name}</span>
-                    <span className="tf-chip">{(group.user_ids || []).length}</span>
-                  </button>
-                ))}
-              </div>
-              {groupEditorId && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                  <div className="mb-3 grid gap-3 sm:grid-cols-[minmax(160px,1fr)_auto_auto]">
-                    <input className="tf-input" value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="Название группы" />
-                    <button onClick={saveGroup} className="tf-button tf-button-primary"><Save size={15} />Сохранить</button>
-                    <button onClick={deleteGroup} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
-                  </div>
-                  {groupError && <div className="mb-2 text-xs font-semibold text-[var(--color-danger)]">{groupError}</div>}
-                  <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">Права группы (только добавляются к правам роли):</div>
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {(catalog?.groups || []).flatMap(groupDef => groupDef.items)
-                      .filter(item => currentUser?.features?.[item.key] !== false)
-                      .map(item => (
-                      <label key={item.key} className={`flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs ${groupEditorPermissions[item.key] ? 'border-[var(--color-accent)]' : ''}`}>
-                        <input className="accent-[var(--color-accent)]" type="checkbox" checked={Boolean(groupEditorPermissions[item.key])} onChange={event => setGroupEditorPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))} />
-                        {item.label}
-                      </label>
-                    ))}
-                  </div>
-                  <div className="text-xs font-semibold text-[var(--color-text-secondary)]">Участники:</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {users.map(u => {
-                      const member = (groups.find(g => g.id === groupEditorId)?.user_ids || []).includes(u.id);
-                      return (
-                        <label key={u.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1 text-xs ${member ? 'border-[var(--color-accent)] bg-[var(--color-surface)]' : 'border-[var(--color-border)]'}`}>
-                          <input className="accent-[var(--color-accent)]" type="checkbox" checked={member} onChange={() => toggleGroupMember(groupEditorId, u.id)} />
-                          {u.username}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-
-      {showModal && <CreateUserModal onClose={() => setShowModal(false)} onCreate={handleCreate} />}
-    </div>
-  );
-}
-
-function isSuperadmin(user: User) {
-  return user.roles?.some(role => role.name === 'superadmin');
-}
-
-function isProtectedSuperadmin(user: User, users: User[]) {
-  if (!isSuperadmin(user)) return false;
-  return users.filter(isSuperadmin).length <= 1;
-}
-
-function CreateUserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (username: string, password: string, workspaceId?: string, wsRole?: string) => Promise<void> }) {
+  const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
+  const [tab, setTab] = useState<'users' | 'roles' | 'groups'>('users');
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [workspaces, setWorkspaces] = useState<{ id: number; name: string }[]>([]);
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [wsRole, setWsRole] = useState('member');
-  const [formError, setFormError] = useState('');
-
-  useEffect(() => {
-    api.getWorkspaces().then(setWorkspaces).catch(() => {});
-  }, []);
-
-  const requestClose = () => {
-    const dirty = username.trim() !== '' || password !== '';
-    if (!dirty || confirm('Есть несохранённые данные. Закрыть без сохранения?')) onClose();
+  const [role, setRole] = useState<Role | null>(null);
+  const [newRole, setNewRole] = useState('');
+  const [newGroup, setNewGroup] = useState('');
+  const [access, setAccess] = useState<Awaited<ReturnType<typeof api.getUserAccess>> | null>(null);
+  const [accessName, setAccessName] = useState('');
+  const load = async () => {
+    const [u, r, c] = await Promise.all([api.getUsers('platform'), api.getRoles(), api.getPermissionCatalog()]);
+    setUsers(u); setRoles(r); setCatalog(c);
+    if (root) setGroups(await api.getGroups());
   };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setSaving(true);
-    setFormError('');
-    try {
-      await onCreate(username, password, workspaceId || undefined, wsRole);
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Не удалось создать.');
-    } finally {
-      setSaving(false);
-    }
+  useEffect(() => { load().catch(e => setError(e.message)).finally(() => setLoading(false)); }, []);
+  const run = async (operation: () => Promise<unknown>) => {
+    setError(''); setBusy(true);
+    try { await operation(); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить'); }
+    finally { setBusy(false); }
   };
-
-  return (
-    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={requestClose}>
-      <form onSubmit={submit} className="tf-panel w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-black">Новый пользователь</h2>
-          <button type="button" onClick={requestClose} className="tf-button"><X size={16} /></button>
-        </div>
-        <div className="space-y-3">
-          <label><span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Логин</span><input className="tf-input" value={username} onChange={event => setUsername(event.target.value)} required minLength={2} /></label>
-          <label><span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Пароль</span><input className="tf-input" type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={4} /></label>
-          <label>
-            <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Сразу в окружение (необязательно)</span>
-            <SearchSelect
-              value={workspaceId}
-              options={workspaces.map(w => ({ value: String(w.id), label: w.name }))}
-              onChange={setWorkspaceId}
-              placeholder="Без окружения"
-              searchPlaceholder="Найти окружение..."
-            />
-          </label>
-          {workspaceId && (
-            <label>
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Роль в окружении</span>
-              <select className="tf-input" value={wsRole} onChange={event => setWsRole(event.target.value)}>
-                <option value="member">Участник</option>
-                <option value="admin">Админ</option>
-              </select>
-            </label>
-          )}
-          {formError && <div className="text-sm font-semibold text-[var(--color-danger)]">{formError}</div>}
-          <button disabled={saving} className="tf-button tf-button-primary w-full">{saving ? 'Создание...' : 'Создать пользователя'}</button>
-        </div>
-      </form>
-    </div>
-  );
+  const create = (event: FormEvent) => {
+    event.preventDefault(); void run(async () => { await api.createUser(username, password); setCreateOpen(false); setUsername(''); setPassword(''); });
+  };
+  const filtered = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
+  const canManage = Boolean(root || actor?.permissions?.users_manage);
+  return <div className="mx-auto max-w-6xl space-y-5">
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><div className="tf-eyebrow">Управление приложением</div><h2 className="tf-page-title">Пользователи и доступ</h2><p className="tf-page-subtitle">Аккаунты общие для приложения. Работа и роли команды задаются отдельно в каждом пространстве.</p></div>{canManage && <button className="tf-button tf-button-primary" onClick={() => setCreateOpen(true)}><Plus size={16} />Новый пользователь</button>}</header>
+    <div className="grid gap-3 sm:grid-cols-3">{[['Аккаунтов', users.length], ['Активных', users.filter(u => u.is_active !== false).length], ['Ожидают смены пароля', users.filter(u => u.must_change_password).length]].map(([label, value]) => <div key={label} className="tf-panel-flat p-4"><span className="text-xs text-[var(--color-muted)]">{label}</span><p className="mt-1 text-2xl font-bold">{value}</p></div>)}</div>
+    <div className="tf-panel-flat flex flex-wrap gap-2 p-2"><button className={`tf-button ${tab === 'users' ? 'tf-button-primary' : ''}`} onClick={() => setTab('users')}><UsersRound size={15} />Аккаунты</button>{root && <><button className={`tf-button ${tab === 'roles' ? 'tf-button-primary' : ''}`} onClick={() => setTab('roles')}><ShieldCheck size={15} />Роли приложения</button><button className={`tf-button ${tab === 'groups' ? 'tf-button-primary' : ''}`} onClick={() => setTab('groups')}>Группы</button></>}<Link to="/workspace" className="tf-button ml-auto">Команда пространства →</Link></div>
+    {error && <div role="alert" className="tf-alert-error">{error}</div>}
+    {loading ? <div className="p-10 text-center">Загрузка…</div> : tab === 'users' ? <section className="tf-panel-flat overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)] p-4"><Search size={16} /><input className="min-w-0 flex-1 bg-transparent outline-none" value={search} onChange={e => setSearch(e.target.value)} placeholder="Найти пользователя" /></div>
+      <div className="overflow-x-auto"><table className="tf-table w-full text-sm"><thead><tr><th>Пользователь</th><th>Статус</th><th>Роль приложения</th><th>Действия</th></tr></thead><tbody>{filtered.map(u => <tr key={u.id}><td><span className="font-semibold">{u.username}</span>{u.is_root && <span className="tf-chip ml-2">Суперадмин</span>}{u.id === actor?.id && <span className="ml-2 text-xs text-[var(--color-muted)]">Вы</span>}</td><td><span className={`tf-chip ${u.is_active === false ? 'text-[var(--color-danger)]' : ''}`}>{u.is_active === false ? 'Заблокирован' : u.must_change_password ? 'Временный пароль' : 'Активен'}</span></td><td>{root && !u.is_root ? <select className="tf-input h-9 min-w-40 text-xs" disabled={busy} value={u.roles?.[0]?.id || ''} onChange={e => void run(() => api.setUserRole(u.id, Number(e.target.value)))}><option value="" disabled>Без роли приложения</option>{roles.filter(r => r.name !== 'superadmin').map(r => <option key={r.id} value={r.id}>{roleMeta[r.name]?.label || r.name}</option>)}</select> : u.roles.map(r => roleMeta[r.name]?.label || r.name).join(', ') || 'Участник'}</td><td><div className="flex flex-wrap gap-1">{canManage && <button disabled={busy} className="tf-button h-8 px-2 text-xs" onClick={() => void run(async () => { setAccess(await api.getUserAccess(u.id)); setAccessName(u.username); })}>Доступ</button>}{canManage && !u.is_root && u.id !== actor?.id && <><button title="Задать временный пароль" disabled={busy} className="tf-button h-8 px-2" onClick={() => { const next = prompt(`Временный пароль для ${u.username} (от 8 символов):`); if (next && next.length >= 8) void run(() => api.setUserPassword(u.id, next)); }}><KeyRound size={14} /></button><button title={u.is_active === false ? 'Разблокировать' : 'Заблокировать'} disabled={busy} className="tf-button h-8 px-2" onClick={() => { if (confirm(`${u.is_active === false ? 'Разблокировать' : 'Заблокировать'} ${u.username}?`)) void run(() => api.setUserStatus(u.id, u.is_active === false)); }}>{u.is_active === false ? <Check size={14} /> : <Ban size={14} />}</button></>}</div></td></tr>)}</tbody></table></div>{!filtered.length && <p className="p-8 text-center text-[var(--color-muted)]">Пользователей не найдено</p>}
+    </section> : tab === 'roles' ? <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+      <section className="tf-panel-flat space-y-2 p-4"><form className="flex gap-2" onSubmit={e => { e.preventDefault(); void run(async () => { const r = await api.createRole({ name: newRole, permissions: {} }); setRole(r); setNewRole(''); }); }}><input required className="tf-input" placeholder="Название роли" value={newRole} onChange={e => setNewRole(e.target.value)} /><button disabled={busy} className="tf-button"><Plus size={14} /></button></form>{roles.filter(r => r.name !== 'superadmin').map(r => <button key={r.id} className={`tf-button w-full justify-start ${r.id === role?.id ? 'tf-button-primary' : ''}`} onClick={() => setRole({ ...r, permissions: { ...r.permissions } })}>{roleMeta[r.name]?.label || r.name}</button>)}</section>
+      <section className="tf-panel-flat p-5">{role ? <><h3 className="text-lg font-bold">{roleMeta[role.name]?.label || role.name}</h3><p className="tf-page-subtitle mb-4">Права приложения действуют глобально. Рабочие права назначаются в ролях пространства. Новые разрешения добавляются выключенными.</p><div className="space-y-4">{catalog?.groups.filter(g => g.scope === 'app').map(g => <div key={g.id}><h4 className="mb-2 text-xs font-bold uppercase text-[var(--color-muted)]">{g.title}</h4>{g.items.map(item => <label key={item.key} className="flex items-start gap-3 rounded-xl p-2 hover:bg-[var(--color-surface-2)]"><input className="mt-1" type="checkbox" checked={Boolean(role.permissions[item.key])} onChange={e => setRole({ ...role, permissions: { ...role.permissions, [item.key]: e.target.checked } })} /><span className="text-sm"><strong>{item.label}</strong><span className="block text-xs text-[var(--color-muted)]">{item.hint}</span></span></label>)}</div>)}</div><button disabled={busy} className="tf-button tf-button-primary mt-5" onClick={() => void run(() => api.updateRole(role.id, { permissions: role.permissions }))}>Сохранить роль</button></> : <p className="p-8 text-center text-[var(--color-muted)]">Выберите роль или создайте новую</p>}</section>
+    </div> : <section className="tf-panel-flat space-y-4 p-5"><h3 className="font-bold">Группы пользователей</h3><p className="tf-page-subtitle">Группы объединяют аккаунты. Глобальные права групп не открывают чужие пространства.</p><form className="flex gap-2" onSubmit={e => { e.preventDefault(); void run(async () => { await api.createGroup({ name: newGroup, permissions: {} }); setNewGroup(''); }); }}><input required className="tf-input" placeholder="Название группы" value={newGroup} onChange={e => setNewGroup(e.target.value)} /><button disabled={busy} className="tf-button">Добавить</button></form>{groups.map(g => <details key={g.id} className="rounded-xl border border-[var(--color-border)] p-4"><summary className="cursor-pointer font-semibold">{g.name} · {g.user_ids?.length || 0}</summary><div className="mt-3 grid gap-2 sm:grid-cols-3">{users.filter(u => !u.is_root).map(u => <label key={u.id} className="flex gap-2 text-sm"><input type="checkbox" disabled={busy} checked={g.user_ids?.includes(u.id) || false} onChange={e => void run(() => api.setGroupMembers(g.id, e.target.checked ? [...(g.user_ids || []), u.id] : (g.user_ids || []).filter(id => id !== u.id)))} />{u.username}</label>)}</div></details>)}</section>}
+    {createOpen && <div className="tf-modal-backdrop" onClick={() => setCreateOpen(false)}><form className="tf-modal-shell w-full max-w-md space-y-4 p-6" role="dialog" aria-modal="true" aria-label="Новый пользователь" onClick={e => e.stopPropagation()} onSubmit={create}><div className="flex justify-between"><h3 className="text-xl font-bold">Новый пользователь</h3><button type="button" aria-label="Закрыть" onClick={() => setCreateOpen(false)}><X /></button></div><p className="tf-page-subtitle">Создайте аккаунт, затем назначьте роль приложения и пригласите его в нужные пространства.</p><label className="block text-sm">Логин<input autoComplete="off" className="tf-input mt-1" minLength={2} maxLength={100} required value={username} onChange={e => setUsername(e.target.value)} /></label><label className="block text-sm">Временный пароль<input className="tf-input mt-1" autoComplete="new-password" type="password" minLength={8} required value={password} onChange={e => setPassword(e.target.value)} /></label><p className="text-xs text-[var(--color-muted)]">При первом входе пользователь обязательно сменит пароль. Пространства автоматически не назначаются.</p>{error && <p role="alert" className="tf-alert-error">{error}</p>}<button disabled={busy} className="tf-button tf-button-primary w-full">{busy ? 'Создание…' : 'Создать аккаунт'}</button></form></div>}
+    {access && <div className="tf-modal-backdrop" onClick={() => setAccess(null)}><section role="dialog" aria-modal="true" aria-label="Доступ пользователя" className="tf-modal-shell w-full max-w-xl space-y-4 p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between"><h3 className="text-xl font-bold">Доступ: {accessName}</h3><button aria-label="Закрыть" onClick={() => setAccess(null)}><X /></button></div><p className="tf-page-subtitle">Права берутся из роли приложения и роли в конкретном пространстве. Отключённые модули ограничивают рабочие действия.</p><h4 className="font-semibold">Приложение</h4><div className="flex flex-wrap gap-1">{Object.entries(access.app_permissions).filter(([, v]) => v).map(([key]) => <span className="tf-chip" key={key}>{key === 'all' ? 'Полный доступ суперадмина' : catalog?.groups.flatMap(g => g.items).find(i => i.key === key)?.label || key}</span>)}</div>{access.spaces.map(space => <div key={space.id} className="rounded-xl border border-[var(--color-border)] p-3"><strong>{space.name}</strong><span className="tf-chip ml-2">{space.rank}</span><div className="mt-2 flex flex-wrap gap-1">{Object.entries(space.permissions || {}).filter(([, v]) => v).map(([key]) => <span key={key} className={`tf-chip ${space.features[key] === false ? 'line-through opacity-50' : ''}`}>{catalog?.groups.flatMap(g => g.items).find(i => i.key === key)?.label || key}</span>)}</div></div>)}{!access.spaces.length && <p className="text-sm text-[var(--color-muted)]">В пространства не приглашён</p>}</section></div>}
+  </div>;
 }

@@ -739,7 +739,7 @@ function ClientModal({
                   <section className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_180px]">
                     <Field label="Название"><input className="tf-input" value={orgName} onChange={event => setOrgName(event.target.value)} required /></Field>
                     <Field label="Домен"><input className="tf-input" value={domain} onChange={event => setDomain(event.target.value)} placeholder="site.ru" /></Field>
-                    <Field label="Статус"><Select value={status} options={[{ value: 'active', label: 'Активный' }, { value: 'paused', label: 'Пауза' }, { value: 'closed', label: 'Закрыт' }]} onChange={setStatus} /></Field>
+                    <Field label="Статус"><Select value={status} options={[{ value: 'active', label: 'Активный' }, { value: 'paused', label: 'Пауза' }, { value: 'closed', label: 'Закрыт' }, { value: 'archived', label: 'Архив' }]} onChange={setStatus} /></Field>
                   </section>
                 </Panel>
                 <Panel title="Памятка для задач" icon={<AlertTriangle size={16} />}>
@@ -857,7 +857,7 @@ function ClientModal({
                     <input className="tf-input" list="contract-type-options" placeholder="Тип договора" value={contract.contract_type} onChange={event => updateItem(contracts, setContracts, index, { contract_type: event.target.value })} />
                     <input className="tf-input" type="date" value={contract.start_date} onChange={event => updateItem(contracts, setContracts, index, { start_date: event.target.value })} />
                     <input className="tf-input" type="date" value={contract.end_date} onChange={event => updateItem(contracts, setContracts, index, { end_date: event.target.value })} />
-                    <Select value={contract.status} options={[{ value: 'active', label: 'Активен' }, { value: 'expired', label: 'Истёк' }, { value: 'closed', label: 'Закрыт' }]} onChange={value => updateItem(contracts, setContracts, index, { status: value })} />
+                    <Select value={contract.status} options={[{ value: 'active', label: 'Активен' }, { value: 'expired', label: 'Истёк' }, { value: 'closed', label: 'Закрыт' }, { value: 'archived', label: 'Архив' }]} onChange={value => updateItem(contracts, setContracts, index, { status: value })} />
                     <RemoveButton onClick={() => setContracts(prev => prev.filter((_, i) => i !== index))} />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">

@@ -3,6 +3,7 @@ import pytest
 
 class TestTasks:
 
+    @pytest.mark.legacy_ui
     def test_tasks_page(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/tasks', cookies=admin_cookies)
         assert resp.status_code == 200
@@ -13,10 +14,11 @@ class TestTasks:
         assert isinstance(resp.json(), list)
 
     def test_api_tasks_all(self, sync_request, client, admin_cookies):
-        resp = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        resp = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
+    @pytest.mark.legacy_ui
     def test_task_create_form(self, sync_request, client, admin_cookies):
         resp = sync_request('POST', '/tasks/create',
                            data={'title': 'New Task', 'status': 'todo'},
@@ -36,7 +38,7 @@ class TestTasks:
         sync_request('POST', '/api/tasks',
                     json={'title': 'Edit Test', 'priority': 'medium'},
                     cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Edit Test'), None)
         assert task is not None
         tid = task['id']
@@ -49,7 +51,7 @@ class TestTasks:
         sync_request('POST', '/api/tasks',
                     json={'title': 'Move Test', 'priority': 'medium'},
                     cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Move Test'), None)
         assert task is not None
         resp = sync_request('POST', f'/api/tasks/{task["id"]}/move',
@@ -61,7 +63,7 @@ class TestTasks:
         sync_request('POST', '/api/tasks',
                     json={'title': 'Start Test', 'priority': 'medium'},
                     cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Start Test'), None)
         assert task is not None
         resp = sync_request('POST', f'/api/tasks/{task["id"]}/start',
@@ -74,7 +76,7 @@ class TestTasks:
                     json={'title': 'Batch 1'}, cookies=admin_cookies)
         sync_request('POST', '/api/tasks',
                     json={'title': 'Batch 2'}, cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         ids = [t['id'] for t in r.json() if t['title'] in ('Batch 1', 'Batch 2')]
         resp = sync_request('POST', '/api/tasks/bulk',
                            json={'ids': ids, 'fields': {'priority': 'high'}},
@@ -84,10 +86,12 @@ class TestTasks:
 
 
 
+    @pytest.mark.legacy_ui
     def test_kanban_page(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/kanban', cookies=admin_cookies)
         assert resp.status_code == 200
 
+    @pytest.mark.legacy_ui
     def test_calendar_page(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/calendar', cookies=admin_cookies)
         assert resp.status_code == 200
@@ -96,7 +100,7 @@ class TestTasks:
         sync_request('POST', '/api/tasks',
                     json={'title': 'Get API Task'},
                     cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Get API Task'), None)
         assert task is not None
         resp = sync_request('GET', f'/api/tasks/{task["id"]}',
@@ -112,7 +116,7 @@ class TestTasks:
         sync_request('POST', '/api/tasks',
                     json={'title': 'Delete Test'},
                     cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Delete Test'), None)
         assert task is not None
         tid = task['id']

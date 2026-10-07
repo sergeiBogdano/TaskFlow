@@ -45,7 +45,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
     try {
       await api.setFeature({ scope, target_id: scope === 'workspace' ? targetId : null, key, enabled });
       await load();
-      setMsg(enabled ? `Функция «${key}» включена` : `Функция «${key}» выключена — она скрыта и закрыта (403) для всех`);
+      setMsg(enabled ? `Функция «${key}» включена` : `Функция «${key}» выключена — она скрыта и закрыта для пользователей`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : 'Не удалось изменить функцию');
     } finally {
@@ -59,7 +59,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
     <section className="tf-panel-flat p-5">
       <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><Power size={16} />{title || 'Функции контура'}</h3>
       <p className="mb-3 text-sm text-[var(--color-text-secondary)]">
-        {description || 'Кран доступности: выключенная функция исчезает из меню и возвращает 403 на бэке — у всех, включая суперадмина. Выдачи прав в ролях при этом не трогаются.'}
+        {description || 'Кран доступности: выключенная функция исчезает из меню и возвращает 403 на бэке — у обычных пользователей. Суперадмин сохраняет доступ к управлению. Выдачи прав в ролях при этом не трогаются.'}
       </p>
       <div className="space-y-3">
         {groups.map(group => (
@@ -69,7 +69,7 @@ export function FeaturesPanel({ scope, targetId, title, description }: FeaturesP
             </div>
             <div className="space-y-1.5">
               {group.items.map(item => {
-                const off = effective[item.key] === false;
+                const off = overrides[item.key]?.enabled === false || (!overrides[item.key] && effective[item.key] === false);
                 const overridden = overrides[item.key];
                 return (
                   <label key={item.key} className={`flex items-start justify-between gap-3 rounded-lg border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-3 py-2 text-sm ${item.key === 'settings' ? 'opacity-70' : ''}`}>

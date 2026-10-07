@@ -4,6 +4,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { Bold, Code2, Eraser, Eye, Heading1, Heading2, Italic, List, ListOrdered, Loader2, Mic, Pilcrow, Quote, Redo2, Strikethrough, Undo2, Wand2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
+import { useAuth } from '../hooks/useAuth';
 
 type Props = {
   value: string;
@@ -13,6 +14,8 @@ type Props = {
 };
 
 export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28', placeholder }: Props) {
+  const { user } = useAuth();
+  const aiEnabled = user?.features?.ai !== false && Boolean(user?.is_root || user?.permissions?.ai);
   const [listening, setListening] = useState(false);
   const [polishing, setPolishing] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
@@ -111,7 +114,7 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
         <Separator />
         <ToolbarButton onClick={toggleSource} active={sourceMode} title={sourceMode ? 'Визуальный режим' : 'HTML-код'}>{sourceMode ? <Eye size={15} /> : <Code2 size={15} />}</ToolbarButton>
         <ToolbarButton onClick={startListening} active={listening} title={listening ? 'Слушаю...' : 'Надиктовать текст'}><Mic size={15} /></ToolbarButton>
-        <ToolbarButton onClick={polish} active={polishing} title="Улучшить текст ИИ">{polishing ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}</ToolbarButton>
+        {aiEnabled && <ToolbarButton onClick={polish} active={polishing} title="Улучшить текст ИИ">{polishing ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}</ToolbarButton>}
       </div>
       {sourceMode ? (
         <div>

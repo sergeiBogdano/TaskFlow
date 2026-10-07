@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api, type Workspace } from '../api/client';
+import { useAuth } from '../hooks/useAuth';
 import { Select } from './Select';
 import { ensureWorkspace, getActiveWorkspaceId, switchWorkspace } from '../lib/workspace';
 
 const PRESETS = [
   { value: 'seo', label: 'SEO-команда', hint: 'Задачи, клиенты, договоры' },
-  { value: 'study', label: 'Учёба', hint: 'Проекты, спринты, наставник AI' },
+  { value: 'study', label: 'Учёба', hint: 'Задачи, спринты и заметки' },
   { value: 'project', label: 'Проект', hint: 'Командная разработка, спринты, фичи' },
   { value: 'empty', label: 'Пустой', hint: 'Стандартные названия, с нуля' },
 ];
 
 export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
+  const { user } = useAuth();
+  const canCreate = Boolean(user?.is_root || user?.permissions?.workspaces_create);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeId, setActiveId] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -84,7 +87,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
               {saving ? 'Создаём...' : 'Создать'}
             </button>
           </div>
-          <p className="text-xs leading-5 text-[var(--color-text-secondary)]">Ты станешь владельцем: удалить тебя и сменить тебе пароль сможет только суперадмин.</p>
+          <p className="text-xs leading-5 text-[var(--color-text-secondary)]">Вы станете владельцем пространства и сможете приглашать участников. Учётными записями управляет администратор приложения.</p>
         </div>
       </form>
     </div>
@@ -98,15 +101,15 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
         </div>
         <div className="rounded-xl border border-dashed border-[var(--color-border)] p-4 text-center">
           <p className="mb-3 text-xs leading-5 text-[var(--color-text-secondary)]">
-            У вас пока нет окружения. Создайте своё — вы станете владельцем.
+            У вас пока нет пространства. Попросите администратора пригласить вас.
           </p>
-          <button
+          {canCreate && <button
             type="button"
             onClick={() => setModalOpen(true)}
             className="tf-button tf-button-primary h-9 px-4 text-sm"
           >
-            Создать окружение
-          </button>
+            Создать пространство
+          </button>}
         </div>
         {renderModal()}
       </div>
@@ -133,7 +136,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
             searchPlaceholder="Найти окружение..."
           />
         </div>
-        <button
+        {canCreate && <button
           type="button"
           onClick={() => setModalOpen(true)}
           className="tf-button h-[42px] w-10 shrink-0 px-0"
@@ -141,7 +144,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
           aria-label="Новое окружение"
         >
           <Plus size={16} />
-        </button>
+        </button>}
       </div>
       {renderModal()}
     </div>

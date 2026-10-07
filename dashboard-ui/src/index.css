@@ -504,3 +504,16 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
     animation: none;
   }
 }
+
+/* Shared management and CRM surfaces; both existing themes use these tokens. */
+.tf-eyebrow { font-size: .65rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; color: var(--color-muted); margin-bottom: .4rem; }
+.tf-alert-error { border: 1px solid var(--color-danger); border-radius: .8rem; padding: .8rem 1rem; color: var(--color-danger); font-size: .875rem; }
+.tf-modal-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.5); backdrop-filter: blur(4px); display: flex; align-items: flex-start; justify-content: center; padding: 5vh 1rem; overflow-y: auto; }
+.tf-crm-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: .9rem; padding: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,.025); transition: box-shadow .15s, border-color .15s; }
+.tf-crm-card:hover { border-color: var(--color-border-strong); box-shadow: 0 5px 16px rgba(0,0,0,.07); }
+.tf-table th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--color-muted); background: var(--color-surface-2); }
+.tf-table th, .tf-table td { padding: 1rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+.tf-table tbody tr:last-child td { border-bottom: 0; }
+.tf-table tbody tr:hover { background: var(--color-surface-2); }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

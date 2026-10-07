@@ -16,7 +16,7 @@ class TestWsRoles:
     def _make_ws(sync_request, cookies):
         name = f'ws_roles_{uuid.uuid4().hex[:8]}'
         resp = sync_request('POST', '/api/workspaces',
-                            json={'name': name}, cookies=cookies)
+                            json={'name': name, 'preset': 'seo'}, cookies=cookies)
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -145,6 +145,8 @@ class TestWsRoles:
         assert resp.status_code == 403, resp.text
         assert 'users_password_reset' in resp.text
 
+        # Явно возвращаем доступ после глобального выключения в предыдущих сценариях.
+        sync_request('PUT', '/api/features', json={'scope': 'user', 'target_id': exec_id, 'key': 'reports', 'enabled': True}, cookies=admin_cookies)
         # reports в effective-правах админа окружения есть → делегирование разрешено
         resp = self._create_role(sync_request, executor_cookies, ws['id'],
                                  'Делегат', {'reports': True})
@@ -200,8 +202,10 @@ class TestWsRoles:
         admin = set(workspace_default_permissions('admin'))
         member = set(workspace_default_permissions('member'))
 
-        assert owner == all_work - {'users_password_reset'}
-        assert admin == all_work - {'users_password_reset'}
+        assert owner <= all_work - {'users_password_reset'}
+        assert not owner & {'crm', 'crm_edit', 'crm_delete', 'crm_configure'}
+        assert admin == owner
+        assert not (admin & {'crm', 'crm_edit', 'crm_delete', 'crm_configure'})
         assert member < all_work
         assert 'users_password_reset' not in member
         assert member < all_work

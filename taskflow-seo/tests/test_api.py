@@ -3,10 +3,12 @@ import pytest
 
 class TestDashboard:
 
+    @pytest.mark.legacy_ui
     def test_dashboard_admin(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/', cookies=admin_cookies)
         assert resp.status_code == 200
 
+    @pytest.mark.legacy_ui
     def test_dashboard_unauth(self, sync_request):
         resp = sync_request('GET', '/', cookies={})
         assert resp.status_code in (302, 307)
@@ -99,10 +101,12 @@ class TestTemplates:
 
 class TestSettings:
 
+    @pytest.mark.legacy_ui
     def test_settings_page(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/settings', cookies=admin_cookies)
         assert resp.status_code == 200
 
+    @pytest.mark.legacy_ui
     def test_settings_save(self, sync_request, admin_cookies):
         resp = sync_request('POST', '/settings',
                            data={'timezone': 'Europe/Moscow', 'theme': 'dark'},
@@ -113,6 +117,7 @@ class TestSettings:
 
 class TestReports:
 
+    @pytest.mark.legacy_ui
     def test_reports_page(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/reports', cookies=admin_cookies)
         assert resp.status_code == 200
@@ -134,7 +139,7 @@ class TestFiles:
         sync_request('POST', '/api/tasks',
                    json={'title': 'File Upload Task'},
                    cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'File Upload Task'), None)
         assert task is not None
         resp = sync_request('POST', f'/api/tasks/{task["id"]}/upload',
@@ -148,13 +153,13 @@ class TestFiles:
         assert resp2.content == b'hello pytest'
 
     def test_file_list(self, sync_request, admin_cookies):
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         tasks = r.json()
         if not tasks:
             sync_request('POST', '/api/tasks',
                         json={'title': 'List Files Task'},
                         cookies=admin_cookies)
-            r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+            r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
             tasks = r.json()
         tid = tasks[0]['id']
         resp = sync_request('GET', f'/api/tasks/{tid}/files',
@@ -208,10 +213,10 @@ class TestAdditionalAPI:
         sync_request('POST', '/api/tasks',
                    json={'title': 'Done Test'},
                    cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Done Test'), None)
         assert task is not None
-        resp = sync_request('POST', f'/tasks/{task["id"]}/done',
+        resp = sync_request('POST', f'/api/tasks/{task["id"]}/done',
                           cookies=admin_cookies)
         assert resp.status_code in (200, 302)
 
@@ -219,7 +224,7 @@ class TestAdditionalAPI:
         sync_request('POST', '/api/tasks',
                    json={'title': 'Recurring Task'},
                    cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Recurring Task'), None)
         assert task is not None
         resp = sync_request('POST', f'/api/tasks/{task["id"]}/generate-next',
@@ -354,7 +359,7 @@ class TestAdditionalAPI:
         sync_request('POST', '/api/tasks',
                    json={'title': 'Batch API Task'},
                    cookies=admin_cookies)
-        r = sync_request('GET', '/api/tasks/all', cookies=admin_cookies)
+        r = sync_request('GET', '/api/tasks/all?scope=all', cookies=admin_cookies)
         task = next((t for t in r.json() if t['title'] == 'Batch API Task'), None)
         assert task is not None
         resp = sync_request('POST', '/api/tasks/batch',

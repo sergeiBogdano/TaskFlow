@@ -3,10 +3,12 @@ import pytest
 
 class TestClients:
 
+    @pytest.mark.legacy_ui
     def test_clients_page(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/clients', cookies=admin_cookies)
         assert resp.status_code == 200
 
+    @pytest.mark.legacy_ui
     def test_client_detail(self, sync_request, client, admin_cookies):
         resp = sync_request('POST', '/clients/create',
                            data={'org_name': 'Detail Test Org',
@@ -21,6 +23,7 @@ class TestClients:
         resp = sync_request('GET', f'/clients/{c["id"]}', cookies=admin_cookies)
         assert resp.status_code == 200
 
+    @pytest.mark.legacy_ui
     def test_client_create_form(self, sync_request, client, admin_cookies):
         resp = sync_request('POST', '/clients/create',
                            data={'org_name': 'New Org', 'contract_end': '2027-06-30',
@@ -38,6 +41,7 @@ class TestClients:
         assert resp.status_code == 201
         assert 'id' in resp.json()
 
+    @pytest.mark.legacy_ui
     def test_client_update(self, sync_request, client, admin_cookies):
         sync_request('POST', '/clients/create',
                     data={'org_name': 'Update Test Org',
@@ -51,6 +55,7 @@ class TestClients:
                            cookies=admin_cookies, follow_redirects=False)
         assert resp.status_code == 302
 
+    @pytest.mark.legacy_ui
     def test_client_status_change(self, sync_request, client, admin_cookies):
         sync_request('POST', '/clients/create',
                     data={'org_name': 'Status Test Org',
@@ -63,6 +68,7 @@ class TestClients:
                            data={'status': 'paused'}, cookies=admin_cookies, follow_redirects=False)
         assert resp.status_code == 302
 
+    @pytest.mark.legacy_ui
     def test_client_print(self, sync_request, client, admin_cookies):
         sync_request('POST', '/clients/create',
                     data={'org_name': 'Print Test Org',

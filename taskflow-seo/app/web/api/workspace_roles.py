@@ -1,7 +1,7 @@
 """Кастомные роли окружения (Ф7): CRUD + назначение участнику.
 
 Только scope=work-ключи, кран доступности (Ф6) и потолок (Ф3/Ф4).
-Базовые rank owner/admin/member сохраняются — кастомная роль аддитивна.
+Базовые rank owner/admin/member управляют членством, кастомная роль задаёт точный набор рабочих прав.
 """
 
 from __future__ import annotations
@@ -63,28 +63,27 @@ def _validate_payload(data: dict) -> tuple[str, dict]:
             status_code=400,
             detail="Только права scope=work: " + ", ".join(unknown),
         )
-    permissions = {key: bool(value) for key, value in raw.items() if value}
+    if any(not isinstance(value, bool) for value in raw.values()):
+        raise HTTPException(status_code=400, detail='Права должны быть логическими значениями')
+    permissions = {key: value for key, value in raw.items() if value}
     return name, permissions
 
 
 async def _assert_grantable(user, workspace_id: int, permissions: dict) -> None:
     """Потолок (право выдающего) + кран доступности в этом окружении.
 
-    Потолок считается по объединению app-прав и effective-прав в ЭТОМ
-    окружении: админ окружения вправе делегировать то, чем реально
+    Потолок считается по рабочим правам в ЭТОМ окружении: админ окружения вправе делегировать то, чем реально
     располагает в нём (например, выдать выбранным участникам право
-    из своей кастомной роли). Чего нет ни там, ни там — выдать нельзя.
+    из своей кастомной роли). Отсутствующие рабочие права выдать нельзя.
     """
     from app.core.permissions import get_workspace_permissions
-    app_permissions = await get_user_permissions(user.id)
     ws_permissions = await get_workspace_permissions(user.id, workspace_id) or {}
-    ceiling = dict(app_permissions)
-    ceiling.update({key: True for key, value in ws_permissions.items() if value})
+    ceiling = {'all': True} if is_root_user(user) else ws_permissions
     # assert_within_ceiling сам пропускает суперадмина ('all'), кран ниже — для всех
     assert_within_ceiling(ceiling, permissions)
     if not permissions:
         return
-    state = await get_effective_features(user, workspace_id, keys=list(permissions))
+    state = await grantable_features(user, workspace_id, keys=list(permissions))
     blocked = sorted(key for key in permissions if not state.get(key, True))
     if blocked:
         raise HTTPException(
@@ -102,7 +101,7 @@ async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_role("o
             .where(WorkspaceRole.workspace_id == ctx["workspace"].id)
             .order_by(WorkspaceRole.id)
         )).scalars().all()
-        features = await get_effective_features(ctx["user"], ctx["workspace"].id)
+        features = await grantable_features(ctx["user"], ctx["workspace"].id)
     return JSONResponse({
         "roles": [_role_to_dict(row) for row in rows],
         "features": features,
@@ -233,3 +232,19 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
         "custom_role": role_name,
         "created_at": member.created_at.isoformat() if member.created_at else None,
     })
+
+
+async def grantable_features(user, workspace_id, keys=None):
+    from app.core.permissions import get_global_feature_state
+    from app.core.models import FeatureOverride
+    state = await get_effective_features(user, workspace_id, keys)
+    global_state = await get_global_feature_state(keys)
+    async with async_session() as session:
+        overrides = (await session.execute(select(FeatureOverride).where(FeatureOverride.scope == 'workspace', FeatureOverride.target_id == workspace_id))).scalars().all()
+    for key in state:
+        if not global_state.get(key, False):
+            state[key] = False
+    for row in overrides:
+        if not row.enabled and row.key in state:
+            state[row.key] = False
+    return state

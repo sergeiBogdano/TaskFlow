@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { roleMeta } from '../lib/taskflow';
 import { applyTheme, getTheme, type ThemeName } from '../lib/theme';
 import { disconnectNotesDirectory, listLocalFolders, listLocalNotes, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
+import { PasswordChange } from '../components/PasswordChange';
 import { FeaturesPanel } from '../components/FeaturesPanel';
 
 export function Settings() {
@@ -86,6 +87,7 @@ export function Settings() {
         <p className="text-sm text-[var(--color-text-secondary)]">Профиль, роль и базовая информация по рабочему пространству.</p>
       </div>
 
+      <PasswordChange />
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><ShieldCheck size={16} />Профиль</h3>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

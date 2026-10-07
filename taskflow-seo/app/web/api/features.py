@@ -27,7 +27,7 @@ def _features_payload() -> list[dict]:
             'scope': group['scope'],
             'title': group['title'],
             'description': group['description'],
-            'items': [{'key': item['key'], 'label': item['label'], 'hint': item['hint']}
+            'items': [{'key': item['key'], 'label': item['label'], 'hint': item.get('hint', '')}
                       for item in group['items']],
         }
         for group in PERMISSION_GROUPS
@@ -64,6 +64,8 @@ async def set_feature(request: Request, user=Depends(require_root())):
     key = (data.get('key') or '').strip()
     # enabled=null → убрать запись крана (вернуться к более верхнему уровню)
     drop = 'enabled' in data and data.get('enabled') is None
+    if not drop and not isinstance(data.get('enabled'), bool):
+        raise HTTPException(status_code=400, detail='enabled должен быть логическим значением или null')
     enabled = bool(data.get('enabled'))
     target_id = data.get('target_id')
     if scope not in SCOPES:
@@ -78,10 +80,11 @@ async def set_feature(request: Request, user=Depends(require_root())):
         if target_id is None:
             raise HTTPException(status_code=400, detail='target_id обязателен для этой области')
         target_id = int(target_id)
-        if scope == 'group':
-            from app.core.models import Group
+        if scope in ('group', 'workspace', 'user'):
+            from app.core.models import Group, Workspace, User
             async with async_session() as session:
-                if not await session.get(Group, target_id):
+                model = {'group': Group, 'workspace': Workspace, 'user': User}[scope]
+                if not await session.get(model, target_id):
                     raise HTTPException(status_code=404, detail='Группа не найдена')
     async with async_session() as session:
         stmt = select(FeatureOverride).where(
@@ -99,5 +102,16 @@ async def set_feature(request: Request, user=Depends(require_root())):
             row.enabled = enabled
         elif not drop:
             session.add(FeatureOverride(scope=scope, target_id=target_id, key=key, enabled=enabled))
+        if scope == 'global' and not enabled and not drop:
+            # Restore makes the feature available for explicit opt-in, never revives old user access.
+            from app.core.models import User
+            for uid in (await session.execute(select(User.id).where(User.is_root.is_(False)))).scalars():
+                existing = (await session.execute(select(FeatureOverride).where(FeatureOverride.scope == 'user', FeatureOverride.target_id == uid, FeatureOverride.key == key))).scalars().first()
+                if existing:
+                    existing.enabled = False
+                else:
+                    session.add(FeatureOverride(scope='user', target_id=uid, key=key, enabled=False))
         await session.commit()
+    from app.core.cache import dashboard_cache
+    dashboard_cache.clear()
     return JSONResponse({'ok': True})

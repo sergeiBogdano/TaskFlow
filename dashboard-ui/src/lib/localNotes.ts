@@ -41,7 +41,7 @@ function nowIso(): string {
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('taskflow-local-notes', 1);
+    const req = indexedDB.open(`taskflow-local-notes-account-${localStorage.getItem('taskflow:account') || 'guest'}`, 1);
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
     };

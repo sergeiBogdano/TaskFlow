@@ -7,6 +7,8 @@ import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
 import { refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
 import { FeaturesPanel } from '../components/FeaturesPanel';
+import { SpaceModulesPanel } from '../components/SpaceModulesPanel';
+import { FieldOrderEditor } from '../components/FieldOrderEditor';
 import { WsRolesPanel } from '../components/WsRolesPanel';
 
 export function WorkspaceSettings() {
@@ -22,11 +24,13 @@ export function WorkspaceSettings() {
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState('');
+  const [visibility, setVisibility] = useState('hidden');
   const [theme, setTheme] = useState('');
   const [clientsLabel, setClientsLabel] = useState('');
   const [aiInstructions, setAiInstructions] = useState('');
 
   const [addUserId, setAddUserId] = useState('');
+  const [inviteUsername, setInviteUsername] = useState('');
   const [addRole, setAddRole] = useState('member');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -55,7 +59,7 @@ export function WorkspaceSettings() {
       const [full, memberList, userList, facts, roleData] = await Promise.all([
         api.getWorkspace(active.id),
         api.getWsMembers(active.id),
-        referenceCache.users().catch(() => []),
+        (user?.is_root || user?.permissions?.users_manage ? api.getUsers('platform') : referenceCache.users()).catch(() => []),
         api.getWsKnowledge(active.id).catch(() => []),
         api.getWsRoles(active.id).catch(() => null),
       ]);
@@ -66,6 +70,7 @@ export function WorkspaceSettings() {
       setWsRoles(roleData?.roles || []);
       setName(full.name);
       setTheme(full.theme || '');
+      setVisibility(full.visibility || 'hidden');
       setClientsLabel(full.dictionary?.clients || '');
       setAiInstructions(full.ai_instructions || '');
     } catch (err) {
@@ -117,6 +122,7 @@ export function WorkspaceSettings() {
     try {
       const updated = await api.updateWorkspace(detail.id, {
         name: name.trim(),
+        visibility,
         theme: theme || null,
         dictionary: clientsLabel.trim() ? { clients: clientsLabel.trim() } : {},
         ai_instructions: aiInstructions.trim() || null,
@@ -131,10 +137,12 @@ export function WorkspaceSettings() {
   };
 
   const addMember = async () => {
-    if (!addUserId) return;
+    if (!addUserId && !inviteUsername.trim()) return;
     setError('');
     try {
-      await api.addWsMember(detail.id, Number(addUserId), addRole);
+      if (inviteUsername.trim()) await api.inviteWsMember(detail.id, inviteUsername.trim(), addRole);
+      else await api.addWsMember(detail.id, Number(addUserId), addRole);
+      setInviteUsername('');
       setAddUserId('');
       await load();
     } catch (err) {
@@ -143,8 +151,8 @@ export function WorkspaceSettings() {
   };
 
   const createAndAdd = async () => {
-    if (newUsername.trim().length < 2 || newPassword.length < 4) {
-      setError('Логин от 2 символов, пароль от 4.');
+    if (newUsername.trim().length < 2 || newPassword.length < 8) {
+      setError('Логин от 2 символов, пароль от 8.');
       return;
     }
     setError('');
@@ -274,12 +282,13 @@ export function WorkspaceSettings() {
       <section className="tf-panel-flat border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-4">
         <h3 className="mb-2 text-sm font-bold">Как устроен доступ</h3>
         <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
-          Роль приложения отвечает за глобальные возможности аккаунта. Роль в этом окружении отвечает только за команду и данные выбранного окружения. Дополнительный профиль окружения лишь добавляет рабочие права и не меняет иерархию. Суперадмин (root) имеет полный доступ платформы и не может быть изменён или удалён другими пользователями.
+          Роль приложения отвечает за глобальные возможности аккаунта. Роль в этом окружении отвечает только за команду и данные выбранного окружения. Роль пространства задаёт точный набор рабочих прав и не меняет административный ранг. Суперадмин (root) имеет полный доступ платформы и не может быть изменён или удалён другими пользователями.
         </p>
       </section>
 
       {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
 
+      <SpaceModulesPanel id={detail.id} onSaved={() => window.location.reload()} />
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Settings2 size={16} />Основное</h3>
         <form onSubmit={saveInfo} className="grid gap-3">
@@ -287,6 +296,7 @@ export function WorkspaceSettings() {
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
             <input className="tf-input" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={!canEditSettings} />
           </label>
+          <label className="block text-sm">Видимость пространства<select className="tf-input mt-1" value={visibility} onChange={e => setVisibility(e.target.value)} disabled={!canEditSettings}><option value="hidden">Скрытое — только по приглашению</option><option value="closed">Закрытое — видно в каталоге, доступ по приглашению</option><option value="open">Открытое — можно вступить самостоятельно</option></select></label>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Тема</span>
@@ -322,15 +332,15 @@ export function WorkspaceSettings() {
         </p>
         {canManage && (
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px_auto]">
-            <SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />
+            <input className="tf-input" aria-label="Логин приглашённого" placeholder="Логин пользователя" value={inviteUsername} onChange={e => setInviteUsername(e.target.value)} /><SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />
             <select className="tf-input" value={addRole} onChange={event => setAddRole(event.target.value)}>
               <option value="member">Участник окружения</option>
               {(isOwner || isSuperadmin) && <option value="admin">Администратор окружения</option>}
             </select>
-            <button type="button" onClick={addMember} disabled={!addUserId} className="tf-button tf-button-primary"><Plus size={15} />Добавить</button>
+            <button type="button" onClick={addMember} disabled={!addUserId && !inviteUsername.trim()} className="tf-button tf-button-primary"><Plus size={15} />Добавить</button>
           </div>
         )}
-        {canManage && (
+        {(user?.is_root || user?.permissions?.users_manage) && (
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <input className="tf-input" value={newUsername} onChange={event => setNewUsername(event.target.value)} placeholder="Новый логин" />
             <input className="tf-input" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Пароль от 4 символов" />
@@ -493,6 +503,7 @@ const KNOWN_ROUTES = [
   { to: '/calendar', label: 'Календарь' },
   { to: '/notifications', label: 'Уведомления' },
   { to: '/trash', label: 'Корзина' },
+  { to: '/crm', label: 'CRM' },
   { to: '/clients', label: 'Клиенты' },
   { to: '/modules', label: 'Модули' },
   { to: '/reports', label: 'Отчёты' },
@@ -542,13 +553,13 @@ function UiEditor({ detail, canManage, onSaved }: {
   const setTaskField = (key: string, patch: Record<string, any>) => {
     setCfg(prev => ({
       ...prev,
-      tasks: { fields: { ...((prev.tasks || {}).fields || {}), [key]: { ...((prev.tasks || {}).fields || {})[key], ...patch } } },
+      tasks: { ...prev.tasks, fields: { ...((prev.tasks || {}).fields || {}), [key]: { ...((prev.tasks || {}).fields || {})[key], ...patch } } },
     }));
   };
   const setSprintField = (key: string, patch: Record<string, any>) => {
     setCfg(prev => ({
       ...prev,
-      sprints: { fields: { ...((prev.sprints || {}).fields || {}), [key]: { ...((prev.sprints || {}).fields || {})[key], ...patch } } },
+      sprints: { ...prev.sprints, fields: { ...((prev.sprints || {}).fields || {}), [key]: { ...((prev.sprints || {}).fields || {})[key], ...patch } } },
     }));
   };
 
@@ -664,6 +675,7 @@ function UiEditor({ detail, canManage, onSaved }: {
 
       {tab === 'tasks' && (
         <div className="space-y-2">
+          <FieldOrderEditor labels={TASK_FIELD_DEFAULTS} order={cfg.tasks?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, tasks: { ...c.tasks, order } }))} />
           {Object.entries(TASK_FIELD_DEFAULTS).map(([key, defLabel]) => {
             const item = cfg.tasks?.fields?.[key] || {};
             const hideable = key !== 'title';
@@ -701,6 +713,7 @@ function UiEditor({ detail, canManage, onSaved }: {
 
       {tab === 'sprints' && (
         <div className="space-y-2">
+          <FieldOrderEditor labels={SPRINT_FIELD_DEFAULTS} order={cfg.sprints?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, sprints: { ...c.sprints, order } }))} />
           {Object.entries(SPRINT_FIELD_DEFAULTS).map(([key, defLabel]) => {
             const item = cfg.sprints?.fields?.[key] || {};
             const hideable = key !== 'name';

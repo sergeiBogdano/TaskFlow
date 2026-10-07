@@ -1,9 +1,13 @@
 import asyncio
 import os
+import tempfile
+import atexit
 
 os.environ['TESTING'] = '1'
-os.environ['TASKFLOW_LEGACY_UI'] = '1'
-os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///./data/test.db'
+os.environ['TASKFLOW_LEGACY_UI'] = os.environ.get('TEST_LEGACY_UI', '0')
+_test_dir = tempfile.TemporaryDirectory(prefix='taskflow-tests-')
+atexit.register(_test_dir.cleanup)
+os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///' + _test_dir.name.replace('\\', '/') + '/test.db'
 os.environ['WEB_APP_SECRET'] = 'test-secret-for-testing'
 os.environ['CRYPTO_SECRET'] = 'test-crypto-secret'
 os.environ['LOG_LEVEL'] = 'WARNING'
@@ -32,7 +36,7 @@ async def client(event_loop):
     await close_db()
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture
 async def admin_cookies(client):
     resp = await client.post(
         '/api/auth/login',
@@ -42,7 +46,7 @@ async def admin_cookies(client):
     return {'taskflow_user': resp.cookies.get('taskflow_user')}
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture
 async def executor_cookies(client):
     from app.core.auth import hash_password
     from app.core.database import async_session
@@ -100,9 +104,31 @@ def sync_request(client, event_loop):
         # Всегда задаём Cookie явно: session-scoped client хранит куки
         # от прошлых логинов в jar, и без явного заголовка анонимные
         # запросы ушли бы авторизованными.
+        # Most fixtures use permanent passwords; onboarding has separate explicit scenarios.
+        if method.upper() == 'POST' and url == '/api/users' and 'json' in kw:
+            kw['json'].setdefault('must_change_password', False)
         c = kw.pop('cookies', None)
         kw.setdefault('headers', {})['Cookie'] = '; '.join(
             f'{k}={v}' for k, v in c.items()
         ) if c else ''
         return event_loop.run_until_complete(client.request(method, url, **kw))
     return make_request
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'legacy_ui: retired server-rendered UI compatibility scenarios')
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get('TEST_LEGACY_UI') != '1':
+        for item in items:
+            if item.get_closest_marker('legacy_ui'):
+                item.add_marker(pytest.mark.skip(reason='Jinja compatibility UI; run with TEST_LEGACY_UI=1'))
+
+
+@pytest.fixture(autouse=True)
+def no_external_favicon_requests(monkeypatch):
+    from app.web.api import clients
+    async def local_favicon(domain):
+        return None
+    monkeypatch.setattr(clients, '_discover_favicon', local_favicon)

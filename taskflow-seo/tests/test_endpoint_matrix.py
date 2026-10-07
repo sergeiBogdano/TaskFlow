@@ -37,6 +37,11 @@ STRONG_GUARDS = {'permission', 'role', 'ws_role'}
 ALLOWLIST: dict[tuple[str, str], str] = {
     ('GET', '/api/auth/me'): 'карта прав текущего пользователя для фронта (401 без сессии)',
     ('GET', '/api/permissions/catalog'): 'каталог прав читает любой авторизованный (только чтение)',
+    ('GET', '/api/workspaces/directory/list'): 'visible directory without private data',
+    ('GET', '/api/workspaces/{workspace_id}/modules'): 'resolve_workspace checks membership',
+    ('POST', '/api/workspaces/{workspace_id}/join'): 'open space only; hidden space is 404',
+    ('DELETE', '/api/workspaces/{workspace_id}'): 'resolve_workspace and owner check',
+    ('POST', '/api/workspaces/{workspace_id}/restore'): 'resolve_workspace and owner check',
     ('GET', '/api/workspaces'): 'список своих окружений бэкенд фильтрует по членству',
     ('GET', '/api/workspaces/presets/list'): 'справочник пресетов создания окружения',
     ('POST', '/api/workspaces'): 'создание своего окружения, лимит 3 проверяется внутри',
@@ -45,7 +50,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ('POST', '/api/users'): 'права внутри: superadmin либо owner/admin окружения',
     ('PUT', '/api/users/{user_id}/password'): 'смена пароля: свой — с users_password_own, чужой — сброс rank-вниз/суперадмин',
     ('POST', '/api/users/change-password'): 'смена своего пароля, текущий пароль проверяется внутри',
-    ('GET', '/api/sse'): 'стрим уведомлений: cookie-проверка внутри (плюс 401 от middleware)',
 }
 
 # сознательно публичные (без сессии): должны входить в PUBLIC_API_PREFIXES или быть /health

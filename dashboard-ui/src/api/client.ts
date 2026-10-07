@@ -1,4 +1,5 @@
 ﻿const API_BASE = '';
+export { request };
 
 const WORKSPACE_KEY = 'taskflow:workspace';
 
@@ -17,7 +18,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // Бэкенд неизвестные query-параметры игнорирует, так что безопасно везде.
   const ws = activeWorkspaceId();
   const isSessionWrite = url.startsWith('/api/auth/login') || url.startsWith('/api/auth/logout');
-  if (ws && url.startsWith('/api/') && !isSessionWrite) {
+  if (ws && url.startsWith('/api/') && !isSessionWrite && !new URL(url, 'http://local').searchParams.has('workspace_id')) {
     finalUrl += (url.includes('?') ? '&' : '?') + `workspace_id=${encodeURIComponent(ws)}`;
   }
   const res = await fetch(`${API_BASE}${finalUrl}`, {
@@ -27,7 +28,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const error = new Error(err.error || err.detail || `API error: ${res.status}`) as Error & { status?: number };
+    const detail = err.error || (Array.isArray(err.detail) ? err.detail.map((item: { msg?: string }) => item.msg || 'Некорректное значение').join('; ') : err.detail);
+    const error = new Error(detail || `API error: ${res.status}`) as Error & { status?: number };
     error.status = res.status;
     throw error;
   }
@@ -35,7 +37,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export type User = {
+  account_key?: string;
   is_root?: boolean;
+  is_active?: boolean;
+  must_change_password?: boolean;
   id: number;
   username: string;
   created_at: string;
@@ -53,6 +58,7 @@ export type Group = {
 };
 
 export type Task = {
+  contract_id?: number | null;
   id: number;
   title: string;
   status: string;
@@ -356,6 +362,8 @@ export type VoiceTaskParseResult = {
 };
 
 export type Workspace = {
+  visibility?: 'open' | 'closed' | 'hidden';
+  enabled_modules?: string[];
   id: number;
   name: string;
   preset: string;
@@ -487,8 +495,8 @@ export const api = {
     }),
 
   // Users
-  getUsers: () => request<User[]>('/api/users'),
-  createUser: (username: string, password: string, extra?: { workspace_id?: number; role?: string }) =>
+  getUsers: (scope: 'space' | 'platform' = 'space') => request<User[]>(`/api/users?scope=${scope}`),
+  createUser: (username: string, password: string, extra?: { workspace_id?: number; role?: string; must_change_password?: boolean }) =>
     request<{ id: number; username: string }>('/api/users', {
       method: 'POST',
       body: JSON.stringify({ username, password, ...extra }),
@@ -505,6 +513,14 @@ export const api = {
     }),
   deleteUser: (userId: number) =>
     request<{ ok: boolean }>(`/api/users/${userId}`, { method: 'DELETE' }),
+
+  setUserStatus: (id: number, is_active: boolean) => request(`/api/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ is_active }) }),
+  getUserAccess: (id: number) => request<{ app_permissions: Record<string, boolean>; spaces: { id: number; name: string; rank: string; permissions: Record<string, boolean>; features: Record<string, boolean> }[] }>(`/api/users/${id}/access`),
+  changePassword: (current_password: string, new_password: string) => request('/api/users/change-password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
+  getSpaceModules: (id: number) => request<{ catalog: Record<string, { label: string; keys: string[] }>; enabled: string[] }>(`/api/workspaces/${id}/modules`),
+  setSpaceModules: (id: number, enabled: string[]) => request(`/api/workspaces/${id}/modules`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  getSpaceDirectory: () => request<{ id: number; name: string; visibility: string; joined: boolean }[]>('/api/workspaces/directory/list'),
+  joinSpace: (id: number) => request(`/api/workspaces/${id}/join`, { method: 'POST' }),
 
   // Roles
   getRoles: () => request<Role[]>('/api/roles'),
@@ -572,7 +588,7 @@ export const api = {
   uploadFile: (taskId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetch(`${API_BASE}/api/tasks/${taskId}/upload`, {
+    return fetch(`${API_BASE}/api/tasks/${taskId}/upload${activeWorkspaceId() ? `?workspace_id=${activeWorkspaceId()}` : ''}`, {
       method: 'POST',
       credentials: 'include',
       body: formData,
@@ -604,7 +620,7 @@ export const api = {
   uploadClientFile: (clientId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetch(`${API_BASE}/api/clients/${clientId}/upload`, { method: 'POST', credentials: 'include', body: formData }).then(async response => {
+    return fetch(`${API_BASE}/api/clients/${clientId}/upload${activeWorkspaceId() ? `?workspace_id=${activeWorkspaceId()}` : ''}`, { method: 'POST', credentials: 'include', body: formData }).then(async response => {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || body.detail || `API error: ${response.status}`);
       return body;
@@ -807,6 +823,7 @@ export const api = {
   restoreWorkspace: (id: number) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/restore`, { method: 'POST' }),
   getWsMembers: (id: number) => request<WorkspaceMember[]>(`/api/workspaces/${id}/members`),
+  inviteWsMember: (id: number, username: string, role: string) => request(`/api/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify({ username, role }) }),
   addWsMember: (id: number, userId: number, role: string) =>
     request<WorkspaceMember>(`/api/workspaces/${id}/members`, {
       method: 'POST',

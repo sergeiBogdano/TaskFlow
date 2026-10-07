@@ -3,6 +3,7 @@ import pytest
 
 class TestAuth:
 
+    @pytest.mark.legacy_ui
     def test_login_page(self, sync_request):
         resp = sync_request('GET', '/login')
         assert resp.status_code in (200, 302)
@@ -53,11 +54,13 @@ class TestAuth:
                             cookies={'taskflow_user': 'invalid-token'})
         assert resp.status_code == 401
 
+    @pytest.mark.legacy_ui
     def test_dashboard_requires_auth(self, sync_request, client):
         resp = sync_request('GET', '/', cookies={})
         assert resp.status_code in (302, 307)
         assert '/login' in resp.headers['location']
 
+    @pytest.mark.legacy_ui
     def test_login_form_legacy(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/login')
         assert resp.status_code == 200

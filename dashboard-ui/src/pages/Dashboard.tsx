@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { getActiveWorkspaceId } from '../lib/workspace';
+import { useAuth } from '../hooks/useAuth';
+import { SpaceDirectory } from '../components/SpaceDirectory';
 import { SearchSelect } from '../components/SearchSelect';
 import type { DashboardStats, OrganizationOverview, OrganizationOverviewItem, Task } from '../api/client';
 import { daysUntil, formatDate, statusMeta } from '../lib/taskflow';
@@ -21,6 +23,9 @@ type OrganizationFilter = 'all' | 'attention' | 'stale' | 'unassigned';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const hasWorkspace = Boolean(getActiveWorkspaceId());
+  const canCrm = user?.features?.clients !== false && Boolean(user?.is_root || user?.permissions?.clients);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [overview, setOverview] = useState<OrganizationOverview | null>(null);
   const [expiring, setExpiring] = useState<any[]>([]);
@@ -33,7 +38,8 @@ export function Dashboard() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    Promise.all([api.getDashboardStats(), api.getExpiring(), api.getDashboardFocus(7)])
+    if (!hasWorkspace) { setLoading(false); return; }
+    Promise.all([api.getDashboardStats(), canCrm ? api.getExpiring() : Promise.resolve([]), api.getDashboardFocus(7)])
       .then(([dashboardStats, expiringClients, taskList]) => {
         setStats(dashboardStats);
         setExpiring(expiringClients);
@@ -48,16 +54,17 @@ export function Dashboard() {
         setError(err instanceof Error ? err.message : 'Не удалось загрузить данные.');
       })
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [navigate, hasWorkspace, canCrm]);
 
   useEffect(() => {
+    if (!hasWorkspace || !canCrm) { setOverviewLoading(false); return; }
     setOverviewLoading(true);
     setError('');
     api.getOrganizationOverview(selectedUserId ? 'mine' : scope, selectedUserId ? Number(selectedUserId) : undefined)
       .then(setOverview)
       .catch(err => setError(err instanceof Error ? err.message : 'Не удалось загрузить организации.'))
       .finally(() => setOverviewLoading(false));
-  }, [scope, selectedUserId]);
+  }, [scope, selectedUserId, hasWorkspace, canCrm]);
 
   const focusTasks = tasks;
 
@@ -68,37 +75,20 @@ export function Dashboard() {
     return true;
   }), [organizationFilter, overview]);
 
-  const hasWorkspace = Boolean(getActiveWorkspaceId());
-
-  if (loading || !stats) {
-    return <div className="grid h-64 place-items-center text-sm text-[var(--color-text-secondary)]">Загрузка рабочего пространства...</div>;
-  }
-
-  if (!hasWorkspace) {
-    return (
-      <div className="mx-auto max-w-[1500px] space-y-5">
-        <section className="tf-panel-flat flex flex-col items-center gap-3 px-6 py-16 text-center">
-          <Building2 size={28} className="text-[var(--color-accent)]" />
-          <h2 className="text-base font-bold">У вас пока нет окружения</h2>
-          <p className="max-w-md text-sm leading-6 text-[var(--color-text-secondary)]">
-            Создайте своё окружение в панели слева — вы станете его владельцем.
-            Вас также могут добавить в чужое окружение как участника или администратора.
-          </p>
-        </section>
-      </div>
-    );
-  }
+  if (!hasWorkspace) return <SpaceDirectory />;
+  if (loading) return <div className="grid h-64 place-items-center">Загрузка пространства...</div>;
+  if (!stats) return <div className="tf-panel-flat p-6"><p>{error || 'Нет доступа к сводке. Выберите доступный раздел в меню.'}</p></div>;
 
   const cards = [
     { label: 'Видимых задач', value: stats.total, icon: ListTodo, color: 'var(--color-accent)', soft: 'rgba(43,38,32,.08)', to: '/tasks' },
     { label: 'В работе', value: stats.in_progress, icon: Clock3, color: 'var(--color-warning)', soft: 'rgba(150,112,42,.13)', to: '/kanban' },
     { label: 'Просрочено', value: stats.overdue, icon: AlertTriangle, color: 'var(--color-danger)', soft: 'rgba(188,90,72,.12)', to: '/tasks?status=overdue' },
-    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', soft: 'rgba(95,143,106,.13)', to: '/reports' },
+    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', soft: 'rgba(95,143,106,.13)', to: '/tasks?status=done' },
   ];
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_.85fr]">
+      <section className={canCrm ? "grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_.85fr]" : "grid grid-cols-1 gap-5"}>
         <div className="tf-panel-flat overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
             <div><h2 className="text-sm font-bold">Фокус на сегодня</h2><p className="text-xs text-[var(--color-text-secondary)]">Ближайшие сроки и просрочки</p></div>
@@ -120,7 +110,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="tf-panel-flat overflow-hidden">
+        {canCrm && <div className="tf-panel-flat overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
             <div><h2 className="text-sm font-bold">Договоры на исходе</h2><p className="text-xs text-[var(--color-text-secondary)]">Проверить продление или завершение работ</p></div>
             <CalendarClock size={19} className="text-[var(--color-warning)]" />
@@ -134,7 +124,7 @@ export function Dashboard() {
             ))}
             {expiring.length === 0 && <div className="p-6 text-sm text-[var(--color-text-secondary)]">Нет договоров на исходе.</div>}
           </div>
-        </div>
+        </div>}
       </section>
 
       <section className="tf-panel-flat flex flex-wrap items-center gap-x-8 gap-y-2 px-5 py-3">
@@ -147,7 +137,7 @@ export function Dashboard() {
         ))}
       </section>
 
-      <section className="tf-panel-flat overflow-hidden">
+      {canCrm && <section className="tf-panel-flat overflow-hidden">
         <div className="border-b border-[var(--color-border)] p-4 lg:p-5">
           <div className="flex flex-wrap items-start gap-3">
             <div>
@@ -191,7 +181,7 @@ export function Dashboard() {
             {organizations.length === 0 && <div className="p-8 text-center text-sm text-[var(--color-text-secondary)]">В этом представлении организаций пока нет.</div>}
           </div>
         )}
-      </section>
+      </section>}
 
     </div>
   );

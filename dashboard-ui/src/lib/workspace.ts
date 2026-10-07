@@ -54,11 +54,8 @@ export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; acti
   } catch {
     /* ignore */
   }
-  if (stored && !ok) {
-    // Сохранённый id больше не наш (другой аккаунт или удалили из окружения):
-    // страница уже загрузилась с чужим workspace_id — перезагружаем данные.
-    window.location.reload();
-  }
+  const detail = workspaces.find(w => String(w.id) === activeId);
+  try { localStorage.setItem(DETAIL_KEY, JSON.stringify(detail)); } catch { /* ignore */ }
   return { workspaces, activeId };
 }
 
@@ -83,4 +80,8 @@ export async function switchWorkspace(id: string): Promise<void> {
   }
   window.dispatchEvent(new CustomEvent(WORKSPACE_EVENT, { detail: { id } }));
   window.location.reload();
+}
+
+export function clearWorkspace(): void {
+  try { localStorage.removeItem(WORKSPACE_KEY); localStorage.removeItem(DETAIL_KEY); } catch { /* ignore */ }
 }

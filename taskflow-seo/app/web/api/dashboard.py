@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta
 
-from datetime import datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select
@@ -76,6 +74,10 @@ async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_curr
         'active_clients': active_clients,
         'ending_clients': ending_clients,
     }
+    from app.core.permissions import is_feature_available
+    if not await is_feature_available(user, 'clients', workspace.id):
+        payload['active_clients'] = 0
+        payload['ending_clients'] = 0
     dashboard_cache.set(cache_key, payload)
     return JSONResponse(payload)
 

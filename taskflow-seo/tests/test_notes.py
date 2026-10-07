@@ -34,9 +34,8 @@ def _new_user(sync_request, admin_cookies, prefix):
 
 
 def _make_ws(sync_request, cookies, name, preset='empty'):
-    resp = sync_request('POST', '/api/workspaces', json={'name': name, 'preset': preset}, cookies=cookies)
-    assert resp.status_code == 201, resp.text
-    return resp.json()
+    from tests.test_user_permissions import _make_workspace
+    return _make_workspace(sync_request, cookies, name, preset)
 
 
 def _add_member(sync_request, cookies, ws_id, user_id, role='member'):
@@ -50,11 +49,13 @@ def _add_member(sync_request, cookies, ws_id, user_id, role='member'):
 
 class TestNotesPage:
 
+    @pytest.mark.legacy_ui
     def test_notes_page_admin(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/notes', cookies=admin_cookies)
         assert resp.status_code == 200
         assert 'Доска заметок' in resp.text
 
+    @pytest.mark.legacy_ui
     def test_notes_page_unauth_redirect(self, sync_request):
         resp = sync_request('GET', '/notes', cookies={})
         assert resp.status_code in (302, 307)
@@ -388,11 +389,11 @@ class TestNotesWorkspaceIsolation:
 
         resp = sync_request('GET', '/api/notes', cookies=cookies)
         assert resp.status_code == 403
-        assert 'нет окружения' in resp.json()['detail'].lower()
+        assert 'нет пространства' in resp.json()['detail'].lower()
 
         resp = sync_request('POST', '/api/notes', json=_login_note_payload(title='Без окружения'), cookies=cookies)
         assert resp.status_code == 403
-        assert 'нет окружения' in resp.json()['detail'].lower()
+        assert 'нет пространства' in resp.json()['detail'].lower()
 
         # и создавать заметку, и список — один и тот же внятный ответ
         resp = sync_request('GET', '/api/workspaces', cookies=cookies)

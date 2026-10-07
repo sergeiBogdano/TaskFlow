@@ -123,6 +123,14 @@ async def generate_module_tasks():
 
             created_count = 0
             for module in modules:
+                from app.core.models import Workspace, FeatureOverride
+                space = await session.get(Workspace, module.workspace_id) if module.workspace_id else None
+                enabled = set(json.loads(space.enabled_modules or '[]')) if space else set()
+                if space and (space.deleted_at or not {'tasks', 'automation'}.issubset(enabled)):
+                    continue
+                overrides = (await session.execute(select(FeatureOverride).where(FeatureOverride.key.in_(['tasks', 'modules']), FeatureOverride.enabled.is_(False)))).scalars().all()
+                if any(o.scope == 'global' or (o.scope == 'workspace' and o.target_id == module.workspace_id) for o in overrides):
+                    continue
                 if not _module_due_today(module, today):
                     continue
 
@@ -210,8 +218,8 @@ async def autopurge_trash():
                 select(Task).where(Task.deleted_at.is_not(None), Task.deleted_at < cutoff)
             )).scalars().all()
             for t in tasks:
-                await session.execute(sa_delete(FileAttachment).where(FileAttachment.task_id == t.id))
-                await session.delete(t)
+                from app.web.api.workspaces import _purge_task
+                await _purge_task(session, t.id)
             clients = (await session.execute(
                 select(Client).where(Client.deleted_at.is_not(None), Client.deleted_at < cutoff)
             )).scalars().all()

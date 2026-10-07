@@ -15,9 +15,12 @@ def set_request_permissions(user_id: int, permissions: dict) -> None:
 
 
 async def get_current_user(request: Request):
-    from app.web.router import current_user
-    user = await current_user(request)
-    if not user:
+    from app.core.auth import COOKIE_NAME, session_matches_user, verify_session_token
+    from app.services.user_service import get_user
+    token = request.cookies.get(COOKIE_NAME, '')
+    uid = verify_session_token(token)
+    user = await get_user(uid) if uid is not None else None
+    if not session_matches_user(token, user):
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
 
@@ -39,6 +42,11 @@ async def get_user_role_names(user_id: int) -> set[str]:
             role = await session.get(Role, user_role.role_id)
             if role:
                 names.add(role.name)
+        from app.core.models import User
+        account = await session.get(User, user_id)
+        names.discard('superadmin')
+        if account and account.is_root:
+            names.add('superadmin')
         return names
 
 
@@ -56,7 +64,8 @@ async def get_user_permissions(user_id: int) -> dict:
             if not role:
                 continue
             role_permissions = json.loads(role.permissions or '{}') if isinstance(role.permissions, str) else (role.permissions or {})
-            permissions.update(role_permissions)
+            for k, v in role_permissions.items():
+                permissions[k] = bool(v) or permissions.get(k, False)
         # группы — additive: только добавляют к правам ролей
         group_rows = (await session.execute(
             select(UserGroup).where(UserGroup.user_id == user_id)
@@ -69,18 +78,24 @@ async def get_user_permissions(user_id: int) -> dict:
                 json.loads(group.permissions or '{}')
                 if isinstance(group.permissions, str) else (group.permissions or {})
             )
-            permissions.update(group_permissions)
+            permissions.update({k: True for k, v in group_permissions.items() if v})
+        from app.core.models import User
+        account = await session.get(User, user_id)
+        if account and account.is_root:
+            return {'all': True}
+        permissions.pop('all', None)
+        permissions.setdefault('users_password_own', True)
         return permissions
 
 
 async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> dict | None:
     """Work-права участника окружения (Ф7/Ф8 + точный набор роли).
 
-    Нет кастомной роли → база ранга (owner/admin — всё кроме reset,
-    member — базовые). Есть кастомная роль → ТОЧНО её набор, база ранга
+    Нет кастомной роли → фиксированная база ранга; новые права
+    по умолчанию выключены. Есть кастомная роль → ТОЧНО её набор, база ранга
     не добавляется: что отмечено в роли, то и действует. Ранг при этом
     сохраняется и продолжает gating административных действий
-    (участники, удаление) и лестницы сброса паролей.
+    (участники, удаление). Пароли управляются на уровне приложения.
     Пустая кастомная роль запрещена на уровне API, но на всякий случай
     трактуется как отсутствие прав, а не как база ранга.
 
@@ -120,10 +135,9 @@ async def effective_permissions(user, workspace_id: int | None = None) -> dict:
 
     - app-ключи (scope=app) — как раньше, из ролей и групп;
     - work-ключи (scope=work) — из активного окружения: точный набор
-      кастомной роли, если назначена, иначе база ранга (owner/admin — всё
-      кроме users_password_reset, member — базовые). Если окружения нет или
+      кастомной роли, если назначена, иначе фиксированная база ранга. Если окружения нет или
       пользователь не участник — остаются app-права (legacy/вне окружения);
-    - superadmin (`all`) — полный доступ, без изменений.
+    - только фактический root (`all`) — полный доступ.
     """
     from app.core.permission_catalog import work_scope_keys
 
@@ -133,8 +147,6 @@ async def effective_permissions(user, workspace_id: int | None = None) -> dict:
     if app_perms.get('all'):
         return app_perms
     ws_perms = await get_workspace_permissions(user.id, workspace_id)
-    if ws_perms is None and workspace_id is None:
-        return app_perms
     work_keys = set(work_scope_keys())
     merged = {key: value for key, value in app_perms.items() if key not in work_keys}
     merged.update(ws_perms or {})
@@ -147,9 +159,11 @@ async def request_permissions(user, workspace_id: int | None = None) -> dict:
     Возвращает копию — можно безопасно мутировать.
     """
     cached = _REQUEST_PERMISSIONS.get()
-    if cached is not None and cached[0] == user.id:
-        return dict(cached[1])
-    return await effective_permissions(user, workspace_id)
+    permissions = dict(cached[1]) if cached is not None and cached[0] == user.id else await effective_permissions(user, workspace_id)
+    if permissions.get('all'):
+        return permissions
+    state = await get_effective_features(user, workspace_id, keys=list(permissions))
+    return {key: bool(value) and state.get(key, False) for key, value in permissions.items()}
 
 
 async def user_can_manage_all_tasks(user) -> bool:
@@ -222,18 +236,9 @@ def task_is_editable_by_user(task, user, role_names: set[str], accessible_client
 
 def require_role(roles: list[str]):
     async def check(user=Depends(get_current_user)):
-        from sqlalchemy import select
-        from app.core.database import async_session
-        from app.core.models import UserRole, Role
-        async with async_session() as session:
-            ur = await session.execute(
-                select(UserRole).where(UserRole.user_id == user.id)
-            )
-            user_roles = ur.scalars().all()
-            for ur_ in user_roles:
-                r = await session.get(Role, ur_.role_id)
-                if r and r.name in roles:
-                    return user
+        names = await get_user_role_names(user.id)
+        if names.intersection(roles):
+            return user
         raise HTTPException(status_code=403, detail="Forbidden")
     check._tf_guard = 'role'
     return check
@@ -258,7 +263,7 @@ def require_permission(key: str):
     и ключа `settings` — он не может быть выключен).
     """
     async def check(request: Request, user=Depends(get_current_user)):
-        permissions = await get_user_permissions(user.id)
+        permissions = await request_permissions(user, workspace_id_from_request(request))
         if not (permissions.get('all') or permissions.get(key)):
             raise HTTPException(status_code=403, detail=f'Нет права "{key}"')
         if not await is_feature_available(user, key, workspace_id_from_request(request)):
@@ -276,6 +281,8 @@ def workspace_id_from_request(request: Request | None) -> int | None:
     """
     if request is None:
         return None
+    if hasattr(request.state, 'workspace_id'):
+        return request.state.workspace_id
     path = request.url.path
     prefix = '/api/workspaces/'
     if path.startswith(prefix):
@@ -308,7 +315,10 @@ async def get_global_feature_state(keys: list[str] | None = None) -> dict[str, b
                 FeatureOverride.key.in_(keys or ['']),
             )
         )).scalars().all()
-    state = {key: True for key in keys}
+    from app.core.workspace_modules import module_for_permission
+    from app.core.permission_catalog import WORKSPACE_ADMIN_DEFAULTS
+    legacy_keys = set(WORKSPACE_ADMIN_DEFAULTS) | {'settings', 'users', 'users_password_own', 'users_password_reset', 'users_manage', 'workspaces_create', 'crm', 'crm_edit', 'crm_delete', 'crm_configure'}
+    state = {key: key in legacy_keys for key in keys}
     for row in rows:
         state[row.key] = bool(row.enabled)
     return state
@@ -342,16 +352,41 @@ async def get_effective_features(user, workspace_id: int | None = None,
         rows = (await session.execute(
             select(FeatureOverride).where(or_(*conds), FeatureOverride.key.in_(keys))
         )).scalars().all()
-    state = {key: True for key in keys}
+    from app.core.workspace_modules import module_for_permission
+    from app.core.permission_catalog import WORKSPACE_ADMIN_DEFAULTS
+    legacy_keys = set(WORKSPACE_ADMIN_DEFAULTS) | {'settings', 'users', 'users_password_own', 'users_password_reset', 'users_manage', 'workspaces_create', 'crm', 'crm_edit', 'crm_delete', 'crm_configure'}
+    state = {key: is_root_user(user) or key in legacy_keys for key in keys}
     priority = {'global': 0, 'group': 1, 'workspace': 2, 'user': 3}
     for row in sorted(rows, key=lambda r: priority.get(r.scope, 0)):
-        if row.key in state:
+        if row.key in state and not is_root_user(user):
             state[row.key] = bool(row.enabled)
+    # Global disable and space module disable are hard limits; user overrides cannot reopen them.
+    for row in rows:
+        if not is_root_user(user) and row.scope == 'global' and not row.enabled and row.key in state:
+            state[row.key] = False
+    if workspace_id is not None:
+        import json
+        from app.core.models import Workspace
+        async with async_session() as session:
+            space = await session.get(Workspace, workspace_id)
+        enabled_modules = json.loads(space.enabled_modules or '[]') if space else []
+        for key in keys:
+            module = module_for_permission(key)
+            if module and module not in enabled_modules:
+                state[key] = False
     return state
 
 
 async def is_feature_available(user, key: str, workspace_id: int | None = None) -> bool:
     if is_root_user(user):
+        from app.core.workspace_modules import module_for_permission
+        if workspace_id is not None and module_for_permission(key):
+            import json
+            from app.core.models import Workspace
+            from app.core.database import async_session
+            async with async_session() as session:
+                space = await session.get(Workspace, workspace_id)
+            return bool(space and module_for_permission(key) in json.loads(space.enabled_modules or '[]'))
         return True
     state = await get_effective_features(user, workspace_id, keys=[key])
     return state.get(key, True)
@@ -436,7 +471,7 @@ async def resolve_workspace(session, user, role_names: set[str], workspace_id: i
             if workspace is None:
                 raise HTTPException(
                     status_code=403,
-                    detail="У вас нет окружения. Создайте своё окружение.",
+                    detail="У вас нет пространства. Попросите администратора пригласить вас.",
                 )
     else:
         workspace = await session.get(Workspace, workspace_id)

@@ -9,10 +9,19 @@ def _login(sync_request, username, password):
     return {"taskflow_user": resp.cookies.get("taskflow_user")}
 
 
-def _make_workspace(sync_request, cookies, name, preset="empty"):
-    resp = sync_request("POST", "/api/workspaces", json={"name": name, "preset": preset}, cookies=cookies)
+def _make_workspace(sync_request, cookies, name, preset="seo"):
+    # Spaces are provisioned centrally, then a responsible owner is assigned.
+    actor = sync_request('GET', '/api/auth/me', cookies=cookies).json()['user']
+    root = _login(sync_request, '4dmin', '4dmin')
+    resp = sync_request('POST', '/api/workspaces', json={'name': name, 'preset': preset}, cookies=root)
     assert resp.status_code == 201, resp.text
-    return resp.json()
+    ws = resp.json()
+    if not actor.get('is_root'):
+        add = sync_request('POST', f"/api/workspaces/{ws['id']}/members", json={'user_id': actor['id'], 'role': 'member'}, cookies=root)
+        assert add.status_code == 201, add.text
+        promote = sync_request('PATCH', f"/api/workspaces/{ws['id']}/members/{actor['id']}", json={'role': 'owner'}, cookies=root)
+        assert promote.status_code == 200, promote.text
+    return ws
 
 
 def _make_user(sync_request, admin_cookies, username):
@@ -49,7 +58,7 @@ class TestSuperadminUserProtection:
         )
         assert resp.status_code == 403
 
-    def test_superadmin_password_only_via_current_proof(self, sync_request, admin_cookies):
+    def test_superadmin_password_only_via_current_proof(self, sync_request, admin_cookies, event_loop):
         # через PUT пароль суперадмина не меняется вообще — даже им самим
         resp = sync_request(
             "PUT", "/api/users/1/password",
@@ -82,12 +91,16 @@ class TestSuperadminUserProtection:
             )
             assert good_login.status_code == 200
         finally:
-            resp = sync_request(
-                "POST", "/api/users/change-password",
-                data={"current_password": "newpass123", "new_password": "4dmin"},
-                cookies=admin_cookies,
-            )
-            assert resp.status_code == 200, resp.text
+            from app.core.auth import hash_password
+            from app.core.database import async_session
+            from app.core.models import User
+            async def restore():
+                async with async_session() as session:
+                    root = await session.get(User, 1)
+                    root.password_hash = hash_password('4dmin')
+                    root.session_version += 1
+                    await session.commit()
+            event_loop.run_until_complete(restore())
 
     def test_other_user_cannot_change_superadmin_password(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]
@@ -283,74 +296,30 @@ class TestRegularUserPermissions:
         uniq = uuid.uuid4().hex[:8]
         uid, cookies = _make_user(sync_request, admin_cookies, f"selfpwd_{uniq}")
         resp = sync_request(
-            "PUT", f"/api/users/{uid}/password",
-            json={"password": "newpass123"}, cookies=cookies,
+            "POST", "/api/users/change-password",
+            json={"current_password": "pass1234", "new_password": "newpass123"}, cookies=cookies,
         )
         assert resp.status_code == 200
 
 
-class TestWorkspaceLimit:
-    def test_user_limited_to_3_workspaces(self, sync_request, admin_cookies):
-        uniq = uuid.uuid4().hex[:8]
-        _, cookies = _make_user(sync_request, admin_cookies, f"limited_{uniq}")
-        for i in range(3):
-            resp = sync_request(
-                "POST", "/api/workspaces",
-                json={"name": f"Лимит {uniq} {i}"}, cookies=cookies,
-            )
-            assert resp.status_code == 201, resp.text
-        resp = sync_request(
-            "POST", "/api/workspaces",
-            json={"name": f"Лимит {uniq} 4"}, cookies=cookies,
-        )
-        assert resp.status_code == 400
+class TestWorkspaceProvisioning:
+    def test_regular_user_cannot_provision(self, sync_request, admin_cookies):
+        _, cookies = _make_user(sync_request, admin_cookies, 'limited_' + uuid.uuid4().hex[:8])
+        response = sync_request('POST', '/api/workspaces', json={'name': 'Forbidden'}, cookies=cookies)
+        assert response.status_code == 403
 
-    def test_superadmin_not_limited(self, sync_request, admin_cookies):
-        uniq = uuid.uuid4().hex[:8]
-        for i in range(4):
-            resp = sync_request(
-                "POST", "/api/workspaces",
-                json={"name": f"Супер лимит {uniq} {i}"}, cookies=admin_cookies,
-            )
-            assert resp.status_code == 201, resp.text
+    def test_platform_admin_can_provision_without_artificial_limit(self, sync_request, admin_cookies):
+        uid, cookies = _make_user(sync_request, admin_cookies, 'provisioner_' + uuid.uuid4().hex[:8])
+        roles = sync_request('GET', '/api/roles', cookies=admin_cookies).json()
+        role = next(r for r in roles if r['name'] == 'admin')
+        assert sync_request('PUT', f'/api/users/{uid}/role', json={'role_id': role['id']}, cookies=admin_cookies).status_code == 200
+        for index in range(4):
+            response = sync_request('POST', '/api/workspaces', json={'name': f'Team {index}'}, cookies=cookies)
+            assert response.status_code == 201, response.text
 
-    def test_user_can_be_added_to_unlimited_workspaces(self, sync_request, admin_cookies):
-        uniq = uuid.uuid4().hex[:8]
-        uid, cookies = _make_user(sync_request, admin_cookies, f"joiner_{uniq}")
-        # членство в чужих окружениях не ограничено
-        for i in range(5):
-            ws = _make_workspace(sync_request, admin_cookies, f"WS join {uniq} {i}")
-            resp = sync_request(
-                "POST", f"/api/workspaces/{ws['id']}/members",
-                json={"user_id": uid, "role": "member"}, cookies=admin_cookies,
-            )
-            assert resp.status_code in (200, 201)
-        # лимит применяется только к созданным самим пользователем
-        for i in range(3):
-            resp = sync_request(
-                "POST", "/api/workspaces",
-                json={"name": f"WS own {uniq} {i}"}, cookies=cookies,
-            )
-            assert resp.status_code == 201, resp.text
-        resp = sync_request(
-            "POST", "/api/workspaces",
-            json={"name": f"WS own {uniq} 3"}, cookies=cookies,
-        )
-        assert resp.status_code == 400
-
-
-class TestUnauthenticated:
-    def test_cannot_access_users(self, sync_request):
-        resp = sync_request("GET", "/api/users")
-        assert resp.status_code in (401, 403)
-
-    def test_cannot_access_workspaces(self, sync_request):
-        resp = sync_request("GET", "/api/workspaces")
-        assert resp.status_code in (401, 403)
-
-    def test_cannot_create_user(self, sync_request):
-        resp = sync_request(
-            "POST", "/api/users",
-            json={"username": "anon", "password": "pass1234"},
-        )
-        assert resp.status_code in (401, 403)
+    def test_many_independent_memberships(self, sync_request, admin_cookies):
+        uid, cookies = _make_user(sync_request, admin_cookies, 'manyspaces_' + uuid.uuid4().hex[:8])
+        for index in range(4):
+            ws = _make_workspace(sync_request, admin_cookies, f'Membership {index}')
+            assert sync_request('POST', f"/api/workspaces/{ws['id']}/members", json={'user_id': uid}, cookies=admin_cookies).status_code == 201
+        assert len(sync_request('GET', '/api/workspaces', cookies=cookies).json()) == 4

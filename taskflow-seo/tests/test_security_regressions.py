@@ -36,12 +36,9 @@ class TestPasswordTakeover:
         victim_name, victim_id = _uniq("victim"), None
         victim_id, _ = _make_user(sync_request, admin_cookies, victim_name)
         # атакующий создаёт своё окружение и добавляет жертву без её согласия
-        ws = sync_request(
-            "POST", "/api/workspaces", json={"name": "Evil WS"},
-            cookies=attacker_cookies,
-        )
-        assert ws.status_code == 201, ws.text
-        ws_id = ws.json()["id"]
+        from tests.test_user_permissions import _make_workspace
+        ws_data = _make_workspace(sync_request, attacker_cookies, "Evil WS")
+        ws_id = ws_data['id']
         add = sync_request(
             "POST", f"/api/workspaces/{ws_id}/members",
             json={"user_id": victim_id, "role": "member"},
@@ -308,11 +305,11 @@ class TestPasswordResetLadder:
                 "PUT", f"/api/users/{mid}/password",
                 json={"password": "reset1234"}, cookies=acookies,
             )
-            assert resp.status_code == 200, resp.text
-            # новый пароль реально работает
+            assert resp.status_code == 403, resp.text
+            # A workspace role cannot reset a platform password
             login = sync_request(
                 "POST", "/api/auth/login",
-                json={"username": mname, "password": "reset1234"},
+                json={"username": mname, "password": "pass1234"},
             )
             assert login.status_code == 200, login.text
         finally:
@@ -452,7 +449,7 @@ class TestPasswordResetLadder:
                 "PUT", f"/api/users/{aid}/password",
                 json={"password": "resetbyowner"}, cookies=ocookies,
             )
-            assert resp.status_code == 200, resp.text
+            assert resp.status_code == 403, resp.text
         finally:
             sync_request("DELETE", f"/api/roles/{role_id}", cookies=admin_cookies)
 
@@ -512,7 +509,7 @@ class TestCustomRoleExactSet:
         return resp.json()["user"]["permissions"]
 
     def test_custom_role_replaces_base(self, sync_request, admin_cookies):
-        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("EXACT")}, cookies=admin_cookies).json()
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("EXACT"), "preset": "seo"}, cookies=admin_cookies).json()
         mname = _uniq("exact_member")
         mid, _ = _make_user(sync_request, admin_cookies, mname)
         resp = sync_request(
@@ -600,7 +597,7 @@ class TestCustomRoleExactSet:
             os.remove(path)
 
     def test_migration_preserves_effective(self, tmp_path, monkeypatch, event_loop):
-        # роль на рангах member+admin: после миграции у каждого тот же effective
+        # Ранг управляет членством и не расширяет точную кастомную роль.
         import os
 
         from sqlalchemy import select
@@ -638,19 +635,14 @@ class TestCustomRoleExactSet:
             # get_workspace_permissions импортирует async_session из
             # app.core.database при каждом вызове — замоканого выше хватает
 
-            from app.core.permission_catalog import workspace_default_permissions
-            old_content = {"reports"}
-            # старый аддитивный effective, который никто не должен потерять
-            need_m = set(workspace_default_permissions("member")) | old_content
-            need_a = set(workspace_default_permissions("admin")) | old_content
             await db._migrate_custom_roles_exact()
             after_m = await perm.get_workspace_permissions(mid, wid)
             after_a = await perm.get_workspace_permissions(aid, wid)
-            assert set(after_m) >= need_m, f"member потерял права: {after_m}"
-            assert set(after_a) >= need_a, f"admin потерял права: {after_a}"
+            assert after_m == {"reports": True}
+            assert after_a == {"reports": True}
             assert after_m.get("reports") is True
             assert after_a.get("reports") is True
-            # роль была на двух рангах — её клонировали, у каждого своя строка
+            # Общая роль остаётся общей, без автоматического расширения.
             async with sessions() as s:
                 m_link = (await s.execute(select(WorkspaceMember).where(
                     WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == mid,
@@ -658,7 +650,7 @@ class TestCustomRoleExactSet:
                 a_link = (await s.execute(select(WorkspaceMember).where(
                     WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == aid,
                 ))).scalar_one()
-                assert m_link.custom_role_id != a_link.custom_role_id
+                assert m_link.custom_role_id == a_link.custom_role_id
 
             async def snapshot():
                 async with sessions() as s:

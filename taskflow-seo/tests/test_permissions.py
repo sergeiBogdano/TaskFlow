@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 
 import pytest
 
@@ -24,7 +24,7 @@ class TestPermissions:
         assert resp.status_code == 201
 
     def test_executor_can_list_tasks(self, sync_request, executor_cookies):
-        resp = sync_request('GET', '/api/tasks/all', cookies=executor_cookies)
+        resp = sync_request('GET', '/api/tasks/all?scope=all', cookies=executor_cookies)
         assert resp.status_code == 200
 
     def test_executor_can_view_clients(self, sync_request, executor_cookies):
@@ -46,7 +46,7 @@ class TestPermissions:
         assert resp.status_code in (403, 401)
 
     def test_admin_full_access(self, sync_request, admin_cookies):
-        for url in ['/api/users', '/api/roles', '/api/tasks/all', '/api/clients',
+        for url in ['/api/users', '/api/roles', '/api/tasks/all?scope=all', '/api/clients',
                    '/api/notifications', '/api/dashboard/stats',
                    '/api/reports', '/api/reports/data', '/api/saved-views',
                    '/api/quick-tasks', '/api/calendar', '/api/modules']:
@@ -153,15 +153,12 @@ class TestRoleCeiling:
         resp = self._create_role(sync_request, cookies, 'ceiling_too_high',
                                  {'tasks_view_all': True})
         assert resp.status_code == 403, resp.text
-        assert 'tasks_view_all' in resp.text
+        assert 'root' in resp.text
 
-    def test_ceiling_allows_role_create_within_own(self, sync_request, admin_cookies):
+    def test_app_admin_cannot_create_platform_roles(self, sync_request, admin_cookies):
         cookies = self._app_admin_cookies(sync_request, admin_cookies)
-        resp = self._create_role(sync_request, cookies, 'ceiling_within_own',
-                                 {'dashboard': True, 'clients': True})
-        assert resp.status_code == 201, resp.text
-        role_id = resp.json()['id']
-        self._delete_role(sync_request, cookies, role_id)
+        resp = self._create_role(sync_request, cookies, 'ceiling_within_own', {'dashboard': True})
+        assert resp.status_code == 403, resp.text
 
     def test_ceiling_blocks_role_update_and_delete(self, sync_request, admin_cookies):
         # роль выше потолка создаёт суперадмин
@@ -184,7 +181,7 @@ class TestRoleCeiling:
         resp = sync_request('PUT', f'/api/roles/{tall_id}',
                             json={'permissions': {'dashboard': True, 'clients': True}},
                             cookies=cookies)
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 403, resp.text
 
         self._delete_role(sync_request, admin_cookies, tall_id)
 
@@ -212,7 +209,7 @@ class TestRoleCeiling:
         executor_role = next(r for r in roles if r['name'] == 'executor')
         resp = sync_request('PUT', f'/api/users/{target_id}/role',
                             json={'role_id': executor_role['id']}, cookies=cookies)
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 403, resp.text
 
         self._delete_role(sync_request, admin_cookies, tall_role_id)
 

@@ -92,6 +92,8 @@ async def delete_group(group_id: int, user=Depends(require_role(['superadmin']))
         if not group:
             raise HTTPException(status_code=404, detail='Group not found')
         await session.execute(UserGroup.__table__.delete().where(UserGroup.group_id == group_id))
+        from app.core.models import FeatureOverride
+        await session.execute(FeatureOverride.__table__.delete().where(FeatureOverride.scope == 'group', FeatureOverride.target_id == group_id))
         await session.delete(group)
         await session.commit()
     return JSONResponse({'ok': True})

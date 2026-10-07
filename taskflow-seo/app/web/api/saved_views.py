@@ -65,7 +65,7 @@ async def update_saved_view(view_id: int, data: dict, user=Depends(get_current_u
         if not view:
             raise HTTPException(status_code=404, detail='Saved view not found')
         roles = await get_user_role_names(user.id)
-        if view.user_id not in (None, user.id) and not ({'superadmin', 'admin'} & roles):
+        if view.user_id != user.id and not user.is_root:
             raise HTTPException(status_code=403, detail='Forbidden')
         if 'name' in data and data['name']:
             view.name = data['name']
@@ -86,7 +86,7 @@ async def delete_saved_view(view_id: int, user=Depends(get_current_user)):
         view = await session.get(SavedView, view_id)
         if view:
             roles = await get_user_role_names(user.id)
-            if view.user_id not in (None, user.id) and not ({'superadmin', 'admin'} & roles):
+            if view.user_id != user.id and not user.is_root:
                 raise HTTPException(status_code=403, detail='Forbidden')
             await session.delete(view)
             await session.commit()

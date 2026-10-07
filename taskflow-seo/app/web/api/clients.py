@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.models import Client, ClientContact, ClientResponsible, Contract, FileAttachment, Module, User, UserClientAccess
-from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, require_role, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
+from app.core.permissions import client_is_visible_to_user, get_accessible_client_ids, get_current_user, get_user_role_names, request_permissions, require_role, require_permission, resolve_workspace, task_is_visible_to_user, user_can_view_client_tab
 from app.core.utils.crypto import decrypt_accesses_value, encrypt_accesses_value
 from app.core.utils.timezone import format_datetime, safe_dt, to_utc, utc_now
 from app.core.config import settings
@@ -76,11 +76,11 @@ async def _discover_favicon(domain: str | None) -> str | None:
     return await asyncio.to_thread(fetch)
 
 
-async def _ensure_domain_unique(session, domain: str, client_id: int | None = None):
+async def _ensure_domain_unique(session, domain: str, client_id: int | None = None, workspace_id: int | None = None):
     normalized = _normalize_domain(domain)
     if not normalized:
         return normalized
-    query = select(Client).where(Client.domain == normalized, Client.deleted_at.is_(None))
+    query = select(Client).where(Client.domain == normalized, Client.deleted_at.is_(None), Client.workspace_id == workspace_id)
     if client_id is not None:
         query = query.where(Client.id != client_id)
     existing = (await session.execute(query)).scalar_one_or_none()
@@ -252,7 +252,7 @@ async def list_clients(workspace_id: int = Query(None), user=Depends(get_current
 
 
 @router.get('/trash')
-async def list_client_trash(workspace_id: int = Query(None), user=Depends(require_role(['superadmin', 'admin']))):
+async def list_client_trash(workspace_id: int = Query(None), user=Depends(require_permission('client_delete'))):
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
@@ -271,7 +271,7 @@ async def list_client_trash(workspace_id: int = Query(None), user=Depends(requir
 
 
 @router.post('/bulk')
-async def bulk_clients(data: dict, user=Depends(require_role(['superadmin', 'admin']))):
+async def bulk_clients(data: dict, user=Depends(require_permission('client_delete'))):
     ids = [int(item) for item in (data.get('ids') or []) if item]
     action = data.get('action')
     if not ids:
@@ -317,7 +317,7 @@ async def bulk_clients(data: dict, user=Depends(require_role(['superadmin', 'adm
 
 
 @router.post('/{client_id}/restore')
-async def restore_client(client_id: int, user=Depends(require_role(['superadmin', 'admin']))):
+async def restore_client(client_id: int, user=Depends(require_permission('client_delete'))):
     async with async_session() as session:
         c = await session.get(Client, client_id)
         if not c:
@@ -359,7 +359,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_client(data: dict, workspace_id: int = Query(None), user=Depends(require_role(['superadmin', 'admin', 'manager']))):
+async def create_client(data: dict, workspace_id: int = Query(None), user=Depends(require_permission('client_edit'))):
     async with async_session() as session:
         cs = ClientService(session)
         role_names = await get_user_role_names(user.id)
@@ -376,7 +376,7 @@ async def create_client(data: dict, workspace_id: int = Query(None), user=Depend
         start = _parse_client_date(data.get('contract_start'), 'contract_start') or utc_now()
         end = _parse_client_date(data.get('contract_end'), 'contract_end') or utc_now()
         _validate_contract_dates(start, end)
-        domain = await _ensure_domain_unique(session, data.get('domain'))
+        domain = await _ensure_domain_unique(session, data.get('domain'), workspace_id=workspace.id)
         c = await cs.create_client(
             org_name=data['org_name'],
             domain=domain,
@@ -431,7 +431,7 @@ async def create_client(data: dict, workspace_id: int = Query(None), user=Depend
 
 
 @router.put('/{client_id}')
-async def update_client(client_id: int, data: dict, user=Depends(require_role(['superadmin', 'admin', 'manager']))):
+async def update_client(client_id: int, data: dict, user=Depends(require_permission('client_edit'))):
     async with async_session() as session:
         c = await session.get(Client, client_id)
         if not c:
@@ -476,7 +476,7 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
             c.org_name = data['org_name']
         if data.get('domain') is not None:
             previous_domain = c.domain
-            c.domain = await _ensure_domain_unique(session, data['domain'], client_id)
+            c.domain = await _ensure_domain_unique(session, data['domain'], client_id, c.workspace_id)
             if c.domain != previous_domain or not c.favicon_url:
                 c.favicon_url = await _discover_favicon(c.domain)
         if data.get('contract_start'):
@@ -533,6 +533,10 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
                 contract.status = item.get('status') or 'active'
             for contract_id, contract in existing.items():
                 if contract_id not in incoming_ids:
+                    from app.core.models import CrmDeal
+                    linked = (await session.execute(select(CrmDeal.id).where(CrmDeal.contract_id == contract_id))).scalars().first()
+                    if linked:
+                        raise HTTPException(status_code=409, detail='Договор связан со сделкой. Архивируйте его вместо удаления.')
                     await session.delete(contract)
         if 'allowed_user_ids' in data:
             existing_access = (await session.execute(select(UserClientAccess).where(UserClientAccess.client_id == client_id))).scalars().all()
@@ -588,7 +592,7 @@ async def update_client(client_id: int, data: dict, user=Depends(require_role(['
 
 
 @router.delete('/{client_id}')
-async def delete_client(client_id: int, user=Depends(require_role(['superadmin', 'admin']))):
+async def delete_client(client_id: int, user=Depends(require_permission('client_delete'))):
     async with async_session() as session:
         c = await session.get(Client, client_id)
         if not c:
@@ -740,7 +744,7 @@ async def client_modules(client_id: int, user=Depends(get_current_user)):
 
 
 @router.post('/{client_id}/modules')
-async def attach_module(client_id: int, data: dict, user=Depends(require_role(['superadmin', 'admin']))):
+async def attach_module(client_id: int, data: dict, user=Depends(require_permission('client_delete'))):
     module_id = data.get('module_id')
     if not module_id:
         raise HTTPException(status_code=400, detail='module_id is required')
@@ -761,7 +765,7 @@ async def attach_module(client_id: int, data: dict, user=Depends(require_role(['
 
 
 @router.delete('/{client_id}/modules/{module_id}')
-async def detach_module(client_id: int, module_id: int, user=Depends(require_role(['superadmin', 'admin']))):
+async def detach_module(client_id: int, module_id: int, user=Depends(require_permission('client_delete'))):
     async with async_session() as session:
         m = await session.get(Module, module_id)
         if not m:
@@ -779,7 +783,7 @@ async def detach_module(client_id: int, module_id: int, user=Depends(require_rol
 
 
 @router.post('/{client_id}/upload')
-async def upload_client_file(client_id: int, file: UploadFile, user=Depends(get_current_user)):
+async def upload_client_file(client_id: int, file: UploadFile, user=Depends(require_permission('client_edit'))):
     async with async_session() as session:
         client = await session.get(Client, client_id)
         if not client:
@@ -812,7 +816,7 @@ async def upload_client_file(client_id: int, file: UploadFile, user=Depends(get_
     return JSONResponse({'ok': True, 'id': attachment.id, 'name': attachment.original_name, 'size': attachment.size})
 
 
-async def _ensure_client_file_access(session, client_id: int, user):
+async def _ensure_client_file_access(session, client_id: int, user, *, edit=False, contract=True):
     client = await session.get(Client, client_id)
     if not client:
         raise HTTPException(status_code=404, detail='Client not found')
@@ -821,13 +825,18 @@ async def _ensure_client_file_access(session, client_id: int, user):
     if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
         raise HTTPException(status_code=403, detail='Forbidden')
     await _assert_client_workspace(session, client, user, role_names)
+    permissions = await request_permissions(user, client.workspace_id)
+    if edit and not (permissions.get('all') or permissions.get('client_edit')):
+        raise HTTPException(status_code=403, detail='Нет права изменять файлы клиента')
+    if contract and not user_can_view_client_tab(role_names, permissions, 'contracts'):
+        raise HTTPException(status_code=403, detail='Нет доступа к файлам договоров')
     return client
 
 
 @router.post('/{client_id}/contracts/{contract_id}/upload')
 async def upload_contract_file(client_id: int, contract_id: int, file: UploadFile, user=Depends(get_current_user)):
     async with async_session() as session:
-        await _ensure_client_file_access(session, client_id, user)
+        await _ensure_client_file_access(session, client_id, user, edit=True)
         contract = await session.get(Contract, contract_id)
         if not contract or contract.client_id != client_id:
             raise HTTPException(status_code=404, detail='Contract not found')
@@ -915,6 +924,7 @@ async def download_client_file(client_id: int, file_id: int, user=Depends(get_cu
         attachment = await session.get(FileAttachment, file_id)
         if not attachment or attachment.client_id != client_id:
             raise HTTPException(status_code=404, detail='File not found')
+        await _ensure_client_file_access(session, client_id, user, contract=bool(attachment.contract_id))
         filename = (attachment.original_name or attachment.filename or 'file').replace('"', '')
         disposition = 'inline' if (attachment.content_type or '').startswith(('image/', 'application/pdf')) else 'attachment'
         return Response(
@@ -938,6 +948,7 @@ async def delete_client_file(client_id: int, file_id: int, user=Depends(get_curr
         attachment = await session.get(FileAttachment, file_id)
         if not attachment or attachment.client_id != client_id:
             raise HTTPException(status_code=404, detail='File not found')
+        await _ensure_client_file_access(session, client_id, user, edit=True, contract=bool(attachment.contract_id))
         await session.delete(attachment)
         await session.commit()
     return JSONResponse({'ok': True})
@@ -972,7 +983,7 @@ async def client_contract_check(client_id: int, deadline: str = Query(''), user=
 
 
 @router.get('/{client_id}/accesses/decrypt')
-async def decrypt_client_accesses(client_id: int, user=Depends(require_role(['superadmin', 'admin']))):
+async def decrypt_client_accesses(client_id: int, user=Depends(require_permission('client_tab_access'))):
     async with async_session() as session:
         c = await session.get(Client, client_id)
         if not c or not c.accesses:

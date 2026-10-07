@@ -46,26 +46,40 @@ def _legacy_in_ws(obj_ws_id, ws_filter: int | None) -> bool:
 
 
 async def _legacy_assert_task(session, request: Request, task: Task):
+    from app.core.permissions import effective_permissions, is_feature_available, task_is_editable_by_user
     user = await current_user(request)
     if not user:
-        return None
-    role_names = await get_user_role_names(user.id)
+        return JSONResponse({'error': 'Not authenticated'}, status_code=401)
+    roles = await get_user_role_names(user.id)
     try:
-        await resolve_workspace(session, user, role_names, task.workspace_id)
+        await resolve_workspace(session, user, roles, task.workspace_id)
     except HTTPException:
         return JSONResponse({'error': 'Нет доступа'}, status_code=403)
+    perms = await effective_permissions(user, task.workspace_id)
+    check = task_is_visible_to_user if request.method == 'GET' else task_is_editable_by_user
+    if not (perms.get('all') or perms.get('tasks')) or not await is_feature_available(user, 'tasks', task.workspace_id) or not check(task, user, roles, permissions=perms):
+        return JSONResponse({'error': 'Нет доступа к задаче'}, status_code=403)
     return None
 
 
-async def _legacy_assert_client(session, request: Request, client: Client):
+async def _legacy_assert_client(session, request: Request, client: Client, *, contract=False):
+    from app.core.permissions import effective_permissions, is_feature_available
     user = await current_user(request)
     if not user:
-        return None
-    role_names = await get_user_role_names(user.id)
+        return JSONResponse({'error': 'Not authenticated'}, status_code=401)
+    roles = await get_user_role_names(user.id)
     try:
-        await resolve_workspace(session, user, role_names, client.workspace_id)
+        await resolve_workspace(session, user, roles, client.workspace_id)
     except HTTPException:
         return JSONResponse({'error': 'Нет доступа'}, status_code=403)
+    perms = await effective_permissions(user, client.workspace_id)
+    key = 'clients' if request.method == 'GET' else 'client_edit'
+    if request.url.path.endswith('/hard-delete'):
+        key = 'client_delete'
+    if contract and not (perms.get('all') or perms.get('client_tab_contracts')):
+        return JSONResponse({'error': 'Нет доступа к файлам договоров'}, status_code=403)
+    if not (perms.get('all') or perms.get(key)) or not await is_feature_available(user, 'clients', client.workspace_id):
+        return JSONResponse({'error': 'Нет доступа к клиенту'}, status_code=403)
     return None
 
 
@@ -76,7 +90,9 @@ async def current_user(request: Request) -> User | None:
     user_id = verify_session_token(token)
     if user_id is None:
         return None
-    return await get_user(user_id)
+    from app.core.auth import session_matches_user
+    user = await get_user(user_id)
+    return user if session_matches_user(token, user) else None
 
 
 async def require_user(request: Request) -> User | None:
@@ -1452,27 +1468,32 @@ async def api_notifications_unread_count():
 # ─── Search ────────────────────────────────────────────────────
 
 @router.get('/api/search')
-async def api_search(q: str = ''):
+async def api_search(request: Request, q: str = ''):
     if not q or not q.strip():
         return JSONResponse({'tasks': [], 'clients': []})
-    q = q.strip()
+    q = q.strip()[:200]
     like = f'%{q}%'
+    from app.core.permissions import effective_permissions, is_feature_available
+    user = await current_user(request)
+    roles = await get_user_role_names(user.id)
     async with async_session() as session:
+        wid = await _legacy_ws_filter(session, request)
+        perms = await effective_permissions(user, wid)
         tasks = await session.execute(
             select(Task).where(
-                Task.deleted_at.is_(None),
+                Task.deleted_at.is_(None), Task.workspace_id == wid,
                 (Task.title.ilike(like)) | (Task.notes.ilike(like)) | (Task.comment.ilike(like))
             ).limit(10)
         )
         clients = await session.execute(
             select(Client).where(
-                Client.deleted_at.is_(None),
+                Client.deleted_at.is_(None), Client.workspace_id == wid,
                 (Client.org_name.ilike(like)) | (Client.domain.ilike(like))
             ).limit(5)
         )
     return JSONResponse({
-        'tasks': [{'id': t.id, 'title': t.title[:80], 'status': t.status} for t in tasks.scalars()],
-        'clients': [{'id': c.id, 'org_name': c.org_name} for c in clients.scalars()],
+        'tasks': [{'id': t.id, 'title': t.title[:80], 'status': t.status} for t in tasks.scalars() if (perms.get('all') or perms.get('tasks')) and await is_feature_available(user, 'tasks', wid) and task_is_visible_to_user(t, user, roles, permissions=perms)],
+        'clients': [{'id': c.id, 'org_name': c.org_name} for c in clients.scalars() if (perms.get('all') or perms.get('clients')) and await is_feature_available(user, 'clients', wid)],
     })
 
 
@@ -1494,9 +1515,24 @@ async def activity_page(request: Request):
 
 
 @router.get('/api/activity')
-async def api_activity(limit: int = 200, entity_type: str = '', entity_id: str = ''):
+async def api_activity(request: Request, limit: int = 200, entity_type: str = '', entity_id: str = ''):
     eid = int(entity_id) if entity_id and entity_id.isdigit() else None
-    logs = await list_activity(limit=limit, entity_type=entity_type or None, entity_id=eid)
+    logs = await list_activity(limit=min(max(limit, 1), 500), entity_type=entity_type or None, entity_id=eid)
+    filtered = []
+    async with async_session() as session:
+        wid = await _legacy_ws_filter(session, request)
+        for log in logs:
+            model = {'task': Task, 'client': Client}.get(log.entity_type)
+            obj = await session.get(model, log.entity_id) if model else None
+            if obj and obj.workspace_id == wid:
+                guard = _legacy_assert_task if model is Task else _legacy_assert_client
+                if await guard(session, request, obj) is None:
+                    from app.core.permissions import effective_permissions
+                    actor = await current_user(request)
+                    perms = await effective_permissions(actor, wid)
+                    if model is Task or perms.get('all') or perms.get('client_tab_activity'):
+                        filtered.append(log)
+    logs = filtered
     tz = settings.tz
     return JSONResponse([{
         'id': log.id,
@@ -1621,8 +1657,8 @@ async def api_task_hard_delete(task_id: int, request: Request):
             denied = await _legacy_assert_task(session, request, t)
             if denied:
                 return denied
-        await session.execute(sa_delete(FileAttachment).where(FileAttachment.task_id == task_id))
-        await session.execute(sa_delete(Task).where(Task.id == task_id))
+        from app.web.api.workspaces import _purge_task
+        await _purge_task(session, task_id)
         await session.commit()
     return JSONResponse({'ok': True})
 
@@ -1638,8 +1674,8 @@ async def api_client_hard_delete(client_id: int, request: Request):
             if denied:
                 return denied
         if c and c.deleted_at and c.deleted_at < cutoff:
-            await session.execute(sa_delete(Task).where(Task.client_id == client_id))
-            await session.execute(sa_delete(Client).where(Client.id == client_id))
+            from app.web.api.workspaces import _purge_client
+            await _purge_client(session, client_id)
             await session.commit()
             return JSONResponse({'ok': True})
     return JSONResponse({'ok': False, 'error': 'Клиента нет в корзине или прошло менее 30 дней'}, status_code=400)
@@ -1804,18 +1840,22 @@ async def api_task_upload(task_id: int, file: UploadFile, request: Request):
 async def api_file_download(file_id: int, request: Request):
     async with async_session() as session:
         att = await session.get(FileAttachment, file_id)
-        if not att:
+        if not att or not (att.task_id or att.client_id):
             return JSONResponse({'error': 'File not found'}, status_code=404)
         if att.task_id:
             _t = await session.get(Task, att.task_id)
+            if not _t:
+                return JSONResponse({'error': 'Task not found'}, status_code=404)
             if _t:
                 denied = await _legacy_assert_task(session, request, _t)
                 if denied:
                     return denied
         elif att.client_id:
             _c = await session.get(Client, att.client_id)
+            if not _c:
+                return JSONResponse({'error': 'Client not found'}, status_code=404)
             if _c:
-                denied = await _legacy_assert_client(session, request, _c)
+                denied = await _legacy_assert_client(session, request, _c, contract=bool(att.contract_id))
                 if denied:
                     return denied
         from urllib.parse import quote as _quote
@@ -1850,20 +1890,21 @@ async def api_task_files(task_id: int, request: Request):
 async def api_file_delete(file_id: int, request: Request):
     async with async_session() as session:
         att = await session.get(FileAttachment, file_id)
-        if att:
-            if att.task_id:
-                _t = await session.get(Task, att.task_id)
-                if _t:
-                    denied = await _legacy_assert_task(session, request, _t)
-                    if denied:
-                        return denied
-            elif att.client_id:
-                _c = await session.get(Client, att.client_id)
-                if _c:
-                    denied = await _legacy_assert_client(session, request, _c)
-                    if denied:
-                        return denied
-        await session.execute(sa_delete(FileAttachment).where(FileAttachment.id == file_id))
+        if not att or not (att.task_id or att.client_id):
+            return JSONResponse({'error': 'File not found'}, status_code=404)
+        if att.task_id:
+            parent = await session.get(Task, att.task_id)
+            if not parent:
+                return JSONResponse({'error': 'Task not found'}, status_code=404)
+            denied = await _legacy_assert_task(session, request, parent)
+        else:
+            parent = await session.get(Client, att.client_id)
+            if not parent:
+                return JSONResponse({'error': 'Client not found'}, status_code=404)
+            denied = await _legacy_assert_client(session, request, parent, contract=bool(att.contract_id))
+        if denied:
+            return denied
+        await session.delete(att)
         await session.commit()
     return JSONResponse({'ok': True})
 

@@ -75,11 +75,11 @@ class TestIsolation:
         assert resp.status_code == 201
         tid = resp.json()["id"] if isinstance(resp.json(), dict) and "id" in resp.json() else None
 
-        resp = sync_request("GET", "/api/tasks/all", cookies=admin_cookies)
+        resp = sync_request("GET", "/api/tasks/all?scope=all", cookies=admin_cookies)
         titles = [t["title"] for t in resp.json()]
         assert "Задача в изоляции" not in titles
 
-        resp = sync_request("GET", f"/api/tasks/all?workspace_id={ws['id']}", cookies=admin_cookies)
+        resp = sync_request("GET", f"/api/tasks/all?scope=all&workspace_id={ws['id']}", cookies=admin_cookies)
         assert resp.status_code == 200
         assert any(t["title"] == "Задача в изоляции" for t in resp.json())
         if tid is not None:
@@ -88,7 +88,7 @@ class TestIsolation:
 
     def test_member_cannot_access_foreign_workspace(self, sync_request, admin_cookies, executor_cookies):
         ws = _make_workspace(sync_request, admin_cookies, "Чужой ТС")
-        resp = sync_request("GET", f"/api/tasks/all?workspace_id={ws['id']}", cookies=executor_cookies)
+        resp = sync_request("GET", f"/api/tasks/all?scope=all&workspace_id={ws['id']}", cookies=executor_cookies)
         assert resp.status_code == 403
 
     def test_notes_scoped(self, sync_request, admin_cookies):
@@ -147,7 +147,7 @@ class TestOwnerProtection:
         assert resp.status_code == 201
         resp = sync_request("DELETE", f"/api/workspaces/{ws['id']}", cookies=admin_cookies)
         assert resp.status_code == 200
-        resp = sync_request("GET", f"/api/tasks/all?workspace_id={ws['id']}", cookies=admin_cookies)
+        resp = sync_request("GET", f"/api/tasks/all?scope=all&workspace_id={ws['id']}", cookies=admin_cookies)
         assert resp.status_code == 404
 
 
@@ -157,14 +157,20 @@ class TestPasswords:
         me = sync_request("GET", "/api/auth/me", cookies=executor_cookies).json()
         uid = me["user"]["id"]
         resp = sync_request("PUT", f"/api/users/{uid}/password", json={"password": "newpass123"}, cookies=executor_cookies)
+        assert resp.status_code == 403
+        wrong = sync_request("POST", "/api/users/change-password",
+            json={"current_password": "wrong", "new_password": "newpass123"}, cookies=executor_cookies)
+        assert wrong.status_code == 400
+        resp = sync_request("POST", "/api/users/change-password",
+            json={"current_password": "testpass", "new_password": "newpass123"}, cookies=executor_cookies)
         assert resp.status_code == 200
+        assert sync_request("GET", "/api/auth/me", cookies=executor_cookies).status_code == 401
         login = sync_request("POST", "/api/auth/login", json={"username": "testexec", "password": "newpass123"})
         assert login.status_code == 200
-        # возвращаем обратно, чтобы не ломать другие тесты
-        sync_request(
-            "PUT", f"/api/users/{uid}/password", json={"password": "testpass"},
-            cookies={"taskflow_user": login.cookies.get("taskflow_user")},
-        )
+        restored = sync_request("POST", "/api/users/change-password",
+            json={"current_password": "newpass123", "new_password": "testpass"},
+            cookies={"taskflow_user": login.cookies.get("taskflow_user")})
+        assert restored.status_code == 200
 
     def test_member_cannot_change_admin_password(self, sync_request, admin_cookies, executor_cookies):
         resp = sync_request("PUT", "/api/users/1/password", json={"password": "hacked123"}, cookies=executor_cookies)

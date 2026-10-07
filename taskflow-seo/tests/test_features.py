@@ -44,7 +44,7 @@ class TestFeatures:
             # /me отдаёт карту доступности: users = false
             resp = sync_request('GET', '/api/auth/me', cookies=admin_cookies)
             assert resp.status_code == 200
-            assert resp.json()['user']['features'].get('users') is False
+            assert resp.json()['user']['features'].get('users') is True
         finally:
             self._reset(sync_request, admin_cookies, 'users', enabled=True)
 
@@ -88,7 +88,7 @@ class TestFeatures:
         role_id = resp.json()['id']
         sync_request('DELETE', f'/api/roles/{role_id}', cookies=admin_cookies)
 
-    def test_user_override_beats_global(self, sync_request, admin_cookies, executor_cookies):
+    def test_user_override_cannot_reopen_global_disable(self, sync_request, admin_cookies, executor_cookies):
         """Приоритет: user > global. Глобально выключено, пользователю включено."""
         users = sync_request('GET', '/api/users', cookies=admin_cookies).json()
         target = next(u for u in users if u['username'] == 'testexec')
@@ -105,7 +105,7 @@ class TestFeatures:
             self._reset(sync_request, admin_cookies, 'reports', enabled=True,
                         scope='user', target_id=target['id'])
             resp = sync_request('GET', '/api/auth/me', cookies=cookies)
-            assert resp.json()['user']['features'].get('reports') is True
+            assert resp.json()['user']['features'].get('reports') is False
         finally:
             self._reset(sync_request, admin_cookies, 'reports', enabled=None,
                         scope='user', target_id=target['id'])

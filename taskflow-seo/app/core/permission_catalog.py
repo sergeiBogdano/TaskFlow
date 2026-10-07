@@ -55,6 +55,7 @@ PERMISSION_GROUPS = [
             {'key': 'client_tab_notes', 'label': 'Заметки', 'hint': 'Конкуренты и внутренние заметки клиента', 'level': 'sensitive'},
             {'key': 'client_tab_related', 'label': 'Задачи и модули', 'hint': 'Связанные задачи и подключенные модули клиента', 'level': 'advanced'},
             {'key': 'client_tab_activity', 'label': 'История', 'hint': 'Журнал изменений клиента', 'level': 'advanced'},
+            {'key': 'client_edit', 'label': 'Изменение клиентов', 'hint': 'Создание и изменение организаций', 'level': 'advanced'},
             {'key': 'client_delete', 'label': 'Удаление клиентов', 'hint': 'Перемещение клиентов в корзину и массовое удаление', 'level': 'sensitive'},
         ],
     },
@@ -80,20 +81,42 @@ PERMISSION_GROUPS = [
     },
 ]
 
+PERMISSION_GROUPS.extend([
+    {'id': 'platform_access', 'scope': SCOPE_APP, 'title': 'Администрирование', 'description': 'Явные полномочия приложения', 'items': [
+        {'key': 'workspaces_create', 'label': 'Создание пространств', 'hint': 'Создавать независимые пространства'},
+        {'key': 'users_manage', 'label': 'Управление учётными записями', 'hint': 'Создавать, блокировать и приглашать пользователей'},
+    ]},
+    {'id': 'crm', 'scope': SCOPE_WORK, 'title': 'CRM', 'description': 'Продажи внутри пространства', 'items': [
+        {'key': 'crm', 'label': 'Просмотр CRM', 'hint': 'Воронки, сделки, контакты и активности'},
+        {'key': 'crm_edit', 'label': 'Изменение CRM', 'hint': 'Создание и изменение сделок и контактов'},
+        {'key': 'crm_delete', 'label': 'Удаление CRM', 'hint': 'Удаление сделок и контактов'},
+        {'key': 'crm_configure', 'label': 'Настройка CRM', 'hint': 'Воронки, этапы и поля карточек'},
+    ]},
+])
+
+# Freeze defaults: new catalogue keys never expand rank permissions implicitly.
+WORKSPACE_ADMIN_DEFAULTS = [
+    'dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes',
+    'modules', 'reports', 'ai', 'workspace', 'tasks_view_team', 'tasks_view_others',
+    'tasks_view_all', 'dashboard_team', 'client_tab_contacts', 'client_tab_access',
+    'client_tab_contracts', 'client_tab_notes', 'client_tab_related', 'client_tab_activity', 'client_edit', 'client_delete',
+]
+WORKSPACE_MEMBER_DEFAULTS = ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'client_tab_contacts']
+
 ROLE_PRESETS = {
     'executor': ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'users_password_own'],
     'manager': [
         'dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'kanban', 'calendar', 'clients',
         'modules', 'reports', 'notifications', 'notes', 'ai', 'workspace',
-        'client_tab_contacts', 'client_tab_contracts', 'client_tab_related', 'client_tab_activity',
+        'client_tab_contacts', 'client_tab_contracts', 'client_tab_related', 'client_tab_activity', 'client_edit',
         'users_password_own',
     ],
     'admin': [
         'dashboard', 'dashboard_team', 'tasks', 'tasks_view_team', 'tasks_view_others', 'kanban',
         'calendar', 'clients', 'modules', 'reports', 'notifications', 'notes', 'ai', 'workspace',
-        'settings', 'users',
+        'settings', 'users', 'users_manage', 'workspaces_create',
         'client_tab_contacts', 'client_tab_access', 'client_tab_contracts', 'client_tab_notes',
-        'client_tab_related', 'client_tab_activity', 'client_delete',
+        'client_tab_related', 'client_tab_activity', 'client_edit', 'client_delete',
         'users_password_own',
     ],
 }
@@ -167,12 +190,8 @@ def workspace_default_permissions(rank: str) -> dict:
     (invite-then-reset) без ведома суперадмина. Право выдаётся явно —
     ролью приложения или кастомной ролью окружения.
     """
-    keys = work_scope_keys()
-    if rank in ('owner', 'admin'):
-        return {key: True for key in keys if key != 'users_password_reset'}
-    basic = {item['key'] for group in PERMISSION_GROUPS if group['scope'] == SCOPE_WORK
-             for item in group['items'] if item.get('level') == 'basic'}
-    return {key: True for key in keys if key in basic}
+    keys = WORKSPACE_ADMIN_DEFAULTS if rank in ('owner', 'admin') else WORKSPACE_MEMBER_DEFAULTS
+    return {key: True for key in keys}
 
 
 def catalog_payload() -> dict:

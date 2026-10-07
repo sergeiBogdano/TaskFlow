@@ -1,22 +1,8 @@
-"""Проверка work-прав на уровне API (Ф8).
+"""Authenticate every API request and enforce permissions in the object's actual space.
 
-Карта путей → ключ scope=work. Effective-права считаются по активному
-окружению (база по rank + кастомная роль), при отсутствии окружения —
-app-права, как раньше. Закрытая краном функция тоже даёт 403.
-
-Work-ключ из карты применяется только при явном окружении (path
-/api/workspaces/{id}/… или query workspace_id) и членстве в нём:
-так эндпоинты сохраняют свои внятные ответы («нет окружения»,
-«Нет доступа к воркспейсу»), а без указания окружения действуют
-app-права, как до Ф8. Создание своего окружения (POST /api/workspaces)
-права не требует — лимит проверяет сам эндпоинт.
-
-Сессия (Ф9-fix): весь /api/* без валидной куки получает 401 здесь,
-кроме PUBLIC_API_PREFIXES (/api/auth*). Это закрывает и легаси-роуты
-(TASKFLOW_LEGACY_UI), которые авторизацию не делают сами.
-
-app-ключи (users, settings) здесь не проверяются: за них отвечают
-require_permission / require_role в самих эндпоинтах.
+Work permissions come exclusively from membership; platform permissions cannot bypass
+space roles. Disabled modules block root as well. Root retains emergency access to
+individual feature switches, while normal users respect global disable limits.
 """
 
 from __future__ import annotations
@@ -24,7 +10,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.core.auth import COOKIE_NAME, verify_session_token
+from app.core.auth import COOKIE_NAME, verify_session_token, session_matches_user
 from app.core.permissions import (
     effective_permissions,
     get_workspace_permissions,
@@ -35,6 +21,7 @@ from app.core.permissions import (
 
 # префикс API → обязательный work-ключ
 API_PREFIX_PERMISSIONS: tuple[tuple[str, str], ...] = (
+    ('/api/crm', 'crm'),
     ('/api/quick-tasks', 'tasks'),
     ('/api/templates', 'tasks'),
     ('/api/tasks', 'tasks'),
@@ -73,7 +60,9 @@ def required_permission(path: str, method: str) -> str | None:
     if path.startswith('/api/workspaces'):
         # чтение окружения открыто участникам (переключатель, справочники),
         # управление окружением — только с правом «workspace»
-        return None if method == 'GET' else 'workspace'
+        return None  # Membership/rank dependencies guard management, independently of work roles.
+    if path in ('/api/dashboard/organizations', '/api/dashboard/expiring', '/api/dashboard/clients'):
+        return 'clients'
     for prefix, key in API_PREFIX_PERMISSIONS:
         if path == prefix or path.startswith(prefix + '/'):
             return key
@@ -93,17 +82,53 @@ async def work_permission_middleware(request: Request, call_next):
         return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
     from app.services.user_service import get_user
     user = await get_user(user_id)
-    if user is None:
+    if not session_matches_user(token or '', user):
         if is_public:
             return await call_next(request)
         return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
+    if user.must_change_password and path not in ('/api/auth/me', '/api/auth/logout', '/api/users/change-password'):
+        return JSONResponse({'detail': 'Сначала смените временный пароль', 'code': 'password_change_required'}, status_code=403)
     workspace_id = workspace_id_from_request(request)
+    # Object routes must use the object's space, never privileges from a query-selected space.
+    segments = path.strip('/').split('/')
+    if len(segments) >= 3 and segments[0] == 'api' and segments[2].isdigit():
+        from app.core import models
+        object_models = {'tasks': models.Task, 'clients': models.Client, 'notes': models.Note,
+                         'sprints': models.Sprint, 'modules': models.Module, 'reports': models.GeneratedReport}
+        model = object_models.get(segments[1])
+        if model is not None:
+            from app.core.database import async_session
+            async with async_session() as session:
+                obj = await session.get(model, int(segments[2]))
+                actual = getattr(obj, 'workspace_id', None) if obj else None
+                if segments[1] == 'reports' and obj and obj.client_id:
+                    client = await session.get(models.Client, obj.client_id)
+                    actual = client.workspace_id if client else None
+            if actual is not None:
+                if workspace_id is not None and workspace_id != actual:
+                    return JSONResponse({'detail': 'Объект не найден в выбранном пространстве'}, status_code=404)
+                workspace_id = actual
+    # Resolve the default space before permission checks, including requests without query params.
+    key = required_permission(path, method)
+    if key and not path.startswith('/api/workspaces'):
+        from app.core.database import async_session
+        from app.core.permissions import get_user_role_names, resolve_workspace
+        from fastapi import HTTPException
+        try:
+            async with async_session() as session:
+                space, _ = await resolve_workspace(session, user, await get_user_role_names(user.id), workspace_id)
+                workspace_id = space.id
+        except HTTPException as exc:
+            return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
+    request.state.workspace_id = workspace_id
     permissions = await effective_permissions(user, workspace_id)
     # один набор прав на весь запрос: эндпоинты читают через request_permissions()
     set_request_permissions(user.id, permissions)
     key = required_permission(path, method)
     if key is None:
         return await call_next(request)
+    if key and not (permissions.get('all') or permissions.get(key)):
+        return JSONResponse({'detail': f'Нет права доступа: {key}'}, status_code=403)
     if workspace_id is not None and not permissions.get('all'):
         # явное окружение: право считается по членству в нём (Ф8);
         # не участник — доступ отклонит сам эндпоинт («Нет доступа к воркспейсу»)

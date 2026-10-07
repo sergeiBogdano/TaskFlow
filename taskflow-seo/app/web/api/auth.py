@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import COOKIE_NAME, hash_password, make_session_token, verify_session_token
+from app.core.auth import COOKIE_NAME, hash_password, make_session_token, verify_session_token, session_matches_user
 from app.core.database import async_session
 from app.core.models import Role, User, UserRole
 from app.services.user_service import authenticate, get_user
@@ -27,7 +27,10 @@ def _get_user_data(user: User, roles_list: list = None, permissions: dict | None
     return {
         'id': user.id,
         'username': user.username,
+        'account_key': user.account_key,
         'is_root': bool(user.is_root),
+        'is_active': bool(user.is_active),
+        'must_change_password': bool(user.must_change_password),
         'created_at': user.created_at.isoformat() if user.created_at else '',
         'roles': [{'id': ur.role.id, 'name': ur.role.name} for ur in (roles_list or [])],
         'permissions': permissions,
@@ -39,7 +42,7 @@ async def login(body: LoginRequest):
     u = await authenticate(body.username, body.password)
     if not u:
         return JSONResponse({'error': 'Неверное имя или пароль'}, status_code=401)
-    token = make_session_token(u.id)
+    token = make_session_token(u.id, u.session_version)
     async with async_session() as session:
         r = await session.execute(
             select(UserRole).options(selectinload(UserRole.role))
@@ -66,14 +69,12 @@ async def logout():
 async def me(request: Request):
     token = request.cookies.get(COOKIE_NAME)
     if not token:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
     user_id = verify_session_token(token)
     if user_id is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Invalid token")
     user = await get_user(user_id)
-    if not user:
+    if not session_matches_user(token, user):
         raise HTTPException(status_code=401, detail="User not found")
     async with async_session() as session:
         r = await session.execute(

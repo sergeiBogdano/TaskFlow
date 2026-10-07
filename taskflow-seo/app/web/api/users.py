@@ -8,7 +8,7 @@ from app.core.auth import hash_password
 from app.core.database import async_session
 from app.core.models import Role, User, UserGroup, UserRole, WorkspaceMember
 from app.core.models import (
-    ActivityLog, ClientResponsible, GeneratedReport, Module, Note, NoteFolder,
+    ActivityLog, ClientResponsible, GeneratedReport, Module, Note, NoteFolder, CrmDeal, CrmActivity,
     Notification, SavedView, Sprint, Task, TaskCoExecutor, TaskComment,
     UserClientAccess, Workspace, WorkspaceKnowledge,
 )
@@ -21,6 +21,7 @@ from app.core.permissions import (
     get_workspace_role,
     require_permission,
     require_role,
+    require_root,
     resolve_workspace,
     is_root_user,
     workspace_id_from_request,
@@ -33,7 +34,8 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 @router.get('')
 async def list_users(request: Request, user=Depends(get_current_user)):
     async with async_session() as session:
-        if is_root_user(user):
+        app_permissions = await get_user_permissions(user.id)
+        if (is_root_user(user) or app_permissions.get('users_manage')) and (workspace_id_from_request(request) is None or request.query_params.get('scope') == 'platform'):
             user_query = select(User)
         else:
             roles = await get_user_role_names(user.id)
@@ -65,6 +67,8 @@ async def list_users(request: Request, user=Depends(get_current_user)):
                 'id': u.id,
                 'username': u.username,
                 'is_root': bool(u.is_root),
+                'is_active': bool(u.is_active),
+                'must_change_password': bool(u.must_change_password),
                 'created_at': u.created_at.isoformat() if u.created_at else '',
                 'roles': [{'id': ur.role_id, 'name': (await session.get(Role, ur.role_id)).name} for ur in roles if await session.get(Role, ur.role_id)],
                 'group_ids': groups_by_user.get(u.id, []),
@@ -73,21 +77,24 @@ async def list_users(request: Request, user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_user(request: Request, user=Depends(get_current_user)):
+async def create_user(request: Request, user=Depends(require_permission('users_manage'))):
     data = await request.json()
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
     if not username or len(username) < 2:
         raise HTTPException(status_code=400, detail='Логин должен быть минимум 2 символа')
-    if not password or len(password) < 4:
-        raise HTTPException(status_code=400, detail='Пароль минимум 4 символа')
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=400, detail='Пароль минимум 8 символов')
     workspace_id = data.get('workspace_id')
     ws_role = (data.get('role') or 'member').strip()
     if ws_role not in ('admin', 'member'):
         raise HTTPException(status_code=400, detail='Роль: admin или member')
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        actor_is_super = user_is_superadmin(role_names)
+        actor_is_super = is_root_user(user)
+        actor_permissions = await get_user_permissions(user.id)
+        if not actor_is_super and not actor_permissions.get('users_manage'):
+            raise HTTPException(status_code=403, detail='Создавать аккаунты может администратор приложения')
         target_ws = None
         if workspace_id is not None:
             target_ws, actor_ws_role = await resolve_workspace(session, user, role_names, int(workspace_id))
@@ -98,12 +105,13 @@ async def create_user(request: Request, user=Depends(get_current_user)):
                     status_code=403,
                     detail='Администратор окружения может создавать только участников',
                 )
-        elif not actor_is_super:
+        elif not actor_is_super and not actor_permissions.get('users_manage'):
             raise HTTPException(status_code=403, detail='Forbidden')
         existing = await session.execute(select(User).where(User.username == username))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=400, detail='Пользователь уже существует')
-        u = User(username=username, password_hash=hash_password(password))
+        u = User(username=username, password_hash=hash_password(password),
+                 must_change_password=bool(data.get('must_change_password', True)))
         session.add(u)
         await session.flush()
         if target_ws is not None:
@@ -117,8 +125,8 @@ async def create_user(request: Request, user=Depends(get_current_user)):
 async def set_password(user_id: int, request: Request, user=Depends(get_current_user)):
     data = await request.json()
     password = data.get('password') or ''
-    if len(password) < 4:
-        raise HTTPException(status_code=400, detail='Пароль минимум 4 символа')
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail='Пароль минимум 8 символов')
     async with async_session() as session:
         target = await session.get(User, user_id)
         if not target:
@@ -137,14 +145,12 @@ async def set_password(user_id: int, request: Request, user=Depends(get_current_
                 raise HTTPException(status_code=403, detail='Cannot change the superadmin password')
         actor_permissions = await get_user_permissions(user.id)
         if user.id == user_id:
-            # свой пароль — запрет только при явном False (снятая галочка).
-            # Отсутствие ключа = разрешено: не ломаем legacy-роли и юзеров
-            # вообще без ролей; миграция всем ставит True.
-            if not (actor_permissions.get('all') or actor_permissions.get('users_password_own', True) is not False):
-                raise HTTPException(status_code=403, detail='Нет права "users_password_own"')
-        elif not await _can_reset_password(session, user, actor_permissions, user_id):
+            raise HTTPException(status_code=403, detail='Свой пароль меняйте с подтверждением текущего пароля')
+        if not await _can_reset_password(session, user, actor_permissions, user_id):
             raise HTTPException(status_code=403, detail='Forbidden')
         target.password_hash = hash_password(password)
+        target.session_version += 1
+        target.must_change_password = user.id != user_id
         await session.commit()
     return JSONResponse({'ok': True})
 
@@ -160,25 +166,16 @@ async def _can_reset_password(session, actor, actor_permissions: dict, target_id
     """
     if actor_permissions.get('all'):
         return True
-    from app.core.models import WorkspaceMember
-    from app.core.permissions import get_workspace_permissions, workspace_role_rank
-    memberships = (await session.execute(
-        select(WorkspaceMember).where(WorkspaceMember.user_id == actor.id)
-    )).scalars().all()
-    for membership in memberships:
-        target_role = await get_workspace_role(session, target_id, membership.workspace_id)
-        if target_role is None:
-            continue
-        if workspace_role_rank(membership.role) <= workspace_role_rank(target_role):
-            continue
-        ws_permissions = await get_workspace_permissions(actor.id, membership.workspace_id) or {}
-        if ws_permissions.get('users_password_reset') or actor_permissions.get('users_password_reset'):
-            return True
+    from app.core.permissions import is_feature_available
+    if actor_permissions.get('users_manage') and await is_feature_available(actor, 'users_manage'):
+        target_permissions = await get_user_permissions(target_id)
+        return not (target_permissions.get('all') or target_permissions.get('users_manage') or target_permissions.get('users'))
+    # Space administrators cannot take over platform accounts by inviting them.
     return False
 
 
 @router.put('/{user_id}/role')
-async def set_role(user_id: int, request: Request, user=Depends(require_permission('users'))):
+async def set_role(user_id: int, request: Request, user=Depends(require_root())):
     data = await request.json()
     role_id = data.get('role_id')
     async with async_session() as session:
@@ -239,6 +236,7 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
         # Preserve shared work and history, detaching the deleted account.
         # Tasks/comments have older foreign keys without ON DELETE SET NULL.
         for model, field in (
+            (CrmDeal, 'assignee_id'), (CrmActivity, 'created_by'),
             (Task, 'creator_id'), (Task, 'assignee_id'), (Task, 'co_executor_id'),
             (TaskComment, 'user_id'), (ActivityLog, 'user_id'),
             (GeneratedReport, 'created_by'), (Module, 'assignee_id'),
@@ -253,8 +251,72 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
             TaskCoExecutor, Notification, SavedView, Note, NoteFolder,
         ):
             await session.execute(delete(model).where(model.user_id == user_id))
-        from app.core.models import UserSettings
+        from app.core.models import UserSettings, WorkspaceRemoval, FeatureOverride
+        await session.execute(delete(WorkspaceRemoval).where(WorkspaceRemoval.user_id == user_id))
+        await session.execute(delete(FeatureOverride).where(FeatureOverride.scope == 'user', FeatureOverride.target_id == user_id))
         await session.execute(delete(UserSettings).where(UserSettings.user_id == user_id))
         await session.execute(delete(User).where(User.id == user_id))
         await session.commit()
     return JSONResponse({'ok': True})
+
+
+@router.post('/change-password')
+async def change_password(request: Request, user=Depends(get_current_user)):
+    from app.core.auth import COOKIE_NAME, make_session_token, verify_password
+    permissions = await get_user_permissions(user.id)
+    if not user.must_change_password and not (permissions.get('all') or permissions.get('users_password_own', True)):
+        raise HTTPException(status_code=403, detail='Нет права смены своего пароля')
+    data = await request.json() if 'application/json' in request.headers.get('content-type', '') else await request.form()
+    if not verify_password(data.get('current_password', ''), user.password_hash):
+        raise HTTPException(status_code=400, detail='Неверный текущий пароль')
+    password = data.get('new_password', '')
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail='Новый пароль должен содержать минимум 8 символов')
+    async with async_session() as session:
+        account = await session.get(User, user.id)
+        account.password_hash = hash_password(password)
+        account.must_change_password = False
+        account.session_version += 1
+        await session.commit()
+        response = JSONResponse({'ok': True})
+        response.set_cookie(COOKIE_NAME, make_session_token(account.id, account.session_version),
+                            httponly=True, samesite='lax', max_age=86400 * 30)
+        return response
+
+
+@router.patch('/{user_id}/status')
+async def set_user_status(user_id: int, request: Request, actor=Depends(require_permission('users_manage'))):
+    data = await request.json()
+    if not isinstance(data.get('is_active'), bool):
+        raise HTTPException(status_code=400, detail='is_active должен быть логическим значением')
+    async with async_session() as session:
+        account = await session.get(User, user_id)
+        if not account:
+            raise HTTPException(status_code=404, detail='Пользователь не найден')
+        if account.is_root or account.id == actor.id:
+            raise HTTPException(status_code=403, detail='Нельзя блокировать root или самого себя')
+        target_permissions = await get_user_permissions(account.id)
+        if not actor.is_root and (target_permissions.get('users_manage') or target_permissions.get('users')):
+            raise HTTPException(status_code=403, detail='Управлять администраторами может только суперадмин')
+        account.is_active = data['is_active']
+        account.session_version += 1
+        await session.commit()
+    return {'ok': True}
+
+
+@router.get('/{user_id}/access')
+async def explain_access(user_id: int, actor=Depends(require_permission('users_manage'))):
+    from app.core.permissions import get_workspace_permissions, get_effective_features
+    async with async_session() as session:
+        account = await session.get(User, user_id)
+        if not account:
+            raise HTTPException(status_code=404, detail='Пользователь не найден')
+        rows = (await session.execute(select(WorkspaceMember, Workspace.name).join(
+            Workspace, Workspace.id == WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user_id))).all()
+    spaces = []
+    for member, name in rows:
+        spaces.append({'id': member.workspace_id, 'name': name, 'rank': member.role,
+                       'custom_role_id': member.custom_role_id,
+                       'permissions': await get_workspace_permissions(user_id, member.workspace_id),
+                       'features': await get_effective_features(account, member.workspace_id)})
+    return {'app_permissions': await get_user_permissions(user_id), 'spaces': spaces}

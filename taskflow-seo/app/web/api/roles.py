@@ -11,6 +11,7 @@ from app.core.permissions import (
     assert_within_ceiling,
     get_user_permissions,
     require_permission,
+    require_root,
 )
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
@@ -38,7 +39,7 @@ async def list_roles(user=Depends(require_permission('users'))):
 
 
 @router.post('')
-async def create_role(request: Request, user=Depends(require_permission('users'))):
+async def create_role(request: Request, user=Depends(require_root())):
     data = await request.json()
     name = (data.get('name') or '').strip()
     permissions = data.get('permissions') or {}
@@ -57,7 +58,7 @@ async def create_role(request: Request, user=Depends(require_permission('users')
 
 
 @router.put('/{role_id}')
-async def update_role(role_id: int, request: Request, user=Depends(require_permission('users'))):
+async def update_role(role_id: int, request: Request, user=Depends(require_root())):
     data = await request.json()
     granter = await get_user_permissions(user.id)
     async with async_session() as session:
@@ -80,7 +81,7 @@ async def update_role(role_id: int, request: Request, user=Depends(require_permi
 
 
 @router.delete('/{role_id}')
-async def delete_role(role_id: int, user=Depends(require_permission('users'))):
+async def delete_role(role_id: int, user=Depends(require_root())):
     async with async_session() as session:
         role = await session.get(Role, role_id)
         if not role:

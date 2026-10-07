@@ -40,7 +40,7 @@ export function Login() {
             TF
           </div>
           <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-[var(--color-text)]">TaskFlow</h1>
-          <p className="mt-2 text-[15px] text-[var(--color-text-secondary)]">SEO / dev workspace команды</p>
+          <p className="mt-2 text-[15px] text-[var(--color-text-secondary)]">Задачи, проекты и CRM команды</p>
         </div>
         <form
           onSubmit={handleSubmit}

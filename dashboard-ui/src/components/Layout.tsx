@@ -5,6 +5,7 @@ import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@d
 import { CSS } from '@dnd-kit/utilities';
 import {
   BarChart3,
+  Building2,
   BookOpen,
   Bell,
   CalendarDays,
@@ -49,7 +50,7 @@ const nav = [
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Дашборд', hint: 'Обзор команды', permission: 'dashboard' },
       { to: '/tasks', icon: CheckSquare, label: 'Задачи', hint: 'Список и фильтры', permission: 'tasks' },
-      { to: '/sprints', icon: Timer, label: 'Спринты', hint: 'Отрезки и прогресс', permission: 'tasks' },
+      { to: '/sprints', icon: Timer, label: 'Спринты', hint: 'Отрезки и прогресс', permission: 'kanban' },
       { to: '/kanban', icon: Columns3, label: 'Канбан', hint: 'Поток работы', permission: 'kanban' },
       { to: '/calendar', icon: CalendarDays, label: 'Календарь', hint: 'План выполнения', permission: 'calendar' },
       { to: '/notifications', icon: Bell, label: 'Уведомления', hint: 'События', permission: 'notifications' },
@@ -60,6 +61,7 @@ const nav = [
   {
     section: 'Клиенты',
     items: [
+      { to: '/crm', icon: Building2, label: 'CRM', hint: 'Сделки и контакты', permission: 'crm' },
       { to: '/clients', icon: Users, label: 'Клиенты', hint: 'CRM и договоры', permission: 'clients' },
       { to: '/modules', icon: Puzzle, label: 'Модули', hint: 'Автоматизация', permission: 'modules' },
       { to: '/reports', icon: BarChart3, label: 'Отчёты', hint: 'Метрики', permission: 'reports' },
@@ -81,6 +83,7 @@ const titles: Record<string, string> = {
   '/': 'Командный обзор',
   '/tasks': 'Задачи',
   '/kanban': 'Канбан',
+  '/crm': 'CRM',
   '/clients': 'Клиенты',
   '/modules': 'Модули',
   '/calendar': 'Календарь',
@@ -200,7 +203,8 @@ export function Layout() {
   const isSuperadmin = hasRole('superadmin');
   const canSee = (permission: string) => {
     if (permission === 'wiki') return true;
-    if (user?.is_root) return true;
+    if (permission === 'settings') return true;
+    if (user?.is_root && !['crm', 'clients', 'tasks', 'kanban', 'calendar', 'notes', 'reports', 'modules', 'ai'].includes(permission)) return true;
     // кран доступности (Ф6) действует и на суперадмина: функция выключена — пункта нет
     if (user?.features && user.features[permission] === false) return false;
     if (isSuperadmin) return true;
@@ -261,7 +265,7 @@ export function Layout() {
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
-            <div className="text-xs text-[var(--color-text-secondary)]">SEO / dev workspace</div>
+            <div className="text-xs text-[var(--color-text-secondary)]">Рабочие пространства</div>
           </div>
           <button type="button" onClick={toggleSidebar} className={cn('tf-button ml-auto hidden w-9 px-0 lg:inline-flex', sidebarCollapsed && 'lg:ml-0')} title={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'} aria-label={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -333,7 +337,7 @@ export function Layout() {
         <header className="sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
           <div className="min-w-0">
             <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
-            <p className="text-xs text-[var(--color-text-secondary)]">Быстрая работа команды, задач и клиентов</p>
+            <p className="text-xs text-[var(--color-text-secondary)]">Задачи и инструменты текущего пространства</p>
           </div>
           <button onClick={() => setVoiceOpen(true)} className="tf-button ml-auto w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
             <Mic size={16} />
@@ -354,7 +358,7 @@ export function Layout() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-bold">Коротко о работе в TaskFlow</h2>
                   <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                    Задачи планируются по дате выполнения, дедлайн ограничивает крайний срок, а доступ к клиентам определяет, кто видит связанные задачи и данные.
+                    Выберите пространство команды. Его участники, права и включённые модули определяют доступные разделы. Дедлайн задачи задаёт крайний срок.
                   </p>
                 </div>
                 <button type="button" onClick={closeIntro} className="grid h-8 w-8 place-items-center rounded-md border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)]" aria-label="Закрыть">
@@ -434,15 +438,6 @@ function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const missingForDraft = (value: VoiceTaskDraft) => {
-    const missing = [];
-    if (!value.title) missing.push('Уточните название задачи.');
-    if (!value.client_id) missing.push('Уточните клиента.');
-    if (!value.assignee_id) missing.push('Уточните исполнителя.');
-    if (!value.completion_date) missing.push('Уточните дату выполнения.');
-    return missing;
-  };
-
   const createTask = async () => {
     if (text.trim()) {
       await analyze();
@@ -451,36 +446,6 @@ function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
     setQuestions([]);
     setError('');
     setModalDraft(draft);
-    return;
-    const missing = missingForDraft(draft);
-    if (missing.length) {
-      setQuestions(missing);
-      setError('Не хватает обязательных данных. Уточните их голосом или текстом и нажмите Enter.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const task = await api.createTask({
-        title: draft.title || 'Новая задача',
-        client_id: draft.client_id || null,
-        assignee_id: draft.assignee_id || null,
-        task_type: draft.task_type || 'custom',
-        priority: draft.priority || 'medium',
-        notes: draft.notes || '',
-        status: 'todo',
-        completion_date: draft.completion_date ? new Date(`${draft.completion_date}T12:00:00`).toISOString() : null,
-        deadline: draft.deadline ? new Date(`${draft.deadline}T12:00:00`).toISOString() : null,
-      });
-      navigate('/tasks');
-      setCreatedTask(task);
-      setQuestions([]);
-      setDraft({});
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Не удалось создать задачу.');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const saveDraftTask = async (data: Partial<Task>) => {

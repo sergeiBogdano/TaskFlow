@@ -26,8 +26,11 @@ async def deletion_db(monkeypatch):
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(users, 'async_session', sessions)
     yield sessions
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    # SQLite database is in memory and disappears when its engine is disposed.
+    # PostgreSQL needs explicit teardown, including named circular constraints.
+    if engine.dialect.name != 'sqlite':
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 

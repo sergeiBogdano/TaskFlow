@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     CONTRACT_REMINDER_DAYS: list[int] = [14, 7, 3, 1]
     DEFAULT_REMINDER_OFFSET_HOURS: int = 1
     CRYPTO_SECRET: str = 'taskflow-secret-key-change-in-production'
+    BOOTSTRAP_USERNAME: str = 'admin'
+    BOOTSTRAP_PASSWORD: str = ''
     MAX_UPLOAD_SIZE_MB: int = 10
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10

@@ -19,11 +19,8 @@ class TestWorkspacePermissions:
 
     @staticmethod
     def _make_ws(sync_request, cookies, name=None):
-        resp = sync_request('POST', '/api/workspaces',
-                            json={'name': name or f'wsperm_{uuid.uuid4().hex[:8]}'},
-                            cookies=cookies)
-        assert resp.status_code == 201, resp.text
-        return resp.json()
+        from tests.test_user_permissions import _make_workspace
+        return _make_workspace(sync_request, cookies, name or f'wsperm_{uuid.uuid4().hex[:8]}', 'seo')
 
     @staticmethod
     def _me(sync_request, cookies, workspace_id=None):
@@ -63,7 +60,7 @@ class TestWorkspacePermissions:
         cookies = self._login(sync_request, username, 'pass1234')
 
         # без окружения работают app-права (в роли manager есть «Отчёты»)
-        assert self._me(sync_request, cookies).get('reports') is True
+        assert not self._me(sync_request, cookies).get('reports')
 
         ws = self._make_ws(sync_request, admin_cookies)
         self._add_member(sync_request, admin_cookies, ws['id'], uid, role='member')
@@ -77,9 +74,9 @@ class TestWorkspacePermissions:
         resp = sync_request('GET', f'/api/reports/data?workspace_id={ws["id"]}',
                             cookies=cookies)
         assert resp.status_code == 403, resp.text
-        # …а без указания окружения остаются app-права
+        # Без параметра пространства выбирается членство; глобальная роль не обходит его.
         resp = sync_request('GET', '/api/reports/data', cookies=cookies)
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 403, resp.text
 
         # кастомная роль окружения возвращает право
         resp = sync_request('POST', f'/api/workspaces/{ws["id"]}/roles',
@@ -135,7 +132,7 @@ class TestWorkspacePermissions:
                             json={'name': 'не должно получиться'},
                             cookies=cookies)
         assert resp.status_code == 403, resp.text
-        assert 'workspace' in resp.text
+        assert 'прав' in resp.text.lower()
 
         # чтение списка окружений участнику открыто
         resp = sync_request('GET', '/api/workspaces', cookies=cookies)
@@ -172,7 +169,7 @@ class TestWorkspacePermissions:
         resp = sync_request('POST', f'/api/clients?workspace_id={ws["id"]}',
                             json={'org_name': f'Клиент {uuid.uuid4().hex[:6]}',
                                   'domain': f'{uuid.uuid4().hex[:8]}.example.com'},
-                            cookies=cookies)
+                            cookies=admin_cookies)
         assert resp.status_code in (200, 201), resp.text
         client_id = resp.json().get('id') or resp.json().get('client_id')
         resp = sync_request('DELETE', f'/api/clients/{client_id}?workspace_id={ws["id"]}',

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -29,6 +29,8 @@ from app.core.models import (
 )
 from app.core.permissions import (
     get_current_user,
+    get_user_permissions,
+    require_root,
     get_user_role_names,
     get_workspace_role,
     is_root_user,
@@ -90,6 +92,11 @@ def _parse_ui_config(raw) -> dict:
 def _sanitize_ui_config(raw: dict) -> dict:
     """Чистит конфиг оформления: только известные секции, лимиты длины."""
     clean: dict = {}
+    for section in ('tasks', 'sprints'):
+        order = raw.get(section, {}).get('order') if isinstance(raw.get(section), dict) else None
+        if isinstance(order, list):
+            clean[section] = {'order': list(dict.fromkeys(x for x in order if isinstance(x, str) and len(x) <= 40))[:40]}
+
     nav = raw.get("nav")
     if isinstance(nav, dict):
         items = {}
@@ -139,7 +146,7 @@ def _sanitize_ui_config(raw: dict) -> dict:
             if entry:
                 items[key] = entry
         if items:
-            clean[section] = {"fields": items}
+            clean.setdefault(section, {})["fields"] = items
     return clean
 
 
@@ -152,6 +159,8 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
         "id": ws.id,
         "name": ws.name,
         "preset": ws.preset,
+        "visibility": ws.visibility,
+        "enabled_modules": json.loads(ws.enabled_modules or "[]"),
         "theme": ws.theme,
         "dictionary": dictionary,
         "has_ai_instructions": bool(ws.ai_instructions),
@@ -162,58 +171,93 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
     }
 
 
-async def _purge_client(session, client_id: int) -> None:
-    """Безвозвратное удаление клиента и его данных.
+async def _purge_task(session, task_id: int) -> None:
+    from sqlalchemy import delete, update, or_
+    from app.core.models import (TaskComment, TaskCoExecutor, TaskDependency, SprintTask, CrmDeal,
+                                Notification, Reminder, FileAttachment, task_tags)
+    for model, condition in (
+        (TaskComment, TaskComment.task_id == task_id), (TaskCoExecutor, TaskCoExecutor.task_id == task_id),
+        (SprintTask, SprintTask.task_id == task_id),
+        (TaskDependency, or_(TaskDependency.task_id == task_id, TaskDependency.depends_on_id == task_id)),
+        (Notification, Notification.task_id == task_id), (Reminder, Reminder.task_id == task_id),
+        (FileAttachment, FileAttachment.task_id == task_id),
+    ):
+        await session.execute(delete(model).where(condition))
+    await session.execute(task_tags.delete().where(task_tags.c.task_id == task_id))
+    await session.execute(update(CrmDeal).where(CrmDeal.task_id == task_id).values(task_id=None))
+    await session.execute(update(Task).where(Task.recurring_parent_id == task_id).values(recurring_parent_id=None))
+    await session.execute(delete(Task).where(Task.id == task_id))
 
-    Порядок важен для PostgreSQL: таблицы без ON DELETE (комментарии,
-    договоры, контакты) чистятся явно до родителей. Работает и на SQLite
-    без FK-enforcement (не оставляет сирот).
-    """
-    from app.core.models import ClientContact, Contract, FileAttachment, TaskComment
-    task_ids = select(Task.id).where(Task.client_id == client_id)
-    contract_ids = select(Contract.id).where(Contract.client_id == client_id)
-    await session.execute(TaskComment.__table__.delete().where(TaskComment.task_id.in_(task_ids)))
-    await session.execute(FileAttachment.__table__.delete().where(
-        (FileAttachment.task_id.in_(task_ids))
-        | (FileAttachment.client_id == client_id)
-        | (FileAttachment.contract_id.in_(contract_ids))
-    ))
-    await session.execute(Contract.__table__.delete().where(Contract.client_id == client_id))
-    await session.execute(ClientContact.__table__.delete().where(ClientContact.client_id == client_id))
-    await session.execute(Task.__table__.delete().where(Task.client_id == client_id))
-    await session.execute(Client.__table__.delete().where(Client.id == client_id))
+
+async def _purge_client(session, client_id: int) -> None:
+    from sqlalchemy import delete, update, or_
+    from app.core.models import (ClientContact, Contract, FileAttachment, CrmDeal, CrmContact,
+        Notification, Reminder, GeneratedReport, ClientResponsible, UserClientAccess, Page, Module)
+    tasks = (await session.execute(select(Task.id).where(Task.client_id == client_id))).scalars().all()
+    for task_id in tasks:
+        await _purge_task(session, task_id)
+    contracts = select(Contract.id).where(Contract.client_id == client_id)
+    await session.execute(update(Task).where(Task.contract_id.in_(contracts)).values(contract_id=None))
+    await session.execute(update(CrmDeal).where(CrmDeal.contract_id.in_(contracts)).values(contract_id=None))
+    await session.execute(update(CrmDeal).where(CrmDeal.client_id == client_id).values(client_id=None))
+    await session.execute(update(CrmContact).where(CrmContact.client_id == client_id).values(client_id=None))
+    await session.execute(update(Module).where(Module.client_id == client_id).values(client_id=None))
+    for model, condition in (
+        (FileAttachment, or_(FileAttachment.client_id == client_id, FileAttachment.contract_id.in_(contracts))),
+        (Notification, Notification.client_id == client_id), (Reminder, Reminder.client_id == client_id),
+        (GeneratedReport, GeneratedReport.client_id == client_id), (Page, Page.client_id == client_id),
+        (ClientResponsible, ClientResponsible.client_id == client_id), (UserClientAccess, UserClientAccess.client_id == client_id),
+        (Contract, Contract.client_id == client_id), (ClientContact, ClientContact.client_id == client_id),
+    ):
+        await session.execute(delete(model).where(condition))
+    await session.execute(delete(Client).where(Client.id == client_id))
 
 
 async def _purge_workspace(session, workspace_id: int) -> None:
-    """Безвозвратное удаление окружения и всех его данных.
-
-    Порядок важен для PostgreSQL: таблицы без ON DELETE чистятся явно.
-    """
-    from app.core.models import (
-        ClientContact,
-        Contract,
-        FileAttachment,
-        TaskComment,
-        WorkspaceKnowledge,
-    )
-    ws_tasks = select(Task.id).where(Task.workspace_id == workspace_id)
-    ws_clients = select(Client.id).where(Client.workspace_id == workspace_id)
-    await session.execute(TaskComment.__table__.delete().where(TaskComment.task_id.in_(ws_tasks)))
-    await session.execute(FileAttachment.__table__.delete().where(
-        (FileAttachment.task_id.in_(ws_tasks)) | (FileAttachment.client_id.in_(ws_clients))
-    ))
-    for model, column in ((Contract, Contract.client_id), (ClientContact, ClientContact.client_id)):
-        await session.execute(model.__table__.delete().where(column.in_(ws_clients)))
-    await session.execute(SprintTask.__table__.delete().where(
-        SprintTask.sprint_id.in_(select(Sprint.id).where(Sprint.workspace_id == workspace_id))))
+    """Delete dependencies explicitly on SQLite and PostgreSQL, children first."""
+    from sqlalchemy import delete, update, or_
+    from app.core.models import (ClientContact, Contract, FileAttachment, TaskComment, WorkspaceKnowledge,
+        CrmDeal, CrmActivity, CrmContact, CrmPipeline, CrmField, Module, Cycle, QuickTaskTemplate,
+        TaskCoExecutor, TaskDependency, Notification, Reminder, GeneratedReport, ClientResponsible,
+        UserClientAccess, Page, FeatureOverride, task_tags)
+    tasks = select(Task.id).where(Task.workspace_id == workspace_id)
+    clients = select(Client.id).where(Client.workspace_id == workspace_id)
+    modules = select(Module.id).where(Module.workspace_id == workspace_id)
+    contracts = select(Contract.id).where(Contract.client_id.in_(clients))
+    await session.execute(update(Task).where(Task.crm_deal_id.in_(select(CrmDeal.id).where(CrmDeal.workspace_id == workspace_id))).values(crm_deal_id=None))
+    for model in (CrmActivity, CrmDeal, CrmContact, CrmPipeline, CrmField):
+        await session.execute(delete(model).where(model.workspace_id == workspace_id))
+    for model, condition in (
+        (TaskComment, TaskComment.task_id.in_(tasks)),
+        (TaskCoExecutor, TaskCoExecutor.task_id.in_(tasks)),
+        (TaskDependency, or_(TaskDependency.task_id.in_(tasks), TaskDependency.depends_on_id.in_(tasks))),
+        (FileAttachment, or_(FileAttachment.task_id.in_(tasks), FileAttachment.client_id.in_(clients), FileAttachment.contract_id.in_(contracts))),
+        (Notification, or_(Notification.task_id.in_(tasks), Notification.client_id.in_(clients))),
+        (Reminder, or_(Reminder.task_id.in_(tasks), Reminder.client_id.in_(clients))),
+        (GeneratedReport, GeneratedReport.client_id.in_(clients)),
+        (ClientResponsible, ClientResponsible.client_id.in_(clients)),
+        (UserClientAccess, UserClientAccess.client_id.in_(clients)),
+        (Page, or_(Page.client_id.in_(clients), Page.module_id.in_(modules))),
+        (QuickTaskTemplate, QuickTaskTemplate.workspace_id == workspace_id),
+        (SprintTask, or_(SprintTask.task_id.in_(tasks), SprintTask.sprint_id.in_(select(Sprint.id).where(Sprint.workspace_id == workspace_id)))),
+        (Contract, Contract.client_id.in_(clients)), (ClientContact, ClientContact.client_id.in_(clients)),
+        (WorkspaceRemoval, WorkspaceRemoval.workspace_id == workspace_id),
+        (WorkspaceMember, WorkspaceMember.workspace_id == workspace_id),
+        (WorkspaceRole, WorkspaceRole.workspace_id == workspace_id),
+        (FeatureOverride, (FeatureOverride.scope == 'workspace') & (FeatureOverride.target_id == workspace_id)),
+    ):
+        await session.execute(delete(model).where(condition))
+    await session.execute(task_tags.delete().where(task_tags.c.task_id.in_(tasks)))
+    # SET NULL references also detach explicitly when SQLite FK enforcement is disabled.
+    await session.execute(update(Task).where(Task.recurring_parent_id.in_(tasks)).values(recurring_parent_id=None))
+    await session.execute(update(Task).where(Task.contract_id.in_(contracts)).values(contract_id=None))
     for model, column in ((Sprint, Sprint.workspace_id), (Task, Task.workspace_id),
+                          (Cycle, Cycle.module_id), (Module, Module.workspace_id),
                           (Client, Client.workspace_id), (Note, Note.workspace_id),
-                          (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
-                          (WorkspaceRole, WorkspaceRole.workspace_id),
-                          (WorkspaceMember, WorkspaceMember.workspace_id),
-                          (WorkspaceRemoval, WorkspaceRemoval.workspace_id)):
-        await session.execute(model.__table__.delete().where(column == workspace_id))
-    await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
+                          (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id)):
+        condition = column.in_(modules) if model is Cycle else column == workspace_id
+        await session.execute(delete(model).where(condition))
+    await session.execute(delete(Workspace).where(Workspace.id == workspace_id))
 
 
 def _member_to_dict(member: WorkspaceMember, username: str | None, custom_role: str | None = None) -> dict:
@@ -253,6 +297,7 @@ async def list_workspaces(deleted: bool = Query(default=False), user=Depends(get
 class WorkspaceCreate(BaseModel):
     name: str
     preset: str = "empty"
+    visibility: str = "hidden"
 
 
 @router.post("", status_code=201)
@@ -260,21 +305,15 @@ async def create_workspace(payload: WorkspaceCreate, user=Depends(get_current_us
     name = (payload.name or "").strip()
     if not name:
         return JSONResponse({"error": "Нужно название"}, status_code=400)
+    if payload.visibility not in ('open', 'closed', 'hidden'):
+        raise HTTPException(status_code=400, detail='Неизвестная видимость')
     preset = PRESETS.get(payload.preset, PRESETS["empty"])
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
-        if not user_is_superadmin(role_names):
-            owned_count = (await session.execute(
-                select(Workspace).where(
-                    Workspace.created_by == user.id,
-                    Workspace.deleted_at.is_(None),
-                )
-            )).scalars().all()
-            if len(owned_count) >= 3:
-                return JSONResponse(
-                    {"error": "Можно создать не более 3 окружений. Вас могут добавить в любое количество чужих."},
-                    status_code=400,
-                )
+        permissions = await get_user_permissions(user.id)
+        if not (is_root_user(user) or permissions.get('workspaces_create')):
+            raise HTTPException(status_code=403, detail='Нет права создавать пространства')
+        from app.core.workspace_modules import PRESET_MODULES
         ws = Workspace(
             name=name[:200],
             preset=payload.preset if payload.preset in PRESETS else "empty",
@@ -282,6 +321,8 @@ async def create_workspace(payload: WorkspaceCreate, user=Depends(get_current_us
             dictionary=json.dumps(preset["dictionary"], ensure_ascii=False),
             ai_instructions=preset["ai_instructions"],
             created_by=user.id,
+            visibility=payload.visibility,
+            enabled_modules=json.dumps(PRESET_MODULES.get(payload.preset, PRESET_MODULES['empty'])),
         )
         session.add(ws)
         await session.flush()
@@ -308,6 +349,66 @@ async def list_presets(user=Depends(get_current_user)):
     ])
 
 
+@router.get('/directory/list')
+async def space_directory(user=Depends(get_current_user)):
+    async with async_session() as session:
+        rows = (await session.execute(select(Workspace).where(
+            Workspace.deleted_at.is_(None), Workspace.visibility.in_(['open', 'closed'])).order_by(Workspace.name))).scalars().all()
+        return [{'id': ws.id, 'name': ws.name, 'visibility': ws.visibility,
+                 'joined': await get_workspace_role(session, user.id, ws.id) is not None} for ws in rows]
+
+
+@router.post('/{workspace_id}/join')
+async def join_space(workspace_id: int, user=Depends(get_current_user)):
+    async with async_session() as session:
+        ws = await session.get(Workspace, workspace_id)
+        if not ws or ws.deleted_at is not None or ws.visibility == 'hidden':
+            raise HTTPException(status_code=404, detail='Пространство не найдено')
+        if ws.visibility != 'open':
+            raise HTTPException(status_code=403, detail='Запросите приглашение у администратора пространства')
+        if not await get_workspace_role(session, user.id, ws.id):
+            session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role='member'))
+        await session.commit()
+    return {'ok': True}
+
+
+@router.get('/{workspace_id}/modules')
+async def space_modules(workspace_id: int, user=Depends(get_current_user)):
+    from app.core.workspace_modules import MODULES
+    async with async_session() as session:
+        ws, _ = await resolve_workspace(session, user, await get_user_role_names(user.id), workspace_id)
+        return {'catalog': MODULES, 'enabled': json.loads(ws.enabled_modules or '[]')}
+
+
+@router.put('/{workspace_id}/modules')
+async def set_space_modules(workspace_id: int, request: Request, user=Depends(require_root())):
+    from app.core.workspace_modules import MODULES
+    data = await request.json()
+    enabled = data.get('enabled')
+    if not isinstance(enabled, list) or any(not isinstance(x, str) or x not in MODULES for x in enabled):
+        raise HTTPException(status_code=400, detail='Передайте список известных модулей')
+    async with async_session() as session:
+        ws = await session.get(Workspace, workspace_id)
+        if not ws or ws.deleted_at is not None:
+            raise HTTPException(status_code=404, detail='Пространство не найдено')
+        from app.core.models import FeatureOverride
+        from app.core.workspace_modules import module_for_permission
+        from app.core.permission_catalog import work_scope_keys
+        removed = set(json.loads(ws.enabled_modules or '[]')) - set(enabled)
+        for key in work_scope_keys():
+            if module_for_permission(key) in removed:
+                override = (await session.execute(select(FeatureOverride).where(FeatureOverride.scope == 'workspace', FeatureOverride.target_id == ws.id, FeatureOverride.key == key))).scalars().first()
+                if override:
+                    override.enabled = False
+                else:
+                    session.add(FeatureOverride(scope='workspace', target_id=ws.id, key=key, enabled=False))
+        ws.enabled_modules = json.dumps(list(dict.fromkeys(enabled)))
+        await session.commit()
+    from app.core.cache import dashboard_cache
+    dashboard_cache.clear()
+    return {'ok': True}
+
+
 @router.get("/{workspace_id}")
 async def get_workspace(workspace_id: int, user=Depends(get_current_user)):
     async with async_session() as session:
@@ -324,6 +425,7 @@ class WorkspaceUpdate(BaseModel):
     dictionary: dict | None = None
     ai_instructions: str | None = None
     ui_config: dict | None = None
+    visibility: str | None = None
 
 
 @router.patch("/{workspace_id}")
@@ -331,6 +433,10 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
     workspace = ctx["workspace"]
     async with async_session() as session:
         ws = await session.get(Workspace, workspace.id)
+        if payload.visibility is not None:
+            if payload.visibility not in ('open', 'closed', 'hidden'):
+                raise HTTPException(status_code=400, detail='Неизвестная видимость')
+            ws.visibility = payload.visibility
         if payload.name is not None:
             name = payload.name.strip()
             if not name:
@@ -417,7 +523,8 @@ async def list_members(workspace_id: int, ctx=Depends(require_workspace_role("ow
 
 
 class MemberCreate(BaseModel):
-    user_id: int
+    user_id: int | None = None
+    username: str | None = None
     role: str = WS_ROLE_MEMBER
 
 
@@ -474,8 +581,12 @@ async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(requi
         err = _can_manage(ctx["role"], actor_is_super, None, payload.role)
         if err:
             return JSONResponse({"error": err}, status_code=403)
-        target = await session.get(User, payload.user_id)
-        if target is None:
+        if payload.username:
+            target = (await session.execute(select(User).where(User.username == payload.username.strip()))).scalar_one_or_none()
+            payload.user_id = target.id if target else None
+        else:
+            target = await session.get(User, payload.user_id) if payload.user_id else None
+        if target is None or not target.is_active:
             return JSONResponse({"error": "Пользователь не найден"}, status_code=404)
         existing = (await session.execute(
             select(WorkspaceMember).where(

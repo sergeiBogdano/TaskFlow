@@ -187,12 +187,19 @@ async def _add_assignment_notifications(session, task: Task, actor_user_id: int 
         ))
 
 
-async def _ensure_assignees_valid_for_client(session, role_names: set[str], client_id: int | None, assignee_id: int | None, co_executor_ids):
+async def _ensure_assignees_valid_for_client(session, role_names: set[str], client_id: int | None, assignee_id: int | None, co_executor_ids, workspace_id=None):
     co_executor_ids = [int(user_id) for user_id in (co_executor_ids or []) if user_id]
     if assignee_id and assignee_id in co_executor_ids:
         raise HTTPException(status_code=400, detail='Исполнитель и соисполнитель должны быть разными')
     if len(co_executor_ids) != len(set(co_executor_ids)):
         raise HTTPException(status_code=400, detail='Соисполнители не должны повторяться')
+    ids = set(co_executor_ids) | ({int(assignee_id)} if assignee_id else set())
+    if ids and workspace_id is not None:
+        from app.core.models import WorkspaceMember, User
+        active_ids = set((await session.execute(select(WorkspaceMember.user_id).join(User, User.id == WorkspaceMember.user_id).where(
+            WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id.in_(ids), User.is_active.is_(True)))).scalars())
+        if ids - active_ids:
+            raise HTTPException(status_code=400, detail='Исполнители должны быть активными участниками пространства')
     # Client access controls sensitive client tabs. It must not block a task
     # assignment when organizations are shared across the team.
 
@@ -226,6 +233,8 @@ def _task_to_dict(t: Task) -> dict:
         'task_type': t.task_type,
         'client': client_name,
         'client_id': t.client_id,
+        'contract_id': t.contract_id,
+        'crm_deal_id': t.crm_deal_id,
         'client_warning': client_warning or '',
         'notes': t.notes or '',
         'comment': t.comment or '',
@@ -426,7 +435,7 @@ async def empty_trash(workspace_id: int = Query(None), user=Depends(get_current_
 
 
 @router.post('/bulk')
-async def bulk_update_tasks(data: dict, user=Depends(get_current_user)):
+async def bulk_update_tasks(request: Request, data: dict, user=Depends(get_current_user)):
     ids = [int(item) for item in (data.get('ids') or []) if item]
     fields = data.get('fields') or {}
     if not ids:
@@ -451,6 +460,10 @@ async def bulk_update_tasks(data: dict, user=Depends(get_current_user)):
         updated = 0
 
         for task in tasks:
+            from app.core.permissions import workspace_id_from_request
+            active_ws = workspace_id_from_request(request)
+            if active_ws is not None and task.workspace_id != active_ws:
+                continue
             if not task_is_editable_by_user(task, user, role_names, accessible_client_ids):
                 continue
             try:
@@ -471,7 +484,7 @@ async def bulk_update_tasks(data: dict, user=Depends(get_current_user)):
                 _new_client = await session.get(Client, next_client_id)
                 if _new_client is None or (_new_client.workspace_id or task.workspace_id) != task.workspace_id:
                     continue
-            await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids)
+            await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids, task.workspace_id)
             _validate_task_dates(next_completion_date, next_deadline)
             await _validate_contract_task_dates(session, next_client_id, fields.get('no_contract', task.no_contract), next_completion_date, next_deadline)
             for field, value in fields.items():
@@ -565,6 +578,8 @@ async def task_activity(task_id: int, user=Depends(get_current_user)):
 
 @router.post('')
 async def create_task(data: dict, workspace_id: int = Query(None), user=Depends(get_current_user)):
+    if not isinstance(data.get('title'), str) or not data['title'].strip() or len(data['title']) > 200:
+        raise HTTPException(status_code=400, detail='Укажите название задачи (до 200 символов)')
     async with async_session() as session:
         ts = TaskService(session)
         role_names = await get_user_role_names(user.id)
@@ -580,7 +595,7 @@ async def create_task(data: dict, workspace_id: int = Query(None), user=Depends(
             _client = await session.get(Client, client_id)
             if _client is None or (_client.workspace_id or workspace.id) != workspace.id:
                 raise HTTPException(status_code=400, detail='Client belongs to another workspace')
-        await _ensure_assignees_valid_for_client(session, role_names, client_id, assignee_id, co_executor_ids)
+        await _ensure_assignees_valid_for_client(session, role_names, client_id, assignee_id, co_executor_ids, workspace.id)
         _validate_task_dates(cd, dl)
         await _validate_contract_task_dates(session, client_id, data.get('no_contract', False), cd, dl)
         t = await ts.create_task(
@@ -674,7 +689,7 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         if 'checklist' in data:
             track('checklist', t.checklist, next_checklist)
         await _ensure_client_access(session, user, role_names, accessible_client_ids, next_client_id)
-        await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids)
+        await _ensure_assignees_valid_for_client(session, role_names, next_client_id, next_assignee_id, next_co_executor_ids, t.workspace_id)
         _validate_task_dates(next_completion_date, next_deadline)
         next_no_contract = data.get('no_contract', t.no_contract) if 'no_contract' in data else t.no_contract
         await _validate_contract_task_dates(session, next_client_id, next_no_contract, next_completion_date, next_deadline)
@@ -918,3 +933,8 @@ async def delete_task_file(task_id: int, file_id: int, user=Depends(get_current_
         await session.delete(att)
         await session.commit()
     return JSONResponse({'ok': True})
+
+
+@router.post('/{task_id}/done')
+async def complete_task(task_id: int, user=Depends(get_current_user)):
+    return await move_task(task_id, {'status': 'done'}, user)

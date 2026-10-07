@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import time
 
 from app.core.config import settings
 
@@ -24,22 +25,25 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(dk.hex(), dk_hex)
 
 
-def make_session_token(user_id: int) -> str:
-    payload = str(user_id)
+def make_session_token(user_id: int, session_version: int = 0) -> str:
+    payload = f'{user_id}:{session_version}:{int(time.time()) + COOKIE_MAX_AGE}'
     sig = hmac.new(settings.WEB_APP_SECRET.encode(), payload.encode(), 'sha256').hexdigest()
-    return f'{user_id}:{sig}'
+    return f'{payload}:{sig}'
 
 
 def verify_session_token(token: str) -> int | None:
     try:
-        parts = token.split(':')
-        if len(parts) != 2:
-            return None
-        user_id, sig = parts
-        payload = str(user_id)
+        uid, version, expires, sig = token.split(':')
+        payload = f'{uid}:{version}:{expires}'
         expected = hmac.new(settings.WEB_APP_SECRET.encode(), payload.encode(), 'sha256').hexdigest()
-        if not hmac.compare_digest(sig, expected):
+        if not hmac.compare_digest(sig, expected) or int(expires) <= time.time():
             return None
-        return int(user_id)
-    except (ValueError, IndexError):
+        int(version)
+        return int(uid)
+    except (ValueError, AttributeError):
         return None
+
+
+def session_matches_user(token: str, user) -> bool:
+    return bool(user and user.is_active and verify_session_token(token) == user.id
+                and int(token.split(':')[1]) == user.session_version)

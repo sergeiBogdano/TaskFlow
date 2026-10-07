@@ -12,6 +12,7 @@ from app.core.permissions import (
     get_current_user,
     get_user_role_names,
     require_role,
+    require_permission,
     resolve_workspace,
 )
 from app.core.utils.timezone import format_datetime, to_utc, utc_now
@@ -100,7 +101,7 @@ async def list_modules(workspace_id: int | None = Query(None), user=Depends(get_
 
 
 @router.post('')
-async def create_module(data: dict, workspace_id: int | None = Query(None), user=Depends(require_role(['superadmin', 'admin']))):
+async def create_module(data: dict, workspace_id: int | None = Query(None), user=Depends(require_permission('modules'))):
     _validate_module_dates(data.get('completion_offset_days', 0), data.get('deadline_offset_days'))
     client_ids = [int(item) for item in (data.get('client_ids') or []) if item]
     if not client_ids and data.get('client_id'):
@@ -132,7 +133,7 @@ async def create_module(data: dict, workspace_id: int | None = Query(None), user
 
 
 @router.put('/{module_id}')
-async def update_module(module_id: int, data: dict, user=Depends(require_role(['superadmin', 'admin']))):
+async def update_module(module_id: int, data: dict, user=Depends(require_permission('modules'))):
     async with async_session() as session:
         m = await session.get(Module, module_id)
         if not m:
@@ -161,7 +162,7 @@ async def update_module(module_id: int, data: dict, user=Depends(require_role(['
 
 
 @router.delete('/{module_id}')
-async def delete_module(module_id: int, user=Depends(require_role(['superadmin', 'admin']))):
+async def delete_module(module_id: int, user=Depends(require_permission('modules'))):
     async with async_session() as session:
         m = await session.get(Module, module_id)
         if m:
@@ -172,7 +173,7 @@ async def delete_module(module_id: int, user=Depends(require_role(['superadmin',
 
 
 @router.post('/{module_id}/generate')
-async def generate_tasks(module_id: int, data: dict = None, user=Depends(require_role(['superadmin', 'admin', 'manager']))):
+async def generate_tasks(module_id: int, data: dict = None, user=Depends(require_permission('modules'))):
     async with async_session() as session:
         m = await session.get(Module, module_id)
         if not m:

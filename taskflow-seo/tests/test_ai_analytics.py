@@ -16,7 +16,7 @@ def llm_calls(monkeypatch):
     return calls
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def seed_ai_data(admin_cookies, executor_cookies, event_loop):
     from sqlalchemy import select
 
@@ -194,7 +194,7 @@ class TestSeoReport:
 
 class TestAiChat:
 
-    def test_chat_my_overdue(self, sync_request, executor_cookies, seed_ai_data, llm_calls):
+    def test_chat_my_overdue(self, sync_request, executor_cookies, seed_ai_data, llm_calls, ai_chat_grant):
         resp = sync_request(
             "POST", "/api/ai/chat",
             json={"message": "Сколько у меня просроченных задач?"},
@@ -229,3 +229,17 @@ class TestAiChat:
 
     def test_chat_unauth(self, sync_request):
         assert sync_request("POST", "/api/ai/chat", json={"message": "привет"}, cookies={}).status_code == 401
+
+
+@pytest.fixture
+def ai_chat_grant(sync_request, admin_cookies, seed_ai_data):
+    from app.core.permission_catalog import workspace_default_permissions
+    ws = sync_request('GET', '/api/workspaces', cookies=admin_cookies).json()[0]['id']
+    uid = seed_ai_data['executor_id']
+    role = sync_request('POST', f'/api/workspaces/{ws}/roles', json={'name': 'AI chat test', 'permissions': {**workspace_default_permissions('member'), 'ai': True}}, cookies=admin_cookies)
+    assert role.status_code == 201, role.text
+    rid = role.json()['id']
+    assert sync_request('PUT', f'/api/workspaces/{ws}/members/{uid}/custom-role', json={'role_id': rid}, cookies=admin_cookies).status_code == 200
+    yield
+    sync_request('PUT', f'/api/workspaces/{ws}/members/{uid}/custom-role', json={'role_id': None}, cookies=admin_cookies)
+    sync_request('DELETE', f'/api/workspaces/{ws}/roles/{rid}', cookies=admin_cookies)
