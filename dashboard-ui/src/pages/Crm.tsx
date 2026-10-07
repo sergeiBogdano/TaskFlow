@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Archive, Building2, GripVertical, Plus, Search, Settings2, Trash2, Users, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -105,7 +106,7 @@ export function Crm() {
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><div className="tf-eyebrow">Клиенты и продажи</div><h2 className="tf-page-title">CRM</h2><p className="tf-page-subtitle">От первого контакта до договора и выполненной работы.</p></div>
+      <div><div className="tf-eyebrow">Клиенты и продажи</div><h2 className="tf-page-title">{sectionLabel('/crm')}</h2><p className="tf-page-subtitle">От первого контакта до договора и выполненной работы.</p></div>
       <Link className="tf-button" to="/clients"><Building2 size={16} />Организации и договоры<ArrowRight size={14} /></Link>
     </div>
     <div className="tf-panel-flat flex flex-wrap items-center gap-2 p-2">

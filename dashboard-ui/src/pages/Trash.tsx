@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Eraser, FileText, RotateCcw, Trash2 } from 'lucide-react';
 import { api, type Client, type GeneratedReport, type Task } from '../api/client';
@@ -63,7 +64,7 @@ export function Trash() {
     <div className="mx-auto max-w-[1300px] space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="text-xl font-black">Корзина</h2>
+          <h2 className="text-xl font-black">{sectionLabel('/trash')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">Удалённые задачи можно восстановить или окончательно очистить.</p>
         </div>
         <button onClick={empty} disabled={!tasks.length && !reports.length} className="tf-button tf-button-primary ml-auto">

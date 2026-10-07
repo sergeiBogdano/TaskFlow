@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Building2, CalendarClock, Clock3, Edit3, FileText, Plus, Trash2, UsersRound, X } from 'lucide-react';
 import { api } from '../api/client';
@@ -83,7 +84,7 @@ export function Modules() {
     <div className="mx-auto max-w-[1400px] space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="text-xl font-black">Модули</h2>
+          <h2 className="text-xl font-black">{sectionLabel('/modules')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">Автоматические правила, которые сами создают задачи по клиентам, датам и типам работ.</p>
         </div>
         {canManage && <button onClick={() => { setEditing(null); setShowModal(true); }} className="tf-button tf-button-primary ml-auto"><Plus size={16} />Новое правило</button>}

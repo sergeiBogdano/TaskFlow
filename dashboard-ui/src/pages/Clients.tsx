@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Activity, AlertTriangle, BarChart3, CalendarDays, CalendarRange, CheckCircle2, ExternalLink, KeyRound, ListFilter, NotebookText, Paperclip, Plus, RefreshCw, Save, Search, Target, Trash2, Upload, UserRoundCheck, X } from 'lucide-react';
@@ -165,7 +166,7 @@ export function Clients() {
     <div className="mx-auto max-w-[1500px] space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="text-xl font-black">Клиенты</h2>
+          <h2 className="text-xl font-black">{sectionLabel('/clients')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">Карточки с договором, контактами, доступами, задачами и автоматизациями.</p>
         </div>
         <button onClick={() => { setSelectedClient(null); setShowModal(true); }} className="tf-button tf-button-primary ml-auto"><Plus size={16} />Новый клиент</button>

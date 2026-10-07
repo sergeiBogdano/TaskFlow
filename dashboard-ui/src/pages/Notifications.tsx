@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck, ChevronRight, Trash2 } from 'lucide-react';
@@ -78,7 +79,7 @@ export function Notifications() {
     <div className="mx-auto max-w-4xl space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-xl font-black"><Bell size={22} />Уведомления</h2>
+          <h2 className="flex items-center gap-2 text-xl font-black"><Bell size={22} />{sectionLabel('/notifications')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">События по задачам, клиентам и срокам. Клик открывает связанный объект.</p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">

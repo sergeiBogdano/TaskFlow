@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
@@ -279,7 +280,7 @@ export function Calendar() {
       <div className="mx-auto max-w-[1500px] space-y-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div>
-            <h2 className="text-xl font-black">Календарь</h2>
+            <h2 className="text-xl font-black">{sectionLabel('/calendar')}</h2>
             <p className="text-sm text-[var(--color-text-secondary)]">Задачи показываются по дате выполнения. Перетаскивание меняет дату выполнения, не крайний срок.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5 xl:justify-end">

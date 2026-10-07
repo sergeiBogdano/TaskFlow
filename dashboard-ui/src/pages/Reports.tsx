@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, Eye, FileText, Loader2, RefreshCw, Trash2, Wand2 } from 'lucide-react';
 import { api } from '../api/client';
@@ -139,7 +140,7 @@ export function Reports() {
     <div className="mx-auto grid max-w-[1600px] gap-5 xl:grid-cols-[420px_1fr]">
       <section className="space-y-4">
         <div>
-          <h2 className="text-xl font-black">Отчёты</h2>
+          <h2 className="text-xl font-black">{sectionLabel('/reports')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">
             Собирайте HTML-отчёт по клиенту. Генерация идёт на сервере, поэтому можно перейти в другую вкладку и вернуться позже.
           </p>

@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState } from 'react';
 import { Bell, Download, FolderOpen, HardDrive, Info, Palette, ShieldCheck } from 'lucide-react';
 import { APP_VERSION } from '../lib/version';
@@ -84,7 +85,7 @@ export function Settings() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <div>
-        <h2 className="text-xl font-black">Настройки</h2>
+        <h2 className="text-xl font-black">{sectionLabel('/settings')}</h2>
         <p className="text-sm text-[var(--color-text-secondary)]">Профиль, роль и базовая информация по рабочему пространству.</p>
       </div>
 

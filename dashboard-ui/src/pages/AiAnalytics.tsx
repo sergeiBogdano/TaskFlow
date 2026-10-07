@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, BarChart3, Bot, CalendarClock, Send, Sparkles, Trash2, UsersRound, Wand2 } from 'lucide-react';
 import { api, type AiAnalyticsResult, type Client } from '../api/client';
@@ -118,7 +119,7 @@ export function AiAnalytics() {
   return (
     <div className="mx-auto max-w-[1200px] space-y-5">
       <div>
-        <h2 className="tf-page-title">AI-аналитика</h2>
+        <h2 className="tf-page-title">{sectionLabel('/ai')}</h2>
         <p className="tf-page-subtitle">TaskFlow готовит выборку из базы, локальная модель Ollama анализирует. Модель ничего не меняет — только текст.</p>
       </div>
 

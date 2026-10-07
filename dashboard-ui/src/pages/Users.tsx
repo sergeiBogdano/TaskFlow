@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Ban, Check, KeyRound, Plus, Search, ShieldCheck, UsersRound, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -45,7 +46,7 @@ export function Users() {
   const filtered = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
   const canManage = Boolean(root || actor?.permissions?.users_manage);
   return <div className="mx-auto max-w-6xl space-y-5">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><div className="tf-eyebrow">Управление приложением</div><h2 className="tf-page-title">Пользователи и доступ</h2><p className="tf-page-subtitle">Аккаунты общие для приложения. Работа и роли команды задаются отдельно в каждом пространстве.</p></div>{canManage && <button className="tf-button tf-button-primary" onClick={() => setCreateOpen(true)}><Plus size={16} />Новый пользователь</button>}</header>
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><div className="tf-eyebrow">Управление приложением</div><h2 className="tf-page-title">{sectionLabel('/users')}</h2><p className="tf-page-subtitle">Аккаунты общие для приложения. Работа и роли команды задаются отдельно в каждом пространстве.</p></div>{canManage && <button className="tf-button tf-button-primary" onClick={() => setCreateOpen(true)}><Plus size={16} />Новый пользователь</button>}</header>
     <div className="grid gap-3 sm:grid-cols-3">{[['Аккаунтов', users.length], ['Активных', users.filter(u => u.is_active !== false).length], ['Ожидают смены пароля', users.filter(u => u.must_change_password).length]].map(([label, value]) => <div key={label} className="tf-panel-flat p-4"><span className="text-xs text-[var(--color-muted)]">{label}</span><p className="mt-1 text-2xl font-bold">{value}</p></div>)}</div>
     <div className="tf-panel-flat flex flex-wrap gap-2 p-2"><button className={`tf-button ${tab === 'users' ? 'tf-button-primary' : ''}`} onClick={() => setTab('users')}><UsersRound size={15} />Аккаунты</button>{root && <><button className={`tf-button ${tab === 'roles' ? 'tf-button-primary' : ''}`} onClick={() => setTab('roles')}><ShieldCheck size={15} />Роли приложения</button><button className={`tf-button ${tab === 'groups' ? 'tf-button-primary' : ''}`} onClick={() => setTab('groups')}>Группы</button></>}<Link to="/workspace" className="tf-button ml-auto">Команда пространства →</Link></div>
     {error && <div role="alert" className="tf-alert-error">{error}</div>}

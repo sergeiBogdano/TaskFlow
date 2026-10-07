@@ -1,3 +1,4 @@
+import { SECTION_LABELS, resolveSectionLabel, resolveFieldLabels } from '../lib/uiLabels';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
 import { api, type WorkspaceDetail, type WorkspaceMember, type WorkspaceRole } from '../api/client';
@@ -5,7 +6,7 @@ import { SearchSelect } from '../components/SearchSelect';
 import { referenceCache } from '../api/cache';
 import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
-import { refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
+import { sectionLabel, refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
 import { FeaturesPanel } from '../components/FeaturesPanel';
 import { SpaceModulesPanel } from '../components/SpaceModulesPanel';
 import { FieldOrderEditor } from '../components/FieldOrderEditor';
@@ -26,7 +27,6 @@ export function WorkspaceSettings() {
   const [name, setName] = useState('');
   const [visibility, setVisibility] = useState('hidden');
   const [theme, setTheme] = useState('');
-  const [clientsLabel, setClientsLabel] = useState('');
   const [aiInstructions, setAiInstructions] = useState('');
 
   const [addUserId, setAddUserId] = useState('');
@@ -71,7 +71,6 @@ export function WorkspaceSettings() {
       setName(full.name);
       setTheme(full.theme || '');
       setVisibility(full.visibility || 'hidden');
-      setClientsLabel(full.dictionary?.clients || '');
       setAiInstructions(full.ai_instructions || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить окружение.');
@@ -124,7 +123,6 @@ export function WorkspaceSettings() {
         name: name.trim(),
         visibility,
         theme: theme || null,
-        dictionary: clientsLabel.trim() ? { clients: clientsLabel.trim() } : {},
         ai_instructions: aiInstructions.trim() || null,
       });
       if (updated.theme === 'cream' || updated.theme === 'graphite') applyTheme(updated.theme);
@@ -273,7 +271,7 @@ export function WorkspaceSettings() {
     <div className="mx-auto max-w-3xl space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="tf-page-title">Окружение</h2>
+          <h2 className="tf-page-title">{sectionLabel('/workspace')}</h2>
           <p className="tf-page-subtitle">Настройки, команда и база знаний активного окружения.</p>
         </div>
         <span className="tf-chip ml-auto">роль в окружении: {detail.role === 'owner' ? 'владелец' : detail.role === 'admin' ? 'администратор' : 'участник'}</span>
@@ -306,10 +304,7 @@ export function WorkspaceSettings() {
                 <option value="graphite">Графит</option>
               </select>
             </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">«Клиенты» называть</span>
-              <input className="tf-input" value={clientsLabel} onChange={event => setClientsLabel(event.target.value)} placeholder="Клиенты" maxLength={40} disabled={!canEditSettings} />
-            </label>
+            <a href="#interface-settings" className="self-end text-sm text-[var(--color-accent)] underline">Названия разделов и полей — в конструкторе интерфейса</a>
           </div>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Инструкции для AI</span>
@@ -428,8 +423,8 @@ export function WorkspaceSettings() {
       )}
 
       <section className="tf-panel-flat p-5">
-        <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Переименование и скрытие пунктов меню, полей и заголовков. {(isOwner || isSuperadmin) ? 'Применяется сразу.' : 'Менять оформление может только владелец окружения.'} Таблица задач и новые поля — не входят (таблица с фиксированной сеткой).</p>
+        <h3 id="interface-settings" className="mb-1 flex scroll-mt-24 items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Единые названия разделов для меню и страниц. Подписи полей используются в формах, фильтрах и таблице задач. {(isOwner || isSuperadmin) ? 'Изменения действуют после нажатия «Применить».' : 'Менять оформление может только владелец окружения.'}</p>
         <UiEditor detail={detail} canManage={isOwner || isSuperadmin} onSaved={load} />
       </section>
 
@@ -495,49 +490,14 @@ export function WorkspaceSettings() {
   );
 }
 
-const KNOWN_ROUTES = [
-  { to: '/', label: 'Дашборд' },
-  { to: '/tasks', label: 'Задачи' },
-  { to: '/sprints', label: 'Спринты' },
-  { to: '/kanban', label: 'Канбан' },
-  { to: '/calendar', label: 'Календарь' },
-  { to: '/notifications', label: 'Уведомления' },
-  { to: '/trash', label: 'Корзина' },
-  { to: '/crm', label: 'CRM' },
-  { to: '/clients', label: 'Клиенты' },
-  { to: '/modules', label: 'Модули' },
-  { to: '/reports', label: 'Отчёты' },
-  { to: '/ai', label: 'AI-аналитика' },
-  { to: '/notes', label: 'Заметки' },
-  { to: '/users', label: 'Пользователи' },
-  { to: '/settings', label: 'Настройки' },
-  { to: '/workspace', label: 'Окружение' },
-];
-
-const TITLE_DEFAULTS: Record<string, string> = {
-  '/': 'Командный обзор',
-  '/tasks': 'Задачи',
-  '/sprints': 'Спринты',
-  '/kanban': 'Канбан',
-  '/clients': 'Клиенты',
-  '/modules': 'Модули',
-  '/calendar': 'Календарь',
-  '/notifications': 'Уведомления',
-  '/users': 'Пользователи',
-  '/reports': 'Отчёты',
-  '/trash': 'Корзина',
-  '/notes': 'Заметки',
-  '/ai': 'AI-аналитика',
-  '/workspace': 'Окружение',
-  '/settings': 'Настройки',
-};
+const KNOWN_ROUTES = Object.entries(SECTION_LABELS).map(([to, label]) => ({ to, label }));
 
 function UiEditor({ detail, canManage, onSaved }: {
   detail: WorkspaceDetail;
   canManage: boolean;
   onSaved: () => void;
 }) {
-  const [tab, setTab] = useState<'menu' | 'tasks' | 'sprints' | 'titles'>('menu');
+  const [tab, setTab] = useState<'menu' | 'tasks' | 'sprints'>('menu');
   const [cfg, setCfg] = useState<UiConfig>(() => (
     detail.ui_config && typeof detail.ui_config === 'object' ? detail.ui_config as UiConfig : {}
   ));
@@ -545,10 +505,11 @@ function UiEditor({ detail, canManage, onSaved }: {
   const [msg, setMsg] = useState('');
 
   const setNav = (to: string, patch: Record<string, any>) => {
-    setCfg(prev => ({ ...prev, nav: { ...(prev.nav || {}), [to]: { ...(prev.nav?.[to] || {}), ...patch } } }));
-  };
-  const setTitle = (path: string, value: string) => {
-    setCfg(prev => ({ ...prev, titles: { ...(prev.titles || {}), [path]: value } }));
+    setCfg(prev => {
+      const titles = { ...prev.titles };
+      if ('label' in patch) delete titles[to];
+      return { ...prev, titles, nav: { ...prev.nav, [to]: { ...prev.nav?.[to], ...patch } } };
+    });
   };
   const setTaskField = (key: string, patch: Record<string, any>) => {
     setCfg(prev => ({
@@ -588,16 +549,19 @@ function UiEditor({ detail, canManage, onSaved }: {
     setCfg({});
   };
 
+  const clientsLabel = typeof detail.dictionary?.clients === 'string' ? detail.dictionary.clients : 'Клиенты';
+  const currentSectionLabel = (route: string) => resolveSectionLabel(cfg, route, clientsLabel);
+  const taskLabels = resolveFieldLabels(TASK_FIELD_DEFAULTS, cfg.tasks?.fields);
+  const sprintLabels = resolveFieldLabels(SPRINT_FIELD_DEFAULTS, cfg.sprints?.fields);
   const visibleNav = KNOWN_ROUTES.filter(r => cfg.nav?.[r.to]?.visible !== false);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
         {([
-          ['menu', 'Меню'],
-          ['tasks', 'Задачи'],
-          ['sprints', 'Спринты'],
-          ['titles', 'Заголовки'],
+          ['menu', 'Названия разделов'],
+          ['tasks', `Поля: ${resolveSectionLabel(cfg, '/tasks')}`],
+          ['sprints', `Поля: ${resolveSectionLabel(cfg, '/sprints')}`],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -629,9 +593,10 @@ function UiEditor({ detail, canManage, onSaved }: {
                   <div className="flex items-center gap-2">
                     <input
                       className="tf-input h-9 min-w-0 flex-1 text-sm"
-                      value={item.label ?? ''}
+                      value={item.label?.trim() || cfg.titles?.[route.to]?.trim() || ''}
+                      aria-label={`Название раздела «${currentSectionLabel(route.to)}»`}
                       onChange={event => setNav(route.to, { label: event.target.value })}
-                      placeholder={route.label}
+                      placeholder={route.to === '/clients' ? clientsLabel : route.label}
                       maxLength={40}
                       disabled={!canManage}
                     />
@@ -640,7 +605,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                       onClick={() => setNav(route.to, { visible: hidden ? undefined : false })}
                       disabled={!canManage}
                       title={hidden ? 'Показать' : 'Скрыть'}
-                      aria-label={hidden ? `Показать ${route.label}` : `Скрыть ${route.label}`}
+                      aria-label={hidden ? `Показать ${currentSectionLabel(route.to)}` : `Скрыть ${currentSectionLabel(route.to)}`}
                       className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
                     >
                       {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -657,14 +622,14 @@ function UiEditor({ detail, canManage, onSaved }: {
                 </div>
               );
             })}
-            <p className="text-xs text-[var(--color-muted)]">Порядок пунктов меняется перетаскиванием в самом меню. Скрытый пункт не удаляется — его можно вернуть.</p>
+            <p className="text-xs text-[var(--color-muted)]">Название раздела одинаково в меню и заголовках страниц. Порядок пунктов меняется перетаскиванием в самом меню. Скрытый пункт не удаляется — его можно вернуть.</p>
           </div>
           <div>
             <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">Предпросмотр</div>
             <div className="space-y-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
               {visibleNav.map(route => (
                 <div key={route.to} className="truncate rounded-lg bg-[var(--color-overlay)] px-3 py-2 text-sm font-medium">
-                  {(cfg.nav?.[route.to]?.label || '').trim() || route.label}
+                  {currentSectionLabel(route.to)}
                 </div>
               ))}
               {visibleNav.length === 0 && <div className="p-3 text-sm text-[var(--color-danger)]">Скрыто всё — так нельзя, оставьте хоть один пункт.</div>}
@@ -675,16 +640,17 @@ function UiEditor({ detail, canManage, onSaved }: {
 
       {tab === 'tasks' && (
         <div className="space-y-2">
-          <FieldOrderEditor labels={TASK_FIELD_DEFAULTS} order={cfg.tasks?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, tasks: { ...c.tasks, order } }))} />
+          <FieldOrderEditor labels={taskLabels} order={cfg.tasks?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, tasks: { ...c.tasks, order } }))} />
           {Object.entries(TASK_FIELD_DEFAULTS).map(([key, defLabel]) => {
             const item = cfg.tasks?.fields?.[key] || {};
             const hideable = key !== 'title';
             const hidden = hideable && item.visible === false;
             return (
               <div key={key} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
-                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{defLabel}</span>
+                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{taskLabels[key]}</span>
                 <input
                   className="tf-input h-9 min-w-0 flex-1 text-sm"
+                  aria-label={`Название поля «${taskLabels[key]}»`}
                   value={item.label ?? ''}
                   onChange={event => setTaskField(key, { label: event.target.value })}
                   placeholder={defLabel}
@@ -697,7 +663,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                     onClick={() => setTaskField(key, { visible: hidden ? undefined : false })}
                     disabled={!canManage}
                     title={hidden ? 'Показать' : 'Скрыть'}
-                    aria-label={hidden ? `Показать ${defLabel}` : `Скрыть ${defLabel}`}
+                    aria-label={hidden ? `Показать ${taskLabels[key]}` : `Скрыть ${taskLabels[key]}`}
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
                   >
                     {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -713,16 +679,17 @@ function UiEditor({ detail, canManage, onSaved }: {
 
       {tab === 'sprints' && (
         <div className="space-y-2">
-          <FieldOrderEditor labels={SPRINT_FIELD_DEFAULTS} order={cfg.sprints?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, sprints: { ...c.sprints, order } }))} />
+          <FieldOrderEditor labels={sprintLabels} order={cfg.sprints?.order} disabled={!canManage} onChange={order => setCfg(c => ({ ...c, sprints: { ...c.sprints, order } }))} />
           {Object.entries(SPRINT_FIELD_DEFAULTS).map(([key, defLabel]) => {
             const item = cfg.sprints?.fields?.[key] || {};
             const hideable = key !== 'name';
             const hidden = hideable && item.visible === false;
             return (
               <div key={key} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
-                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{defLabel}</span>
+                <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{sprintLabels[key]}</span>
                 <input
                   className="tf-input h-9 min-w-0 flex-1 text-sm"
+                  aria-label={`Название поля «${sprintLabels[key]}»`}
                   value={item.label ?? ''}
                   onChange={event => setSprintField(key, { label: event.target.value })}
                   placeholder={defLabel}
@@ -735,7 +702,7 @@ function UiEditor({ detail, canManage, onSaved }: {
                     onClick={() => setSprintField(key, { visible: hidden ? undefined : false })}
                     disabled={!canManage}
                     title={hidden ? 'Показать' : 'Скрыть'}
-                    aria-label={hidden ? `Показать ${defLabel}` : `Скрыть ${defLabel}`}
+                    aria-label={hidden ? `Показать ${sprintLabels[key]}` : `Скрыть ${sprintLabels[key]}`}
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] transition hover:text-[var(--color-text)]"
                   >
                     {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -749,24 +716,6 @@ function UiEditor({ detail, canManage, onSaved }: {
         </div>
       )}
 
-      {tab === 'titles' && (
-        <div className="space-y-2">
-          {KNOWN_ROUTES.filter(r => TITLE_DEFAULTS[r.to]).map(route => (
-            <div key={route.to} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
-              <span className="hidden w-32 shrink-0 truncate text-xs text-[var(--color-muted)] sm:block">{route.to}</span>
-              <input
-                className="tf-input h-9 min-w-0 flex-1 text-sm"
-                value={cfg.titles?.[route.to] ?? ''}
-                onChange={event => setTitle(route.to, event.target.value)}
-                placeholder={TITLE_DEFAULTS[route.to]}
-                maxLength={60}
-                disabled={!canManage}
-              />
-            </div>
-          ))}
-          <p className="text-xs text-[var(--color-muted)]">Заголовок сверху страницы. Пусто — стандартный.</p>
-        </div>
-      )}
 
       {msg && <div className="text-sm font-semibold text-[var(--color-text-secondary)]">{msg}</div>}
     </div>

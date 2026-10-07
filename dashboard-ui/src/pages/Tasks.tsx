@@ -8,7 +8,7 @@ import type { Client, SavedView, Sprint, Task, TaskComment, TaskFile, User } fro
 import { RichTextEditor } from '../components/RichTextEditor';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
-import { taskField } from '../lib/uiconfig';
+import { sectionLabel, taskField } from '../lib/uiconfig';
 import { TaskScopeFilter } from '../components/TaskScopeFilter';
 import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
@@ -334,9 +334,9 @@ export function Tasks() {
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(360px,520px)_auto] xl:items-start">
-        <div>
-          <h2 className="text-xl font-black">Задачи</h2>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+        <div className="min-w-0 xl:col-span-2">
+          <h2 className="text-xl font-black">{sectionLabel('/tasks')}</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">Дата постановки берётся из создания. Дата выполнения — когда планируете сесть за задачу. Крайний срок — последний допустимый день.</p>
         </div>
         <TaskScopeFilter
@@ -387,20 +387,20 @@ export function Tasks() {
         </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-[minmax(260px,1.3fr)_190px_220px_220px_110px]">
           <div className="relative rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
-            <div className="mb-1 text-xs font-semibold text-[var(--color-text-secondary)]">Статусы{filters.status.length ? ` · выбрано ${filters.status.length}` : ' · все'}</div>
+            <div className="mb-1 text-xs font-semibold text-[var(--color-text-secondary)]">{taskField('status').label}{filters.status.length ? ` · выбрано ${filters.status.length}` : ' · все'}</div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               {statusOptions.map(status => <label key={status} className="flex min-w-0 items-center gap-2 text-xs"><input type="checkbox" checked={filters.status.includes(status)} onChange={() => setFilters(prev => ({ ...prev, status: prev.status.includes(status) ? prev.status.filter(item => item !== status) : [...prev.status, status] }))} className="accent-[var(--color-accent)]" /><span className="truncate">{statusMeta[status as keyof typeof statusMeta]?.label || status}</span></label>)}
             </div>
           </div>
-          <SearchSelect
+          <Field label={taskField('priority').label}><SearchSelect
             value={filters.priority}
             options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))]}
             onChange={value => setFilters(prev => ({ ...prev, priority: value || 'all' }))}
             searchPlaceholder="Найти приоритет..."
-          />
-          <SearchSelect value={filters.client === 'all' ? '' : filters.client} options={clientOptions} onChange={value => setFilters(prev => ({ ...prev, client: value || 'all' }))} emptyLabel="Все клиенты" searchPlaceholder="Найти клиента или домен" />
-          <SearchSelect value={filters.assignee === 'all' ? '' : filters.assignee} options={userOptions} onChange={value => setFilters(prev => ({ ...prev, assignee: value || 'all' }))} emptyLabel="Все исполнители" searchPlaceholder="Найти сотрудника" />
-          <SearchSelect value={filters.sprint} options={sprints.map(s => ({ value: String(s.id), label: s.name }))} onChange={value => setFilters(prev => ({ ...prev, sprint: value }))} emptyLabel="Все спринты" placeholder="Спринт" searchPlaceholder="Найти спринт..." />
+          /></Field>
+          <Field label={taskField('client').label}><SearchSelect value={filters.client === 'all' ? '' : filters.client} options={clientOptions} onChange={value => setFilters(prev => ({ ...prev, client: value || 'all' }))} emptyLabel="Все" searchPlaceholder="Поиск по названию или домену" /></Field>
+          <Field label={taskField('assignee').label}><SearchSelect value={filters.assignee === 'all' ? '' : filters.assignee} options={userOptions} onChange={value => setFilters(prev => ({ ...prev, assignee: value || 'all' }))} emptyLabel="Все" searchPlaceholder="Поиск по имени" /></Field>
+          <Field label={taskField('sprint').label}><SearchSelect value={filters.sprint} options={sprints.map(s => ({ value: String(s.id), label: s.name }))} onChange={value => setFilters(prev => ({ ...prev, sprint: value }))} emptyLabel="Все" placeholder={taskField('sprint').label} searchPlaceholder="Поиск по названию" /></Field>
           <button onClick={resetTaskFilters} className="tf-button"><ListFilter size={15} />Сброс</button>
         </div>
       </section>}
@@ -427,23 +427,23 @@ export function Tasks() {
               options={statusOptions.map(status => ({ value: status, label: statusMeta[status as keyof typeof statusMeta]?.label || status }))}
               onChange={setBulkStatus}
               emptyLabel="Не менять"
-              placeholder="Статус"
+              placeholder={taskField('status').label}
               searchPlaceholder="Найти статус..."
             />
           </label>
           <label className="space-y-1">
-            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Приоритет</span>
+            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('priority').label}</span>
             <SearchSelect
               value={bulkPriority}
               options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))}
               onChange={setBulkPriority}
               emptyLabel="Не менять"
-              placeholder="Приоритет"
+              placeholder={taskField('priority').label}
               searchPlaceholder="Найти приоритет..."
             />
           </label>
           <label className="space-y-1">
-            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Исполнитель</span>
+            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('assignee').label}</span>
             <SearchSelect
               value={bulkAssignee}
               options={[{ value: 'none', label: 'Не назначен' }, ...userOptions]}
@@ -453,11 +453,11 @@ export function Tasks() {
             />
           </label>
           <label className="space-y-1">
-            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Дата выполнения</span>
+            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('completionDate').label}</span>
             <input className="tf-input" type="date" value={bulkCompletionDate} onChange={event => setBulkCompletionDate(event.target.value)} />
           </label>
           <label className="space-y-1">
-            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Крайний срок</span>
+            <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('deadline').label}</span>
             <input className="tf-input" type="date" value={bulkDeadline} onChange={event => setBulkDeadline(event.target.value)} />
           </label>
           <button onClick={() => applyBulk(false)} disabled={!selectedIds.length || bulkSaving} className="tf-button tf-button-primary self-end">Применить</button>
@@ -520,13 +520,13 @@ export function Tasks() {
       <section className="tf-panel-flat overflow-hidden">
         <div className="hidden min-w-[1180px] grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)] md:grid">
           <span />
-          <span>Задача</span>
-          <span>Статус</span>
-          <span>Клиент</span>
-          <span>Исполнитель</span>
-          <span>Выполнить</span>
-          <span>Дедлайн</span>
-          <span>Приоритет</span>
+          <span>{taskField('title').label}</span>
+          <span>{taskField('status').label}</span>
+          <span>{taskField('client').label}</span>
+          <span>{taskField('assignee').label}</span>
+          <span>{taskField('completionDate').label}</span>
+          <span>{taskField('deadline').label}</span>
+          <span>{taskField('priority').label}</span>
         </div>
         {pagedTasks.map(task => {
           const priority = priorityMeta[task.priority as keyof typeof priorityMeta] || priorityMeta.medium;
@@ -555,8 +555,8 @@ export function Tasks() {
                 onChange={value => changeStatus(task, value)}
                 className="md:w-full"
               />
-              {crmEnabled && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">Клиент: </span>{task.client || 'Без клиента'}</span>}
-              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">Исполнитель: </span>{assignee?.username || 'Не назначен'}</span>
+              {crmEnabled && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
+              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('assignee').label}: </span>{assignee?.username || 'Не назначен'}</span>
               <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{formatDate(task.completion_date)}</span>
               <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{formatDate(task.deadline)}</span>
               <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="block h-6 w-6 rounded-full" style={{ backgroundColor: priority.color }} /><span className="md:hidden">{priority.label}</span></span>
@@ -811,7 +811,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
       return;
     }
     if (completionDate && deadline && new Date(completionDate) > new Date(deadline)) {
-      setError('Дата выполнения не может быть позже крайнего срока.');
+      setError(`${uiFields.completionDate.label} не может быть позже поля «${uiFields.deadline.label}».`);
       return;
     }
     if (!noContract && contractEndRef.current) {
@@ -1033,7 +1033,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                 )}
 
                 {showDates && (
-                <CollapsiblePanel title="Сроки" collapsed={collapsedSections.dates} onToggle={() => toggleSection('dates')} summary={`Выполнить: ${completionDate || '-'} · дедлайн: ${deadline || '-'}`}>
+                <CollapsiblePanel title="Сроки" collapsed={collapsedSections.dates} onToggle={() => toggleSection('dates')} summary={`${uiFields.completionDate.label}: ${completionDate || '-'} · ${uiFields.deadline.label}: ${deadline || '-'}`}>
                   <div className="grid gap-3">
                     {uiFields.completionDate.visible && <Field order={uiFields.completionDate.order} label={uiFields.completionDate.label}><input className="tf-input" type="date" value={completionDate} max={deadline || undefined} onChange={event => setCompletionDate(event.target.value)} /></Field>}
                     {uiFields.deadline.visible && <Field order={uiFields.deadline.order} label={uiFields.deadline.label}><input className="tf-input" type="date" value={deadline} min={completionDate || undefined} onChange={event => setDeadline(event.target.value)} /></Field>}

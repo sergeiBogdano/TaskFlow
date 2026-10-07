@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { AlertCircle, CalendarDays, ChevronDown, ChevronUp, EyeOff, GripVertical, Search } from 'lucide-react';
@@ -238,7 +239,7 @@ export function Kanban() {
       <div className="mx-auto max-w-[1700px] space-y-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(420px,620px)] xl:items-start">
           <div>
-            <h2 className="text-xl font-black">Канбан</h2>
+            <h2 className="text-xl font-black">{sectionLabel('/kanban')}</h2>
             <p className="text-sm text-[var(--color-text-secondary)]">Перетаскивание меняет статус. Клик открывает полную карточку задачи с файлами, комментариями и доступами клиента.</p>
           </div>
           <TaskScopeFilter

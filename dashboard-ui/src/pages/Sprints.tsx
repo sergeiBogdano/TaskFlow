@@ -3,7 +3,7 @@ import { CalendarDays, Flag, Plus, Target, Trash2, X } from 'lucide-react';
 import { api, type Sprint, type SprintDetail, type Task } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { formatDate, cn } from '../lib/taskflow';
-import { sprintField } from '../lib/uiconfig';
+import { sectionLabel, sprintField } from '../lib/uiconfig';
 
 export function Sprints() {
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -32,7 +32,7 @@ export function Sprints() {
     <div className="mx-auto max-w-[1200px] space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="tf-page-title">Спринты</h2>
+          <h2 className="tf-page-title">{sectionLabel('/sprints')}</h2>
           <p className="tf-page-subtitle">Временные отрезки с набором задач и прогрессом. Как в Практикуме.</p>
         </div>
         <button type="button" onClick={() => setCreateOpen(true)} className="tf-button tf-button-primary ml-auto">

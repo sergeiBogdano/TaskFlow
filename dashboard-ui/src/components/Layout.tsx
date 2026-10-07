@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -32,8 +32,8 @@ import {
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
-import { workspaceClientsLabel, WORKSPACE_EVENT } from '../lib/workspace';
-import { isNavVisible, navOverride, titleOverride } from '../lib/uiconfig';
+import { WORKSPACE_EVENT } from '../lib/workspace';
+import { isNavVisible, navOverride, sectionLabel } from '../lib/uiconfig';
 import type { Client, Task, User, VoiceTaskDraft } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { cn, roleMeta } from '../lib/taskflow';
@@ -78,25 +78,7 @@ const nav = [
   },
 ];
 
-const titles: Record<string, string> = {
-  '/wiki': 'Вики · справка по TaskFlow',
-  '/': 'Командный обзор',
-  '/tasks': 'Задачи',
-  '/kanban': 'Канбан',
-  '/crm': 'CRM',
-  '/clients': 'Клиенты',
-  '/modules': 'Модули',
-  '/calendar': 'Календарь',
-  '/notifications': 'Уведомления',
-  '/notes': 'Заметки',
-  '/users': 'Пользователи',
-  '/reports': 'Отчёты',
-  '/ai': 'AI-аналитика',
-  '/trash': 'Корзина',
-  '/sprints': 'Спринты',
-  '/workspace': 'Окружение',
-  '/settings': 'Настройки',
-};
+
 
 type NavItem = typeof nav[number]['items'][number];
 
@@ -162,7 +144,6 @@ export function Layout() {
   const [navOrder, setNavOrder] = useState<Record<string, string[]>>({});
   const [activeNavRoute, setActiveNavRoute] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('taskflow:sidebar-collapsed') === '1');
-  const [clientsLabel, setClientsLabel] = useState(() => workspaceClientsLabel());
   const [, setUiTick] = useState(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const notificationsAvailable = Boolean(user?.is_root || (user?.features?.notifications !== false && (user?.permissions?.all || user?.permissions?.notifications)));
@@ -170,7 +151,6 @@ export function Layout() {
 
   useEffect(() => {
     const sync = () => {
-      setClientsLabel(workspaceClientsLabel());
       setUiTick(tick => tick + 1);
     };
     window.addEventListener(WORKSPACE_EVENT, sync);
@@ -215,10 +195,7 @@ export function Layout() {
     if (isSuperadmin) return true;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };
-  const pageTitle = useMemo(() => {
-    if (location.pathname === '/clients') return clientsLabel;
-    return titleOverride(location.pathname) || titles[location.pathname] || 'TaskFlow';
-  }, [location.pathname, clientsLabel]);
+  const pageTitle = sectionLabel(location.pathname);
 
   const handleLogout = async () => {
     await logout();
@@ -289,7 +266,7 @@ export function Layout() {
               .filter(item => item.to === '/wiki' || isNavVisible(item.to))
               .map(item => {
                 const override = navOverride(item.to);
-                const label = override?.label?.trim() || (item.to === '/clients' ? clientsLabel : item.label);
+                const label = sectionLabel(item.to);
                 const hint = override?.hint?.trim() || item.hint;
                 return { ...item, label, hint };
               });
@@ -313,7 +290,7 @@ export function Layout() {
             );
           })}
         </nav>
-        <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-[var(--color-text)] shadow-xl">{nav.flatMap(group => group.items).find(item => item.to === activeNavRoute)?.label}</div> : null}</DragOverlay>
+        <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-[var(--color-text)] shadow-xl">{sectionLabel(activeNavRoute)}</div> : null}</DragOverlay>
         </DndContext>
 
         <div className={cn('mt-auto hidden space-y-3 lg:block', sidebarCollapsed && 'lg:hidden')}>

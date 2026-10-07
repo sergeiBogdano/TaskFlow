@@ -1,4 +1,5 @@
-import { getActiveWorkspaceDetail, WORKSPACE_EVENT } from './workspace';
+import { getActiveWorkspaceDetail, workspaceClientsLabel, WORKSPACE_EVENT } from './workspace';
+import { resolveSectionLabel } from './uiLabels';
 
 export type UiNavOverride = {
   label?: string;
@@ -34,15 +35,8 @@ export function isNavVisible(to: string): boolean {
   return navOverride(to)?.visible !== false;
 }
 
-export function navLabel(to: string, fallback: string): string {
-  const label = navOverride(to)?.label?.trim();
-  return label || fallback;
-}
-
-export function titleOverride(path: string): string | null {
-  const cfg = getUiConfig();
-  const title = cfg.titles?.[path];
-  return typeof title === 'string' && title.trim() ? title.trim() : null;
+export function sectionLabel(route: string): string {
+  return resolveSectionLabel(getUiConfig(), route, workspaceClientsLabel());
 }
 
 export const TASK_FIELD_DEFAULTS: Record<string, string> = {

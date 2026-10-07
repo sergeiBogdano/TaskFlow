@@ -1,3 +1,4 @@
+import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Eye, FolderPlus, Globe, HardDrive, Lock, Pencil, Plus, RotateCcw, Search, Server, StickyNote, Tag, Trash2, X } from 'lucide-react';
 import { api, type Note, type NoteFolder } from '../api/client';
@@ -354,7 +355,7 @@ export function Notes() {
         />
         <div className="relative flex flex-wrap items-end gap-6">
           <div className="min-w-0">
-            <h2 className="text-4xl font-semibold tracking-tight text-[var(--color-text)] sm:text-5xl">Заметки</h2>
+            <h2 className="text-4xl font-semibold tracking-tight text-[var(--color-text)] sm:text-5xl">{sectionLabel('/notes')}</h2>
             <p className="mt-3 max-w-xl text-[17px] leading-relaxed text-[var(--color-text-secondary)]">
               Общие живут на сервере. Личные — только на этом ПК.
             </p>
