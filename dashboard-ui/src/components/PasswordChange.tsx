@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 import { api } from '../api/client';
 
 export function PasswordChange({ required = false }: { required?: boolean }) {
+  const { user } = useAuth();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -16,6 +18,7 @@ export function PasswordChange({ required = false }: { required?: boolean }) {
     catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось сменить пароль'); }
     finally { setBusy(false); }
   };
+  if (user?.is_root) return <section className="tf-panel-flat p-5"><h3 className="font-bold">Пароль суперадмина</h3><p className="mt-2 text-sm text-[var(--color-text-secondary)]">Изменение доступно только администратору сервера через защищённую команду обслуживания. Через интерфейс и API пароль изменить нельзя.</p></section>;
   return <section className="tf-panel-flat mx-auto w-full max-w-md p-6">
     <KeyRound className="mb-3 text-[var(--color-accent)]" />
     <h2 className="text-xl font-bold">{required ? 'Задайте постоянный пароль' : 'Смена пароля'}</h2>

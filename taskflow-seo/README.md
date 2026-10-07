@@ -27,7 +27,7 @@ uvicorn app.web.app:app --host 0.0.0.0 --port 8080 --reload
 
 The first installation requires `BOOTSTRAP_USERNAME` (default `admin`) and a unique
 `BOOTSTRAP_PASSWORD` of at least eight characters. The initial account is platform
-root and must change its temporary password before using the API. Bootstrap
+root; its password is managed exclusively on the server. Bootstrap
 credentials do not reset an existing installation. After updating an existing
 installation, all users must sign in again because session tokens now include an
 account version and expiry. Blocking an account or resetting its password revokes
@@ -72,6 +72,33 @@ and sprint fields. Task field ordering operates within existing form groups. Per
 browser notes use a stable account identifier; re-creating a deleted username does
 not inherit its notes, feature overrides or old sessions; the former shared `taskflow-local-notes`
 IndexedDB is retained and is not automatically attributed to an account.
+
+### Root password maintenance
+
+No user, including root itself, can change root's password through the web UI or
+HTTP API. This restriction does not depend on role or feature switches. Initial
+provisioning uses a unique `BOOTSTRAP_PASSWORD`; root is not forced into the ordinary
+user password-change form. Updating that environment variable does not reset an
+existing account.
+
+On the server, from `taskflow-seo` with the deployment environment loaded, run:
+
+```bash
+python -m app.cli root-password
+```
+
+For Docker:
+
+```bash
+docker compose exec web python -m app.cli root-password
+```
+
+The command asks for the new password twice without displaying it. Passwords are
+not accepted in command arguments or a pipe. It updates the salted password hash
+in the configured database, clears any obsolete onboarding flag, and revokes all
+existing root sessions atomically. Only operators with access to the server/container
+and its database configuration can run it. Do not write a plaintext password directly
+into `users.password_hash`.
 
 ### Verification
 

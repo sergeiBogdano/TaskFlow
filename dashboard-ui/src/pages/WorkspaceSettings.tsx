@@ -17,7 +17,7 @@ export function WorkspaceSettings() {
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [wsRoles, setWsRoles] = useState<WorkspaceRole[]>([]);
-  const [users, setUsers] = useState<{ id: number; username: string }[]>([]);
+  const [users, setUsers] = useState<{ id: number; username: string; is_root?: boolean }[]>([]);
   const [knowledge, setKnowledge] = useState<{ id: number; fact: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -65,7 +65,7 @@ export function WorkspaceSettings() {
       ]);
       setDetail(full);
       setMembers(memberList);
-      setUsers(userList.map(u => ({ id: u.id, username: u.username })));
+      setUsers(userList.map(u => ({ id: u.id, username: u.username, is_root: u.is_root })));
       setKnowledge(facts);
       setWsRoles(roleData?.roles || []);
       setName(full.name);
@@ -371,7 +371,7 @@ export function WorkspaceSettings() {
                   ) : (
                     <span className="tf-chip">{member.role === 'owner' ? 'владелец' : member.role === 'admin' ? 'админ' : 'участник'}</span>
                   )}
-                  {canTouch && (isSuperadmin || user?.id === member.user_id || user?.permissions?.users_password_reset === true) && (
+                  {canTouch && !users.find(account => account.id === member.user_id)?.is_root && !(user?.is_root && user.id === member.user_id) && (isSuperadmin || user?.id === member.user_id || user?.permissions?.users_password_reset === true) && (
                     <button type="button" onClick={() => setPwdUserId(pwdUserId === member.user_id ? null : member.user_id)} className="tf-button h-9 px-2 text-xs" title="Сменить пароль">
                       <KeyRound size={14} />Пароль
                     </button>

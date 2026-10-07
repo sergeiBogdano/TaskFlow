@@ -263,6 +263,8 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
 @router.post('/change-password')
 async def change_password(request: Request, user=Depends(get_current_user)):
     from app.core.auth import COOKIE_NAME, make_session_token, verify_password
+    if user.is_root:
+        raise HTTPException(status_code=403, detail='Пароль суперадмина меняется только командой на сервере')
     permissions = await get_user_permissions(user.id)
     if not user.must_change_password and not (permissions.get('all') or permissions.get('users_password_own', True)):
         raise HTTPException(status_code=403, detail='Нет права смены своего пароля')

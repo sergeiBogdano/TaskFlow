@@ -58,49 +58,14 @@ class TestSuperadminUserProtection:
         )
         assert resp.status_code == 403
 
-    def test_superadmin_password_only_via_current_proof(self, sync_request, admin_cookies, event_loop):
-        # через PUT пароль суперадмина не меняется вообще — даже им самим
-        resp = sync_request(
-            "PUT", "/api/users/1/password",
-            json={"password": "newpass123"}, cookies=admin_cookies,
-        )
-        assert resp.status_code == 403
-        # через change-password с неверным текущим — 400, пароль цел
-        resp = sync_request(
-            "POST", "/api/users/change-password",
-            data={"current_password": "wrong", "new_password": "newpass123"},
-            cookies=admin_cookies,
-        )
-        assert resp.status_code == 400
-        bad_login = sync_request(
-            "POST", "/api/auth/login",
-            json={"username": "4dmin", "password": "newpass123"},
-        )
-        assert bad_login.status_code != 200
-        # с верным текущим — 200, затем возвращаем обратно
-        try:
-            resp = sync_request(
-                "POST", "/api/users/change-password",
-                data={"current_password": "4dmin", "new_password": "newpass123"},
-                cookies=admin_cookies,
-            )
-            assert resp.status_code == 200, resp.text
-            good_login = sync_request(
-                "POST", "/api/auth/login",
-                json={"username": "4dmin", "password": "newpass123"},
-            )
-            assert good_login.status_code == 200
-        finally:
-            from app.core.auth import hash_password
-            from app.core.database import async_session
-            from app.core.models import User
-            async def restore():
-                async with async_session() as session:
-                    root = await session.get(User, 1)
-                    root.password_hash = hash_password('4dmin')
-                    root.session_version += 1
-                    await session.commit()
-            event_loop.run_until_complete(restore())
+    def test_superadmin_password_only_on_server(self, sync_request, admin_cookies):
+        for current in ('wrong', '4dmin'):
+            resp = sync_request('POST', '/api/users/change-password',
+                json={'current_password': current, 'new_password': 'newpass123'}, cookies=admin_cookies)
+            assert resp.status_code == 403
+        assert sync_request('PUT', '/api/users/1/password', json={'password':'newpass123'}, cookies=admin_cookies).status_code == 403
+        assert sync_request('POST', '/api/auth/login', json={'username':'4dmin', 'password':'4dmin'}).status_code == 200
+        assert sync_request('POST', '/api/auth/login', json={'username':'4dmin', 'password':'newpass123'}).status_code == 401
 
     def test_other_user_cannot_change_superadmin_password(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]

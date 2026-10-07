@@ -290,7 +290,7 @@ async def _ensure_admin():
             if not os.environ.get('TESTING') and len(password) < 8:
                 raise RuntimeError('BOOTSTRAP_PASSWORD должен содержать минимум 8 символов')
             admin = User(username=username, password_hash=hash_password(password), is_root=True,
-                         must_change_password=not bool(os.environ.get('TESTING')))
+                         must_change_password=False)
             session.add(admin)
             await session.commit()
             await session.refresh(admin)
@@ -300,7 +300,7 @@ async def _ensure_admin():
             if superadmin_role:
                 session.add(UserRole(user_id=admin.id, role_id=superadmin_role.id))
             await session.commit()
-            logger.info('Bootstrap administrator created; password change required')
+            logger.info('Bootstrap administrator created; password managed only on server')
             return
 
 
@@ -322,6 +322,8 @@ async def _ensure_root():
                 import uuid
                 account.account_key = str(uuid.uuid4())
             account.is_root = account.id == root.id
+            if account.is_root:
+                account.must_change_password = False
         superadmin = (await session.execute(
             select(Role).where(Role.name == 'superadmin')
         )).scalar_one_or_none()
