@@ -221,14 +221,14 @@ class TestSuperadminPasswordLocked:
         )
         assert resp.status_code == 403, resp.text
 
-    def test_change_password_requires_current(self, sync_request, admin_cookies):
-        # без верного текущего пароля — 400, состояние не меняется
+    def test_root_change_password_always_forbidden(self, sync_request, admin_cookies):
+        # смена пароля суперадмина через API запрещена, состояние не меняется
         resp = sync_request(
             "POST", "/api/users/change-password",
             data={"current_password": "definitely-wrong", "new_password": "newpass123"},
             cookies=admin_cookies,
         )
-        assert resp.status_code == 400, resp.text
+        assert resp.status_code == 403, resp.text
         login = sync_request(
             "POST", "/api/auth/login",
             json={"username": "4dmin", "password": "newpass123"},
