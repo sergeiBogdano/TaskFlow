@@ -495,21 +495,6 @@ class WorkspaceMember(Base):
     )
 
 
-class WorkspaceRemoval(Base):
-    """Tombstone явного удаления участника: _ensure_workspaces не возвращает
-    удалённых обратно при рестарте. Повторное приглашение стирает запись."""
-    __tablename__ = 'workspace_removals'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        Index('ix_workspace_removal_unique', 'workspace_id', 'user_id', unique=True),
-    )
-
-
 class Sprint(Base):
     __tablename__ = 'sprints'
 

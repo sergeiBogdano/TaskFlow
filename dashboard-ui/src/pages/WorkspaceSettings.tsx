@@ -307,6 +307,11 @@ export function WorkspaceSettings() {
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} />Команда · {members.length}</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
+          Ранг (владелец/админ/участник) — это управление окружением. Что человек видит и может делать —
+          задаёт кастомная роль ниже: отмеченное в ней и действует, остальное закрыто даже админу.
+          Без кастомной роли работают права ранга.
+        </p>
         {canManage && (
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px_auto]">
             <SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />

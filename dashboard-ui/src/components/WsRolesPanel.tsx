@@ -14,9 +14,12 @@ type WsRolesPanelProps = {
 };
 
 /**
- * Ф7: конструктор кастомных ролей окружения.
+ * Конструктор кастомных ролей окружения.
  * Только scope=work-ключи; чекбоксы, отключённые краном доступности, скрыты;
  * чекбоксы вне потолка выдающего — disabled.
+ * Кастомная роль — ТОЧНЫЙ итоговый набор прав участника: что отмечено,
+ * то и действует, база ранга не добавляется. Ранг (owner/admin/member)
+ * при этом сохраняется и отвечает только за управление окружением.
  */
 export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
   const { user } = useAuth();
@@ -116,6 +119,21 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
     });
   };
 
+  const applyBasePreset = (kind: 'member' | 'admin') => {
+    setPermissions(prev => {
+      const next = { ...prev };
+      groups.forEach(group => group.items.forEach(item => {
+        if (features[item.key] === false) return;
+        if (!canGrant(item.key)) return;
+        next[item.key] = kind === 'admin' ? true : item.level === 'basic';
+      }));
+      return next;
+    });
+    setMsg(kind === 'admin'
+      ? 'Предзаполнено как у админа (полный набор). Снимите лишнее.'
+      : 'Предзаполнено как у участника (базовые). Отметьте нужное.');
+  };
+
   const visibleGroups = groups.map(group => ({
     ...group,
     items: group.items.filter(item => features[item.key] !== false),
@@ -131,8 +149,9 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
         <span className="tf-chip ml-auto">Ролей: {roles.length}</span>
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-        Кастомные роли — только права «Работы». Владелец и администратор окружения по умолчанию
-        имеют полный набор, участник — базовый; кастомная роль назначается участнику дополнительно.
+        Роль — это точный итоговый набор прав: участник с этой ролью видит и может
+        ровно отмеченное, база его ранга не добавляется. Ранг (владелец/админ/участник)
+        влияет только на управление окружением: участники, роли, настройки, удаление.
         Отключённые краном доступности функции в конструкторе не показываются.
       </p>
 
@@ -142,6 +161,12 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
             <span className="text-xs font-black uppercase tracking-wide text-[var(--color-text-secondary)]">
               {editingId == null ? 'Новая роль' : 'Редактирование роли'}
             </span>
+            <button type="button" onClick={() => applyBasePreset('member')} className="tf-button h-8 px-2 text-xs" title="Отметить базовый набор участника">
+              Как участник
+            </button>
+            <button type="button" onClick={() => applyBasePreset('admin')} className="tf-button h-8 px-2 text-xs" title="Отметить полный набор">
+              Как админ
+            </button>
             {editingId != null && (
               <button type="button" onClick={cancelEdit} className="tf-button h-8 px-2 text-xs">
                 <X size={14} />Отмена

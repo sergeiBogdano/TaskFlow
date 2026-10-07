@@ -74,7 +74,15 @@ async def get_user_permissions(user_id: int) -> dict:
 
 
 async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> dict | None:
-    """Work-права участника окружения: база по rank + кастомная роль (Ф7/Ф8).
+    """Work-права участника окружения (Ф7/Ф8 + точный набор роли).
+
+    Нет кастомной роли → база ранга (owner/admin — всё кроме reset,
+    member — базовые). Есть кастомная роль → ТОЧНО её набор, база ранга
+    не добавляется: что отмечено в роли, то и действует. Ранг при этом
+    сохраняется и продолжает gating административных действий
+    (участники, удаление) и лестницы сброса паролей.
+    Пустая кастомная роль запрещена на уровне API, но на всякий случай
+    трактуется как отсутствие прав, а не как база ранга.
 
     None — пользователь не участник окружения (или окружение не задано).
     """
@@ -97,23 +105,24 @@ async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> d
         )).scalar_one_or_none()
         if member is None:
             return None
-        perms = dict(workspace_default_permissions(member.role))
-        if member.custom_role_id:
-            role = await session.get(WorkspaceRole, member.custom_role_id)
-            if role:
-                raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
-                allowed = set(work_scope_keys())
-                perms.update({key: True for key, value in raw.items() if value and key in allowed})
-        return perms
+        if not member.custom_role_id:
+            return dict(workspace_default_permissions(member.role))
+        role = await session.get(WorkspaceRole, member.custom_role_id)
+        if role is None:
+            return dict(workspace_default_permissions(member.role))
+        raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
+        allowed = set(work_scope_keys())
+        return {key: True for key, value in raw.items() if value and key in allowed}
 
 
 async def effective_permissions(user, workspace_id: int | None = None) -> dict:
     """Effective-набор прав пользователя (Ф8).
 
     - app-ключи (scope=app) — как раньше, из ролей и групп;
-    - work-ключи (scope=work) — из активного окружения: база по rank + кастомная роль;
-      окружение заменяет app-права на «Работу». Если окружения нет или пользователь
-      не участник — остаются app-права (legacy/вне окружения);
+    - work-ключи (scope=work) — из активного окружения: точный набор
+      кастомной роли, если назначена, иначе база ранга (owner/admin — всё
+      кроме users_password_reset, member — базовые). Если окружения нет или
+      пользователь не участник — остаются app-права (legacy/вне окружения);
     - superadmin (`all`) — полный доступ, без изменений.
     """
     from app.core.permission_catalog import work_scope_keys

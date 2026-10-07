@@ -24,7 +24,6 @@ from app.core.models import (
     Workspace,
     WorkspaceKnowledge,
     WorkspaceMember,
-    WorkspaceRemoval,
     WorkspaceRole,
 )
 from app.core.permissions import (
@@ -209,8 +208,7 @@ async def _purge_workspace(session, workspace_id: int) -> None:
                           (Client, Client.workspace_id), (Note, Note.workspace_id),
                           (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
                           (WorkspaceRole, WorkspaceRole.workspace_id),
-                          (WorkspaceMember, WorkspaceMember.workspace_id),
-                          (WorkspaceRemoval, WorkspaceRemoval.workspace_id)):
+                          (WorkspaceMember, WorkspaceMember.workspace_id)):
         await session.execute(model.__table__.delete().where(column == workspace_id))
     await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
 
@@ -478,13 +476,6 @@ async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(requi
             return JSONResponse({"error": "Уже участник"}, status_code=400)
         member = WorkspaceMember(workspace_id=ctx["workspace"].id, user_id=payload.user_id, role=payload.role)
         session.add(member)
-        # повторное приглашение стирает tombstone явного удаления
-        await session.execute(
-            WorkspaceRemoval.__table__.delete().where(
-                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
-                WorkspaceRemoval.user_id == payload.user_id,
-            )
-        )
         await session.commit()
         await session.refresh(member)
     return JSONResponse(_member_to_dict(member, target.username), status_code=201)
@@ -543,15 +534,6 @@ async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_wor
         if err:
             return JSONResponse({"error": err}, status_code=403)
         await session.delete(member)
-        # tombstone: автодобавление при рестарте не должно возвращать удалённых
-        existing_mark = (await session.execute(
-            select(WorkspaceRemoval).where(
-                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
-                WorkspaceRemoval.user_id == user_id,
-            )
-        )).scalar_one_or_none()
-        if existing_mark is None:
-            session.add(WorkspaceRemoval(workspace_id=ctx["workspace"].id, user_id=user_id))
         await session.commit()
     return JSONResponse({"ok": True})
 

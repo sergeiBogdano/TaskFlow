@@ -120,7 +120,6 @@ class TestModuleGeneratorWs:
         from app.core.database import async_session
         from app.core.models import Task
         from sqlalchemy import select
-        import asyncio
 
         client = sync_request(
             "POST", "/api/clients",
@@ -155,8 +154,6 @@ class TestModuleGeneratorWs:
 
 class TestWsRolePrecedence:
     def test_path_beats_query(self, sync_request, admin_cookies):
-        me = sync_request("GET", "/api/auth/me", cookies=admin_cookies).json()
-        admin_id = me["user"]["id"]
         wa = sync_request("POST", "/api/workspaces", json={"name": _uniq("WSA")}, cookies=admin_cookies).json()
         wb = sync_request("POST", "/api/workspaces", json={"name": _uniq("WSB")}, cookies=admin_cookies).json()
         # пользователь ТОЛЬКО в B
@@ -492,6 +489,191 @@ class TestPasswordResetLadder:
                 json={"permissions": original}, cookies=admin_cookies,
             )
             assert resp.status_code == 200, resp.text
+
+
+class TestCustomRoleExactSet:
+    """Кастомная роль — точный набор: база ранга не добавляется."""
+
+    @staticmethod
+    def _login(sync_request, username, password):
+        resp = sync_request(
+            "POST", "/api/auth/login",
+            json={"username": username, "password": password},
+        )
+        assert resp.status_code == 200, resp.text
+        return {"taskflow_user": resp.cookies.get("taskflow_user")}
+
+    @staticmethod
+    def _me(sync_request, cookies, workspace_id):
+        resp = sync_request(
+            "GET", f"/api/auth/me?workspace_id={workspace_id}", cookies=cookies,
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()["user"]["permissions"]
+
+    def test_custom_role_replaces_base(self, sync_request, admin_cookies):
+        ws = sync_request("POST", "/api/workspaces", json={"name": _uniq("EXACT")}, cookies=admin_cookies).json()
+        mname = _uniq("exact_member")
+        mid, _ = _make_user(sync_request, admin_cookies, mname)
+        resp = sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/members",
+            json={"user_id": mid, "role": "member"}, cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        # база member даёт tasks
+        mcookies = self._login(sync_request, mname, "pass1234")
+        assert self._me(sync_request, mcookies, ws["id"]).get("tasks") is True
+        # кастомная роль только с reports
+        resp = sync_request(
+            "POST", f"/api/workspaces/{ws['id']}/roles",
+            json={"name": _uniq("Only reports"), "permissions": {"reports": True}},
+            cookies=admin_cookies,
+        )
+        assert resp.status_code == 201, resp.text
+        custom_id = resp.json()["id"]
+        try:
+            resp = sync_request(
+                "PUT", f"/api/workspaces/{ws['id']}/members/{mid}/custom-role",
+                json={"role_id": custom_id}, cookies=admin_cookies,
+            )
+            assert resp.status_code == 200, resp.text
+            perms = self._me(sync_request, mcookies, ws["id"])
+            assert perms.get("reports") is True
+            assert not perms.get("tasks"), "база ранга просочилась сквозь точный набор"
+            assert not perms.get("dashboard"), "база ранга просочилась сквозь точный набор"
+        finally:
+            sync_request(
+                "PUT", f"/api/workspaces/{ws['id']}/members/{mid}/custom-role",
+                json={"role_id": None}, cookies=admin_cookies,
+            )
+            sync_request(
+                "DELETE", f"/api/workspaces/{ws['id']}/roles/{custom_id}",
+                cookies=admin_cookies,
+            )
+
+    def test_no_auto_add_on_boot(self, tmp_path, monkeypatch, event_loop):
+        # новый пользователь без окружений не оказывается молча в первом:
+        # только явное создание/приглашение
+        import os
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        import app.core.database as db
+        from app.core.models import User, WorkspaceMember
+
+        path = tmp_path / "noauto.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+
+        async def go():
+            async with engine.begin() as conn:
+                await conn.run_sync(db.Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            monkeypatch.setattr(db, "async_session", sessions)
+            async with sessions() as s:
+                s.add(User(username="loner", password_hash="x"))
+                await s.commit()
+            await db._ensure_workspaces()
+            async with sessions() as s:
+                rows = (await s.execute(select(WorkspaceMember))).scalars().all()
+                return rows
+
+        try:
+            rows = event_loop.run_until_complete(go())
+            assert rows == [], f"молчаливое добавление: {rows}"
+        finally:
+            await_engine_dispose(event_loop, engine)
+            os.remove(path)
+
+    def test_migration_preserves_effective(self, tmp_path, monkeypatch, event_loop):
+        # роль на рангах member+admin: после миграции у каждого тот же effective
+        import os
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        import app.core.database as db
+        from app.core.models import User, Workspace, WorkspaceMember, WorkspaceRole
+
+        path = tmp_path / "migrate_roles.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+
+        async def go():
+            async with engine.begin() as conn:
+                await conn.run_sync(db.Base.metadata.create_all)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            monkeypatch.setattr(db, "async_session", sessions)
+            async with sessions() as s:
+                s.add(Workspace(name="W"))
+                await s.flush()
+                ws = (await s.execute(select(Workspace))).scalars().first()
+                m_user = User(username="mm", password_hash="x")
+                a_user = User(username="aa", password_hash="x")
+                s.add_all([m_user, a_user])
+                await s.flush()
+                role = WorkspaceRole(workspace_id=ws.id, name="Shared", permissions='{"reports": true}')
+                s.add(role)
+                await s.flush()
+                s.add_all([
+                    WorkspaceMember(workspace_id=ws.id, user_id=m_user.id, role="member", custom_role_id=role.id),
+                    WorkspaceMember(workspace_id=ws.id, user_id=a_user.id, role="admin", custom_role_id=role.id),
+                ])
+                await s.commit()
+                wid, mid, aid = ws.id, m_user.id, a_user.id
+            import app.core.permissions as perm
+            # get_workspace_permissions импортирует async_session из
+            # app.core.database при каждом вызове — замоканого выше хватает
+
+            from app.core.permission_catalog import workspace_default_permissions
+            old_content = {"reports"}
+            # старый аддитивный effective, который никто не должен потерять
+            need_m = set(workspace_default_permissions("member")) | old_content
+            need_a = set(workspace_default_permissions("admin")) | old_content
+            await db._migrate_custom_roles_exact()
+            after_m = await perm.get_workspace_permissions(mid, wid)
+            after_a = await perm.get_workspace_permissions(aid, wid)
+            assert set(after_m) >= need_m, f"member потерял права: {after_m}"
+            assert set(after_a) >= need_a, f"admin потерял права: {after_a}"
+            assert after_m.get("reports") is True
+            assert after_a.get("reports") is True
+            # роль была на двух рангах — её клонировали, у каждого своя строка
+            async with sessions() as s:
+                m_link = (await s.execute(select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == mid,
+                ))).scalar_one()
+                a_link = (await s.execute(select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == aid,
+                ))).scalar_one()
+                assert m_link.custom_role_id != a_link.custom_role_id
+
+            async def snapshot():
+                async with sessions() as s:
+                    rws = (await s.execute(select(WorkspaceRole))).scalars().all()
+                    lks = (await s.execute(select(WorkspaceMember))).scalars().all()
+                    return (
+                        sorted((r.workspace_id, r.name, r.permissions) for r in rws),
+                        sorted((l.workspace_id, l.user_id, l.custom_role_id) for l in lks),
+                    )
+
+            before = await snapshot()
+            # и повторный прогон ничего не меняет (конвергентность)
+            await db._migrate_custom_roles_exact()
+            assert await snapshot() == before
+            assert await perm.get_workspace_permissions(mid, wid) == after_m
+            assert await perm.get_workspace_permissions(aid, wid) == after_a
+
+        try:
+            event_loop.run_until_complete(go())
+        finally:
+            await_engine_dispose(event_loop, engine)
+            os.remove(path)
+
+
+def await_engine_dispose(event_loop, engine):
+    async def _dispose():
+        await engine.dispose()
+
+    return event_loop.run_until_complete(_dispose())
 
 
 class TestContractReminders:

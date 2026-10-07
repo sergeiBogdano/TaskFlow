@@ -68,7 +68,7 @@ async def _migrate():
             'ALTER TABLE file_attachments ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
             'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
             'ALTER TABLE workspace_members ADD COLUMN custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
-            'CREATE TABLE IF NOT EXISTS workspace_removals (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE NOT NULL, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)',
+            'DROP TABLE IF EXISTS workspace_removals',
         ]:
             try:
                 await conn.execute(text(col))
@@ -184,8 +184,7 @@ async def _ensure_indexes():
         'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
         'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\'',
         'ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
-        'CREATE TABLE IF NOT EXISTS workspace_removals (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMP WITH TIME ZONE DEFAULT now())',
-        'CREATE UNIQUE INDEX IF NOT EXISTS ix_workspace_removal_unique ON workspace_removals(workspace_id, user_id)',
+        'DROP TABLE IF EXISTS workspace_removals',
         'ALTER TABLE saved_views ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
         'ALTER TABLE client_contacts ADD COLUMN IF NOT EXISTS contact_role VARCHAR(50)',
     ]
@@ -298,13 +297,95 @@ async def _migrate_role_permissions():
         await session.commit()
 
 
+async def _migrate_custom_roles_exact():
+    """Разовый переход кастомных ролей с аддитивной семантики на точный набор.
+
+    Было: effective = база ранга + роль. Стало: effective = ровно роль.
+    Чтобы никто молча не потерял права: содержимое каждой назначенной роли
+    сливается с базой ранга её участников. Роль на участниках с разным
+    базовым рангом клонируется по группам рангов ("Имя (rank)"), чтобы у
+    каждой группы сохранился ровно прежний effective-набор.
+    Конвергентно: после прогона каждая роль однорангова и покрывает базу —
+    повторный прогон ничего не меняет.
+    """
+    from app.core.models import WorkspaceMember, WorkspaceRole
+    from app.core.permission_catalog import work_scope_keys, workspace_default_permissions
+
+    allowed = set(work_scope_keys())
+
+    def _clean(raw) -> dict:
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except ValueError:
+            data = {}
+        return {key: True for key, value in data.items() if value and key in allowed}
+
+    async with async_session() as session:
+        roles = (await session.execute(select(WorkspaceRole))).scalars().all()
+        for role in roles:
+            content = _clean(role.permissions)
+            links = (await session.execute(
+                select(WorkspaceMember).where(WorkspaceMember.custom_role_id == role.id)
+            )).scalars().all()
+            if not links:
+                if content != _clean(role.permissions):
+                    role.permissions = json.dumps(content, ensure_ascii=False)
+                continue
+            by_rank: dict[str, list] = {}
+            for link in links:
+                by_rank.setdefault(link.role, []).append(link)
+            union_base: set[str] = set()
+            for rank in by_rank:
+                union_base |= set(workspace_default_permissions(rank))
+            if set(content) >= union_base:
+                # содержимое уже покрывает базы всех назначенных:
+                # поведение не изменится, только нормализуем
+                if content != _clean(role.permissions):
+                    role.permissions = json.dumps(content, ensure_ascii=False)
+                continue
+            taken = {
+                row[0] for row in (await session.execute(
+                    select(WorkspaceRole.name).where(WorkspaceRole.workspace_id == role.workspace_id)
+                )).all()
+            }
+            for index, rank in enumerate(sorted(by_rank)):
+                merged = dict(workspace_default_permissions(rank))
+                merged.update(content)
+                merged = {key: True for key, value in merged.items() if key in allowed}
+                if index == 0:
+                    role.permissions = json.dumps(merged, ensure_ascii=False)
+                    taken.add(role.name)
+                    continue
+                clone_name = f'{role.name} ({rank})'
+                suffix = 2
+                while clone_name[:100] in taken:
+                    clone_name = f'{role.name} ({rank} {suffix})'
+                    suffix += 1
+                clone = WorkspaceRole(
+                    workspace_id=role.workspace_id,
+                    name=clone_name[:100],
+                    permissions=json.dumps(merged, ensure_ascii=False),
+                )
+                session.add(clone)
+                await session.flush()
+                taken.add(clone.name)
+                for link in by_rank[rank]:
+                    link.custom_role_id = clone.id
+        await session.commit()
+
+
 async def _ensure_workspaces():
+    """Базовое окружение и привязка бесхозных данных.
+
+    Новое поведение: никакого молчаливого добавления пользователей в
+    окружения при старте. Участник появляется только через явное создание
+    (становится владельцем) или приглашение; удалённый не возвращается.
+    Пользователь без окружений получает внятный 403 с подсказкой создать
+    своё (экран «нет окружения» во фронте).
+    """
     from sqlalchemy import update
 
     from app.core.models import (
-        WS_ROLE_ADMIN,
-        WS_ROLE_MEMBER,
-        WS_ROLE_OWNER,
         Client,
         Note,
         Task,
@@ -313,7 +394,7 @@ async def _ensure_workspaces():
         Role,
         Workspace,
         WorkspaceMember,
-        WorkspaceRemoval,
+        WS_ROLE_OWNER,
     )
     async with async_session() as session:
         ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
@@ -335,37 +416,17 @@ async def _ensure_workspaces():
             )
             session.add(ws)
             await session.flush()
+            if superadmin is not None:
+                # разовое членство создателя при создании окружения —
+                # дальше только явные приглашения, никаких авто-добавлений
+                session.add(WorkspaceMember(
+                    workspace_id=ws.id, user_id=superadmin.id, role=WS_ROLE_OWNER,
+                ))
         wid = ws.id
         for model in (Task, Client, Note):
             await session.execute(
                 update(model).where(model.workspace_id.is_(None)).values(workspace_id=wid)
             )
-        members = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceMember))).scalars().all()}
-        removed = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceRemoval))).scalars().all()}
-        users = (await session.execute(select(User))).scalars().all()
-        user_ws_ids: dict[int, set[int]] = {}
-        for workspace_id, user_id in members:
-            user_ws_ids.setdefault(user_id, set()).add(workspace_id)
-        for user in users:
-            if (wid, user.id) in members:
-                continue
-            if (wid, user.id) in removed:
-                # явно удалён из окружения — не возвращать при рестарте
-                continue
-            if user_ws_ids.get(user.id):
-                # участник других окружений — не тянуть в первое
-                continue
-            role_rows = (await session.execute(
-                select(Role.name).join(UserRole, UserRole.role_id == Role.id)
-                .where(UserRole.user_id == user.id)
-            )).scalars().all()
-            if 'superadmin' in role_rows:
-                role = WS_ROLE_OWNER
-            elif 'admin' in role_rows:
-                role = WS_ROLE_ADMIN
-            else:
-                role = WS_ROLE_MEMBER
-            session.add(WorkspaceMember(workspace_id=wid, user_id=user.id, role=role))
         await session.commit()
 
 
@@ -377,6 +438,7 @@ async def init_db():
     await _ensure_indexes()
     await _ensure_admin()
     await _migrate_role_permissions()
+    await _migrate_custom_roles_exact()
     await _ensure_workspaces()
 
 
