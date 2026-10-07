@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from app.core.database import async_session
 from app.core.models import UserSettings
@@ -85,9 +86,11 @@ async def unread_count(user=Depends(get_current_user)):
 @router.put('/users/notification-settings')
 async def update_notification_settings(data: dict, user=Depends(get_current_user)):
     async with async_session() as session:
-        r = await session.get(UserSettings, 1)
+        r = (await session.execute(
+            select(UserSettings).where(UserSettings.user_id == user.id)
+        )).scalar_one_or_none()
         if not r:
-            r = UserSettings(id=1)
+            r = UserSettings(user_id=user.id)
             session.add(r)
         if 'calendar_view_mode' in data:
             r.calendar_view_mode = data['calendar_view_mode']

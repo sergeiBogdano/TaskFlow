@@ -30,8 +30,8 @@ class TestFeatures:
                          scope='global', key='reports', enabled=False)
         assert resp.status_code in (403, 401)
 
-    def test_switch_off_closes_api_even_for_superadmin(self, sync_request, admin_cookies):
-        """Выключили функцию → API, требующее это право, отдаёт 403 даже суперадмину."""
+    def test_root_can_disable_feature_without_locking_itself_out(self, sync_request, admin_cookies):
+        """Root отключает функцию для остальных, но сам сохраняет аварийный доступ."""
         # baseline: список ролей доступен (право users включено)
         resp = sync_request('GET', '/api/roles', cookies=admin_cookies)
         assert resp.status_code == 200, resp.text
@@ -39,8 +39,7 @@ class TestFeatures:
         self._reset(sync_request, admin_cookies, 'users', enabled=False)
         try:
             resp = sync_request('GET', '/api/roles', cookies=admin_cookies)
-            assert resp.status_code == 403, resp.text
-            assert 'кран' in resp.text
+            assert resp.status_code == 200, resp.text
 
             # /me отдаёт карту доступности: users = false
             resp = sync_request('GET', '/api/auth/me', cookies=admin_cookies)

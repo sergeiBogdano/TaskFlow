@@ -238,7 +238,7 @@ export function Users() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-black">Пользователи и права</h2>
-          <p className="text-sm text-[var(--color-text-secondary)]">Superadmin защищён, его права не редактируются и не удаляются. Остальные роли можно настраивать по разделам.</p>
+          <p className="text-sm text-[var(--color-text-secondary)]">Здесь настраиваются глобальные роли приложения. Роли «владелец / администратор / участник» назначаются отдельно внутри конкретного окружения.</p>
         </div>
         <button onClick={() => setShowModal(true)} className="tf-button tf-button-primary"><Plus size={16} />Создать</button>
       </div>
@@ -335,9 +335,9 @@ export function Users() {
             <button type="button" onClick={createRole} className="tf-button"><Plus size={15} />Добавить роль</button>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
-            <button type="button" className="tf-button" onClick={() => applyPreset('executor')}>Исполнитель</button>
-            <button type="button" className="tf-button" onClick={() => applyPreset('manager')}>Менеджер</button>
-            <button type="button" className="tf-button" onClick={() => applyPreset('admin')}>Админ</button>
+            <button type="button" className="tf-button" onClick={() => applyPreset('executor')}>Участник приложения</button>
+            <button type="button" className="tf-button" onClick={() => applyPreset('manager')}>Руководитель команды</button>
+            <button type="button" className="tf-button" onClick={() => applyPreset('admin')}>Администратор приложения</button>
           </div>
         </div>
         <div className="mb-4 flex flex-wrap gap-2">

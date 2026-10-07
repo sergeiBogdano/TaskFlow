@@ -38,10 +38,10 @@ export const taskTypeMeta: Record<string, string> = {
 };
 
 export const roleMeta: Record<string, { label: string; hint: string; icon: typeof ShieldCheck }> = {
-  superadmin: { label: 'Суперадмин', hint: 'Полный доступ и роли', icon: ShieldCheck },
-  admin: { label: 'Администратор', hint: 'Пользователи, настройки, модули', icon: ShieldCheck },
-  manager: { label: 'Руководитель', hint: 'Команда, сроки, все задачи', icon: UserRoundCheck },
-  executor: { label: 'Исполнитель', hint: 'Свои и публичные задачи', icon: UserRoundCheck },
+  superadmin: { label: 'Суперадмин (root)', hint: 'Полный доступ платформы; учётная запись защищена', icon: ShieldCheck },
+  admin: { label: 'Администратор приложения', hint: 'Пользователи, глобальные роли и настройки приложения', icon: ShieldCheck },
+  manager: { label: 'Руководитель команды', hint: 'Команда, сроки и расширенная работа с задачами', icon: UserRoundCheck },
+  executor: { label: 'Участник приложения', hint: 'Обычная работа в доступных окружениях', icon: UserRoundCheck },
 };
 
 export function formatDate(value?: string | null) {

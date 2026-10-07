@@ -1101,7 +1101,7 @@ async def calendar_page(request: Request):
         cs = ClientService(session)
         user = await current_user(request)
         all_clients = await cs.list_clients()
-        result = await session.execute(select(UserSettings).where(UserSettings.id == 1))
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == user.id))
         us = result.scalar_one_or_none()
         cal_view_mode = us.calendar_view_mode if us else 'time'
     return templates.TemplateResponse(request, 'calendar.html', ctx(request, user=user,
@@ -1318,10 +1318,10 @@ async def settings_page(request: Request):
     if not user:
         return RedirectResponse(url='/login')
     async with async_session() as session:
-        result = await session.execute(select(UserSettings).where(UserSettings.id == 1))
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == user.id))
         us = result.scalar_one_or_none()
         if not us:
-            us = UserSettings(id=1, timezone=settings.DEFAULT_TIMEZONE, default_reminder_offset_hours=1)
+            us = UserSettings(user_id=user.id, timezone=settings.DEFAULT_TIMEZONE, default_reminder_offset_hours=1)
             session.add(us)
             await session.commit()
     return templates.TemplateResponse(request, 'settings.html', ctx(request, user=user,
@@ -1340,11 +1340,12 @@ async def settings_save(
 ):
     if not await require_auth(request):
         return RedirectResponse(url='/login')
+    user = await current_user(request)
     async with async_session() as session:
-        result = await session.execute(select(UserSettings).where(UserSettings.id == 1))
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == user.id))
         us = result.scalar_one_or_none()
         if not us:
-            us = UserSettings(id=1)
+            us = UserSettings(user_id=user.id)
             session.add(us)
         us.timezone = timezone
         us.default_reminder_offset_hours = reminder_offset

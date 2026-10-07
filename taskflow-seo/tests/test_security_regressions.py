@@ -552,8 +552,9 @@ class TestCustomRoleExactSet:
             )
 
     def test_no_auto_add_on_boot(self, tmp_path, monkeypatch, event_loop):
-        # новый пользователь без окружений не оказывается молча в первом:
-        # только явное создание/приглашение
+        # молчаливое добавление — только при создании самого первого
+        # окружения (bootstrap legacy-данных); рестарт никого не добавляет,
+        # удалённый (tombstone) не возвращается
         import os
 
         from sqlalchemy import select
@@ -573,14 +574,27 @@ class TestCustomRoleExactSet:
             async with sessions() as s:
                 s.add(User(username="loner", password_hash="x"))
                 await s.commit()
+            # первый старт: окружения нет → bootstrap создаёт + импортирует
+            await db._ensure_workspaces()
+            async with sessions() as s:
+                loner_id = (await s.execute(
+                    select(User.id).where(User.username == "loner")
+                )).scalar_one()
+                loner_ws = (await s.execute(select(WorkspaceMember).where(
+                    WorkspaceMember.user_id == loner_id
+                ))).scalars().all()
+                assert len(loner_ws) == 1, "bootstrap должен импортировать новичка один раз"
+                # удаляем и рестартуем: tombstone не даёт вернуть
+                for link in loner_ws:
+                    await s.delete(link)
+                await s.commit()
             await db._ensure_workspaces()
             async with sessions() as s:
                 rows = (await s.execute(select(WorkspaceMember))).scalars().all()
-                return rows
+                assert rows == [], f"воскрешение/лишние: {rows}"
 
         try:
-            rows = event_loop.run_until_complete(go())
-            assert rows == [], f"молчаливое добавление: {rows}"
+            event_loop.run_until_complete(go())
         finally:
             await_engine_dispose(event_loop, engine)
             os.remove(path)

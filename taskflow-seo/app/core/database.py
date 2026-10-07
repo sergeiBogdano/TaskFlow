@@ -68,7 +68,11 @@ async def _migrate():
             'ALTER TABLE file_attachments ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
             'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
             'ALTER TABLE workspace_members ADD COLUMN custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
-            'DROP TABLE IF EXISTS workspace_removals',
+            'ALTER TABLE users ADD COLUMN is_root BOOLEAN NOT NULL DEFAULT 0',
+            'ALTER TABLE user_settings ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
+            'ALTER TABLE modules ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+            'ALTER TABLE quick_task_templates ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+            'CREATE TABLE IF NOT EXISTS workspace_removals (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE NOT NULL, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)',
         ]:
             try:
                 await conn.execute(text(col))
@@ -89,6 +93,9 @@ async def _migrate():
             'CREATE INDEX IF NOT EXISTS ix_clients_workspace ON clients(workspace_id, deleted_at)',
             'CREATE INDEX IF NOT EXISTS ix_notes_workspace ON notes(workspace_id, deleted_at)',
             'CREATE INDEX IF NOT EXISTS ix_sprints_workspace ON sprints(workspace_id, status)',
+            'CREATE INDEX IF NOT EXISTS ix_modules_workspace ON modules(workspace_id)',
+            'CREATE INDEX IF NOT EXISTS ix_quick_task_templates_workspace ON quick_task_templates(workspace_id)',
+            'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_settings_user_id ON user_settings(user_id)',
         ]:
             try:
                 await conn.execute(text(idx))
@@ -184,7 +191,12 @@ async def _ensure_indexes():
         'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
         'ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS ui_config TEXT DEFAULT \'{}\'',
         'ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
-        'DROP TABLE IF EXISTS workspace_removals',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
+        'ALTER TABLE modules ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+        'ALTER TABLE quick_task_templates ADD COLUMN IF NOT EXISTS workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE',
+        'CREATE TABLE IF NOT EXISTS workspace_removals (id SERIAL PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMP WITH TIME ZONE DEFAULT now())',
+        'CREATE UNIQUE INDEX IF NOT EXISTS ix_workspace_removal_unique ON workspace_removals(workspace_id, user_id)',
         'ALTER TABLE saved_views ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE',
         'ALTER TABLE client_contacts ADD COLUMN IF NOT EXISTS contact_role VARCHAR(50)',
     ]
@@ -222,6 +234,9 @@ async def _ensure_indexes():
         'CREATE INDEX IF NOT EXISTS ix_clients_workspace ON clients(workspace_id, deleted_at)',
         'CREATE INDEX IF NOT EXISTS ix_notes_workspace ON notes(workspace_id, deleted_at)',
         'CREATE INDEX IF NOT EXISTS ix_sprints_workspace ON sprints(workspace_id, status)',
+        'CREATE INDEX IF NOT EXISTS ix_modules_workspace ON modules(workspace_id)',
+        'CREATE INDEX IF NOT EXISTS ix_quick_task_templates_workspace ON quick_task_templates(workspace_id)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS ix_user_settings_user_id ON user_settings(user_id)',
     ]
     async with engine.begin() as conn:
         for idx in indexes:
@@ -250,7 +265,7 @@ async def _ensure_admin():
         r = await session.execute(text('SELECT COUNT(*) FROM users'))
         count = r.scalar()
         if count == 0:
-            admin = User(username='4dmin', password_hash=hash_password('4dmin'))
+            admin = User(username='4dmin', password_hash=hash_password('4dmin'), is_root=True)
             session.add(admin)
             await session.commit()
             await session.refresh(admin)
@@ -262,6 +277,36 @@ async def _ensure_admin():
             await session.commit()
             logger.info('Default superadmin user created (4dmin:4dmin)')
             return
+
+
+async def _ensure_root():
+    """Keep exactly the first user as the immutable platform root.
+
+    This is deliberately separate from the role system: a superadmin role is
+    assignable application data, while root is an account invariant.
+    """
+    from app.core.models import Role, User, UserRole
+
+    async with async_session() as session:
+        users = (await session.execute(select(User).order_by(User.id))).scalars().all()
+        if not users:
+            return
+        root = users[0]
+        for account in users:
+            account.is_root = account.id == root.id
+        superadmin = (await session.execute(
+            select(Role).where(Role.name == 'superadmin')
+        )).scalar_one_or_none()
+        if superadmin:
+            link = (await session.execute(
+                select(UserRole).where(
+                    UserRole.user_id == root.id,
+                    UserRole.role_id == superadmin.id,
+                )
+            )).scalar_one_or_none()
+            if link is None:
+                session.add(UserRole(user_id=root.id, role_id=superadmin.id))
+        await session.commit()
 
 
 async def _migrate_role_permissions():
@@ -377,27 +422,34 @@ async def _migrate_custom_roles_exact():
 async def _ensure_workspaces():
     """Базовое окружение и привязка бесхозных данных.
 
-    Новое поведение: никакого молчаливого добавления пользователей в
-    окружения при старте. Участник появляется только через явное создание
-    (становится владельцем) или приглашение; удалённый не возвращается.
+    Импорт legacy-аккаунтов — только при создании самого первого окружения
+    (bootstrap); рестарт никого никуда не добавляет. Удаление участника
+    фиксируется tombstone (workspace_removals) и не откатывается.
     Пользователь без окружений получает внятный 403 с подсказкой создать
     своё (экран «нет окружения» во фронте).
     """
     from sqlalchemy import update
 
     from app.core.models import (
+        WS_ROLE_ADMIN,
+        WS_ROLE_MEMBER,
+        WS_ROLE_OWNER,
         Client,
         Note,
+        Module,
+        QuickTaskTemplate,
+        UserSettings,
         Task,
         User,
         UserRole,
         Role,
         Workspace,
         WorkspaceMember,
-        WS_ROLE_OWNER,
+        WorkspaceRemoval,
     )
     async with async_session() as session:
         ws = (await session.execute(select(Workspace).order_by(Workspace.id))).scalars().first()
+        bootstrap_memberships = ws is None
         if ws is None:
             superadmin = (await session.execute(
                 select(User).join(UserRole, UserRole.user_id == User.id).join(Role, Role.id == UserRole.role_id)
@@ -427,6 +479,47 @@ async def _ensure_workspaces():
             await session.execute(
                 update(model).where(model.workspace_id.is_(None)).values(workspace_id=wid)
             )
+        # Legacy global records belong to the original workspace. New records
+        # are always written with an explicit workspace_id by their APIs.
+        for model in (Module, QuickTaskTemplate):
+            await session.execute(
+                update(model).where(model.workspace_id.is_(None)).values(workspace_id=wid)
+            )
+        first_user = (await session.execute(select(User).order_by(User.id))).scalars().first()
+        if first_user is not None:
+            await session.execute(
+                update(UserSettings).where(UserSettings.user_id.is_(None)).values(user_id=first_user.id)
+            )
+        members = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceMember))).scalars().all()}
+        removed = {(m.workspace_id, m.user_id) for m in (await session.execute(select(WorkspaceRemoval))).scalars().all()}
+        users = (await session.execute(select(User))).scalars().all()
+        user_ws_ids: dict[int, set[int]] = {}
+        for workspace_id, user_id in members:
+            user_ws_ids.setdefault(user_id, set()).add(workspace_id)
+        for user in users:
+            # Import legacy accounts only while creating the initial workspace.
+            # A restart must never invite newly created accounts into another team.
+            if not bootstrap_memberships:
+                continue
+            if (wid, user.id) in members:
+                continue
+            if (wid, user.id) in removed:
+                # явно удалён из окружения — не возвращать при рестарте
+                continue
+            if user_ws_ids.get(user.id):
+                # участник других окружений — не тянуть в первое
+                continue
+            role_rows = (await session.execute(
+                select(Role.name).join(UserRole, UserRole.role_id == Role.id)
+                .where(UserRole.user_id == user.id)
+            )).scalars().all()
+            if 'superadmin' in role_rows:
+                role = WS_ROLE_OWNER
+            elif 'admin' in role_rows:
+                role = WS_ROLE_ADMIN
+            else:
+                role = WS_ROLE_MEMBER
+            session.add(WorkspaceMember(workspace_id=wid, user_id=user.id, role=role))
         await session.commit()
 
 
@@ -437,6 +530,7 @@ async def init_db():
     await _migrate()
     await _ensure_indexes()
     await _ensure_admin()
+    await _ensure_root()
     await _migrate_role_permissions()
     await _migrate_custom_roles_exact()
     await _ensure_workspaces()

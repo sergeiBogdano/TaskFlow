@@ -108,7 +108,7 @@ async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> d
         if not member.custom_role_id:
             return dict(workspace_default_permissions(member.role))
         role = await session.get(WorkspaceRole, member.custom_role_id)
-        if role is None:
+        if role is None or role.workspace_id != workspace_id:
             return dict(workspace_default_permissions(member.role))
         raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
         allowed = set(work_scope_keys())
@@ -128,14 +128,16 @@ async def effective_permissions(user, workspace_id: int | None = None) -> dict:
     from app.core.permission_catalog import work_scope_keys
 
     app_perms = await get_user_permissions(user.id)
+    if is_root_user(user):
+        return {'all': True}
     if app_perms.get('all'):
         return app_perms
     ws_perms = await get_workspace_permissions(user.id, workspace_id)
-    if ws_perms is None:
+    if ws_perms is None and workspace_id is None:
         return app_perms
     work_keys = set(work_scope_keys())
     merged = {key: value for key, value in app_perms.items() if key not in work_keys}
-    merged.update(ws_perms)
+    merged.update(ws_perms or {})
     return merged
 
 
@@ -157,6 +159,11 @@ async def user_can_manage_all_tasks(user) -> bool:
 
 def user_is_superadmin(role_names: set[str]) -> bool:
     return 'superadmin' in role_names
+
+
+def is_root_user(user) -> bool:
+    """Return the immutable platform-root marker without a database query."""
+    return bool(getattr(user, 'is_root', False))
 
 
 async def get_accessible_client_ids(session, user_id: int, role_names: set[str]) -> set[int]:
@@ -228,6 +235,17 @@ def require_role(roles: list[str]):
                 if r and r.name in roles:
                     return user
         raise HTTPException(status_code=403, detail="Forbidden")
+    check._tf_guard = 'role'
+    return check
+
+
+def require_root():
+    """Dependency for operations reserved for the first platform account."""
+    async def check(user=Depends(get_current_user)):
+        if not is_root_user(user):
+            raise HTTPException(status_code=403, detail='Только root-пользователь может выполнить эту операцию')
+        return user
+    # Keep endpoint protection visible to the existing protection matrix.
     check._tf_guard = 'role'
     return check
 
@@ -333,6 +351,8 @@ async def get_effective_features(user, workspace_id: int | None = None,
 
 
 async def is_feature_available(user, key: str, workspace_id: int | None = None) -> bool:
+    if is_root_user(user):
+        return True
     state = await get_effective_features(user, workspace_id, keys=[key])
     return state.get(key, True)
 

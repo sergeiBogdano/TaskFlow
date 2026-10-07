@@ -241,6 +241,20 @@ select.tf-input option {
   color: var(--color-text);
 }
 
+/* Portalled select menus are above every panel, sidebar and modal layer. */
+.tf-floating-menu {
+  min-width: var(--tf-menu-width, 180px);
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+  overscroll-behavior: contain;
+}
+
+.tf-floating-menu > div:last-child {
+  max-height: min(360px, calc(100vh - 20px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 [data-theme="graphite"] select.tf-input {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23b9c3d0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }

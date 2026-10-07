@@ -24,12 +24,14 @@ from app.core.models import (
     Workspace,
     WorkspaceKnowledge,
     WorkspaceMember,
+    WorkspaceRemoval,
     WorkspaceRole,
 )
 from app.core.permissions import (
     get_current_user,
     get_user_role_names,
     get_workspace_role,
+    is_root_user,
     require_workspace_role,
     resolve_workspace,
     user_is_superadmin,
@@ -208,7 +210,8 @@ async def _purge_workspace(session, workspace_id: int) -> None:
                           (Client, Client.workspace_id), (Note, Note.workspace_id),
                           (WorkspaceKnowledge, WorkspaceKnowledge.workspace_id),
                           (WorkspaceRole, WorkspaceRole.workspace_id),
-                          (WorkspaceMember, WorkspaceMember.workspace_id)):
+                          (WorkspaceMember, WorkspaceMember.workspace_id),
+                          (WorkspaceRemoval, WorkspaceRemoval.workspace_id)):
         await session.execute(model.__table__.delete().where(column == workspace_id))
     await session.execute(Workspace.__table__.delete().where(Workspace.id == workspace_id))
 
@@ -424,11 +427,19 @@ def _can_manage(actor_role: str, actor_is_super: bool, target_role: str | None, 
         return None
     if target_role == WS_ROLE_OWNER:
         return "Владельца может менять только суперадмин"
-    if actor_role not in (WS_ROLE_OWNER, WS_ROLE_ADMIN):
-        return "Недостаточно прав в воркспейсе"
-    if new_role == WS_ROLE_OWNER:
-        return "Назначить владельцем может только суперадмин"
-    return None
+    if actor_role == WS_ROLE_OWNER:
+        if new_role == WS_ROLE_OWNER:
+            return "Назначить владельцем может только суперадмин"
+        return None
+    if actor_role == WS_ROLE_ADMIN:
+        # Администратор окружения управляет только участниками ниже себя.
+        # Равные администраторы и повышение до администратора — зона владельца.
+        if target_role not in (None, WS_ROLE_MEMBER):
+            return "Администратор окружения может управлять только участниками"
+        if new_role == WS_ROLE_ADMIN:
+            return "Назначать администраторов может только владелец окружения"
+        return None
+    return "Недостаточно прав в воркспейсе"
 
 
 async def _owner_count(session, workspace_id: int) -> int:
@@ -476,6 +487,13 @@ async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(requi
             return JSONResponse({"error": "Уже участник"}, status_code=400)
         member = WorkspaceMember(workspace_id=ctx["workspace"].id, user_id=payload.user_id, role=payload.role)
         session.add(member)
+        # повторное приглашение стирает tombstone явного удаления
+        await session.execute(
+            WorkspaceRemoval.__table__.delete().where(
+                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
+                WorkspaceRemoval.user_id == payload.user_id,
+            )
+        )
         await session.commit()
         await session.refresh(member)
     return JSONResponse(_member_to_dict(member, target.username), status_code=201)
@@ -502,6 +520,9 @@ async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, 
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
+        target = await session.get(User, user_id)
+        if target is not None and target.is_root and not is_root_user(ctx["user"]):
+            return JSONResponse({"error": "Нельзя изменять root-пользователя"}, status_code=403)
         if member.role == WS_ROLE_OWNER and payload.role != WS_ROLE_OWNER and not actor_is_super:
             err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
         else:
@@ -527,6 +548,9 @@ async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_wor
         )).scalar_one_or_none()
         if member is None:
             return JSONResponse({"error": "Не участник"}, status_code=404)
+        target = await session.get(User, user_id)
+        if target is not None and target.is_root and not is_root_user(ctx["user"]):
+            return JSONResponse({"error": "Нельзя удалять root-пользователя из окружения"}, status_code=403)
         if member.role == WS_ROLE_OWNER and not actor_is_super:
             err = await _can_leave_ownership(session, ctx["workspace"].id, ctx["user"].id, user_id)
         else:
@@ -534,6 +558,15 @@ async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_wor
         if err:
             return JSONResponse({"error": err}, status_code=403)
         await session.delete(member)
+        # tombstone: автодобавление при рестарте не должно возвращать удалённых
+        existing_mark = (await session.execute(
+            select(WorkspaceRemoval).where(
+                WorkspaceRemoval.workspace_id == ctx["workspace"].id,
+                WorkspaceRemoval.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        if existing_mark is None:
+            session.add(WorkspaceRemoval(workspace_id=ctx["workspace"].id, user_id=user_id))
         await session.commit()
     return JSONResponse({"ok": True})
 

@@ -122,7 +122,11 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
         <div className="min-w-0 flex-1">
           <Select
             value={activeId || getActiveWorkspaceId() || ''}
-            options={workspaces.map(w => ({ value: String(w.id), label: w.name, hint: w.role === 'owner' ? 'владелец' : w.role }))}
+            options={workspaces.map(w => ({
+              value: String(w.id),
+              label: w.name,
+              hint: w.role === 'owner' ? 'владелец окружения' : w.role === 'admin' ? 'администратор окружения' : 'участник окружения',
+            }))}
             onChange={value => {
               if (value && value !== activeId) void switchWorkspace(value);
             }}

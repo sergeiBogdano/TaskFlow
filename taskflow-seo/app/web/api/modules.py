@@ -1,14 +1,19 @@
 import json
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.database import async_session
 from app.core.models import Module, Notification, Task
-from app.core.permissions import require_role, get_current_user
+from app.core.permissions import (
+    get_current_user,
+    get_user_role_names,
+    require_role,
+    resolve_workspace,
+)
 from app.core.utils.timezone import format_datetime, to_utc, utc_now
 from app.core.config import settings
 
@@ -37,11 +42,36 @@ def _validate_module_dates(completion_offset_days, deadline_offset_days):
         raise HTTPException(status_code=400, detail='Дата выполнения модуля не может быть позже крайнего срока')
 
 
+async def _resolve_module_workspace(session, user, workspace_id: int | None, client_ids: list[int]):
+    """Resolve and validate one workspace for a module and all its clients."""
+    roles = await get_user_role_names(user.id)
+    client_workspaces = set()
+    for client_id in client_ids:
+        from app.core.models import Client
+        client = await session.get(Client, client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail='Client not found')
+        if client.workspace_id is not None:
+            client_workspaces.add(client.workspace_id)
+    if len(client_workspaces) > 1:
+        raise HTTPException(status_code=400, detail='Модуль не может объединять организации из разных окружений')
+    if workspace_id is None and client_workspaces:
+        workspace_id = next(iter(client_workspaces))
+    workspace, _ = await resolve_workspace(session, user, roles, workspace_id)
+    if client_workspaces and client_workspaces != {workspace.id}:
+        raise HTTPException(status_code=400, detail='Организация относится к другому окружению')
+    return workspace
+
+
 @router.get('')
-async def list_modules(user=Depends(get_current_user)):
+async def list_modules(workspace_id: int | None = Query(None), user=Depends(get_current_user)):
     async with async_session() as session:
+        roles = await get_user_role_names(user.id)
+        workspace, _ = await resolve_workspace(session, user, roles, workspace_id)
         r = await session.execute(
-            select(Module).options(selectinload(Module.client), selectinload(Module.assignee)).order_by(Module.id)
+            select(Module).where(Module.workspace_id == workspace.id).options(
+                selectinload(Module.client), selectinload(Module.assignee)
+            ).order_by(Module.id)
         )
         modules = r.scalars().all()
     return JSONResponse([{
@@ -70,13 +100,15 @@ async def list_modules(user=Depends(get_current_user)):
 
 
 @router.post('')
-async def create_module(data: dict, user=Depends(require_role(['superadmin', 'admin']))):
+async def create_module(data: dict, workspace_id: int | None = Query(None), user=Depends(require_role(['superadmin', 'admin']))):
     _validate_module_dates(data.get('completion_offset_days', 0), data.get('deadline_offset_days'))
     client_ids = [int(item) for item in (data.get('client_ids') or []) if item]
     if not client_ids and data.get('client_id'):
         client_ids = [int(data.get('client_id'))]
     async with async_session() as session:
+        workspace = await _resolve_module_workspace(session, user, workspace_id, client_ids)
         m = Module(
+            workspace_id=workspace.id,
             name=data['name'],
             description=data.get('description'),
             client_id=client_ids[0] if client_ids else None,
@@ -105,6 +137,10 @@ async def update_module(module_id: int, data: dict, user=Depends(require_role(['
         m = await session.get(Module, module_id)
         if not m:
             raise HTTPException(status_code=404, detail='Module not found')
+        await _resolve_module_workspace(session, user, m.workspace_id, _module_client_ids(m))
+        if 'client_ids' in data:
+            await _resolve_module_workspace(session, user, m.workspace_id,
+                                            [int(item) for item in (data.get('client_ids') or []) if item])
         next_completion_offset = data.get('completion_offset_days', getattr(m, 'completion_offset_days', 0) or 0)
         next_deadline_offset = data.get('deadline_offset_days', getattr(m, 'deadline_offset_days', None))
         _validate_module_dates(next_completion_offset, next_deadline_offset)
@@ -129,6 +165,7 @@ async def delete_module(module_id: int, user=Depends(require_role(['superadmin',
     async with async_session() as session:
         m = await session.get(Module, module_id)
         if m:
+            await _resolve_module_workspace(session, user, m.workspace_id, _module_client_ids(m))
             await session.delete(m)
             await session.commit()
     return JSONResponse({'ok': True})
@@ -140,6 +177,7 @@ async def generate_tasks(module_id: int, data: dict = None, user=Depends(require
         m = await session.get(Module, module_id)
         if not m:
             raise HTTPException(status_code=404, detail='Module not found')
+        await _resolve_module_workspace(session, user, m.workspace_id, _module_client_ids(m))
         from app.core.models import Client
         from app.core.permissions import get_user_role_names, resolve_workspace
         role_names = await get_user_role_names(user.id)

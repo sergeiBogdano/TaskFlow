@@ -1,5 +1,7 @@
 import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFloatingMenu } from './useFloatingMenu';
 
 export type SearchSelectOption = {
   value: string;
@@ -26,9 +28,11 @@ export function SearchSelect({
   emptyLabel,
 }: SearchSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const menuStyle = useFloatingMenu(open, rootRef, 220);
   const selected = options.find(option => option.value === value);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('ru-RU');
@@ -42,7 +46,8 @@ export function SearchSelect({
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
@@ -80,8 +85,8 @@ export function SearchSelect({
         <ChevronDown size={15} className="shrink-0 text-[var(--color-muted)]" />
       </button>
 
-      {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)]/90 shadow-[var(--shadow-panel)] backdrop-blur-xl">
+      {open && createPortal(
+        <div ref={menuRef} style={menuStyle} className="tf-floating-menu z-[1000] overflow-hidden rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-panel)] backdrop-blur-xl">
           <div className="relative border-b border-[var(--color-border)] p-2">
             <Search size={14} className="pointer-events-none absolute left-4 top-[21px] text-[var(--color-muted)]" />
             <input
@@ -111,7 +116,8 @@ export function SearchSelect({
             ))}
             {!filtered.length && <div className="px-3 py-6 text-center text-sm text-[var(--color-text-secondary)]">Ничего не найдено</div>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

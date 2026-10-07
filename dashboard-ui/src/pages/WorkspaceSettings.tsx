@@ -104,6 +104,7 @@ export function WorkspaceSettings() {
 
   const isOwner = detail.role === 'owner';
   const canManage = isOwner || detail.role === 'admin' || isSuperadmin;
+  const canEditSettings = isOwner || isSuperadmin;
 
   const saveInfo = async (event: FormEvent) => {
     event.preventDefault();
@@ -267,8 +268,15 @@ export function WorkspaceSettings() {
           <h2 className="tf-page-title">Окружение</h2>
           <p className="tf-page-subtitle">Настройки, команда и база знаний активного окружения.</p>
         </div>
-        <span className="tf-chip ml-auto">твоя роль: {detail.role === 'owner' ? 'владелец' : detail.role === 'admin' ? 'админ' : 'участник'}</span>
+        <span className="tf-chip ml-auto">роль в окружении: {detail.role === 'owner' ? 'владелец' : detail.role === 'admin' ? 'администратор' : 'участник'}</span>
       </div>
+
+      <section className="tf-panel-flat border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-4">
+        <h3 className="mb-2 text-sm font-bold">Как устроен доступ</h3>
+        <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
+          Роль приложения отвечает за глобальные возможности аккаунта. Роль в этом окружении отвечает только за команду и данные выбранного окружения. Дополнительный профиль окружения лишь добавляет рабочие права и не меняет иерархию. Суперадмин (root) имеет полный доступ платформы и не может быть изменён или удалён другими пользователями.
+        </p>
+      </section>
 
       {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
 
@@ -277,12 +285,12 @@ export function WorkspaceSettings() {
         <form onSubmit={saveInfo} className="grid gap-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
-            <input className="tf-input" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={!canManage} />
+            <input className="tf-input" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={!canEditSettings} />
           </label>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Тема</span>
-              <select className="tf-input" value={theme} onChange={event => setTheme(event.target.value)} disabled={!canManage}>
+              <select className="tf-input" value={theme} onChange={event => setTheme(event.target.value)} disabled={!canEditSettings}>
                 <option value="">Как в браузере</option>
                 <option value="cream">Крем</option>
                 <option value="graphite">Графит</option>
@@ -290,14 +298,14 @@ export function WorkspaceSettings() {
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">«Клиенты» называть</span>
-              <input className="tf-input" value={clientsLabel} onChange={event => setClientsLabel(event.target.value)} placeholder="Клиенты" maxLength={40} disabled={!canManage} />
+              <input className="tf-input" value={clientsLabel} onChange={event => setClientsLabel(event.target.value)} placeholder="Клиенты" maxLength={40} disabled={!canEditSettings} />
             </label>
           </div>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Инструкции для AI</span>
-            <textarea className="tf-input min-h-24 resize-y" value={aiInstructions} onChange={event => setAiInstructions(event.target.value)} placeholder="Например: ты наставник по Python..." disabled={!canManage} />
+            <textarea className="tf-input min-h-24 resize-y" value={aiInstructions} onChange={event => setAiInstructions(event.target.value)} placeholder="Например: ты наставник по Python..." disabled={!canEditSettings} />
           </label>
-          {canManage && (
+          {canEditSettings && (
             <div>
               <button type="submit" disabled={saving} className="tf-button tf-button-primary">{saving ? 'Сохранение...' : 'Сохранить'}</button>
             </div>
@@ -306,18 +314,18 @@ export function WorkspaceSettings() {
       </section>
 
       <section className="tf-panel-flat p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} />Команда · {members.length}</h3>
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} />Участники окружения · {members.length}</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
           Ранг (владелец/админ/участник) — это управление окружением. Что человек видит и может делать —
-          задаёт кастомная роль ниже: отмеченное в ней и действует, остальное закрыто даже админу.
+          задаёт кастомная роль: отмеченное в ней и действует, остальное закрыто даже админу.
           Без кастомной роли работают права ранга.
         </p>
         {canManage && (
           <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px_auto]">
             <SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />
             <select className="tf-input" value={addRole} onChange={event => setAddRole(event.target.value)}>
-              <option value="member">Участник</option>
-              <option value="admin">Админ</option>
+              <option value="member">Участник окружения</option>
+              {(isOwner || isSuperadmin) && <option value="admin">Администратор окружения</option>}
             </select>
             <button type="button" onClick={addMember} disabled={!addUserId} className="tf-button tf-button-primary"><Plus size={15} />Добавить</button>
           </div>
@@ -332,7 +340,7 @@ export function WorkspaceSettings() {
         <div className="space-y-2">
           {members.map(member => {
             const protectedOwner = member.role === 'owner';
-            const canTouch = canManage && (isSuperadmin || !protectedOwner);
+            const canTouch = canManage && (isSuperadmin || (isOwner && !protectedOwner) || (detail.role === 'admin' && member.role === 'member'));
             return (
               <div key={member.user_id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -346,9 +354,9 @@ export function WorkspaceSettings() {
                       value={member.role}
                       onChange={event => changeRole(member.user_id, event.target.value)}
                     >
-                      <option value="member">Участник</option>
-                      <option value="admin">Админ</option>
-                      {isSuperadmin && <option value="owner">Владелец</option>}
+                      <option value="member">Участник окружения</option>
+                      {(isOwner || isSuperadmin) && <option value="admin">Администратор окружения</option>}
+                      {isSuperadmin && <option value="owner">Владелец окружения</option>}
                     </select>
                   ) : (
                     <span className="tf-chip">{member.role === 'owner' ? 'владелец' : member.role === 'admin' ? 'админ' : 'участник'}</span>
@@ -380,7 +388,7 @@ export function WorkspaceSettings() {
                 )}
                 {(wsRoles.length > 0 || member.custom_role) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-secondary)]">Роль окружения:</span>
+                    <span className="text-xs text-[var(--color-text-secondary)]">Дополнительный профиль:</span>
                     {canTouch && wsRoles.length > 0 ? (
                       <select
                         className="tf-input h-8 w-auto py-0 text-xs"

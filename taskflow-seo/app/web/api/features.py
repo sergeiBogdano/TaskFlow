@@ -7,7 +7,7 @@ from app.core.models import FeatureOverride
 from app.core.permissions import (
     get_current_user,
     get_effective_features,
-    require_role,
+    require_root,
     workspace_id_from_request,
 )
 from app.core.permission_catalog import PERMISSION_GROUPS
@@ -35,7 +35,7 @@ def _features_payload() -> list[dict]:
 
 
 @router.get('')
-async def get_features(request: Request, user=Depends(require_role(['superadmin']))):
+async def get_features(request: Request, user=Depends(require_root())):
     """Эффективный набор функций текущего пользователя/окружения + записи крана."""
     workspace_id = workspace_id_from_request(request)
     effective = await get_effective_features(user, workspace_id)
@@ -57,7 +57,7 @@ async def get_features(request: Request, user=Depends(require_role(['superadmin'
 
 
 @router.put('')
-async def set_feature(request: Request, user=Depends(require_role(['superadmin']))):
+async def set_feature(request: Request, user=Depends(require_root())):
     """Тумблер крана: upsert записи global|workspace|group|user (приоритет user>ws>group>global), enabled=null → убрать запись."""
     data = await request.json()
     scope = data.get('scope') or 'global'
