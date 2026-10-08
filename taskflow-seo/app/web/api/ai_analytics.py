@@ -85,15 +85,10 @@ async def _ask_llm(model: str, prompt: str, num_predict: int = 600, *, user, wor
 
 
 async def _workspace_prompt_additions(session, user, workspace_id: int | None) -> str:
-    """Инструкции + память воркспейса для промптов. Пусто если нечего добавить."""
-    from app.web.api.workspaces import workspace_context, workspace_fact_block
-    if workspace_id is None:
-        return ""
-    ws, knowledge = await workspace_context(session, workspace_id)
-    if ws is None:
-        return ""
-    block = workspace_fact_block(ws, knowledge)
-    return f"\n{block}" if block else ""
+    # Shared workspace memory is not an authorized retrieval source for AI.
+    # Text generation uses only explicitly supplied facts and protected assistant context.
+    return ""
+
 
 
 def _now() -> datetime:
@@ -263,7 +258,7 @@ async def collect_project(session, client_id: int, workspace_id: int | None = No
     if client_name is None:
         return None
     tasks = (await session.execute(
-        select(Task).where(Task.deleted_at.is_(None), Task.client_id == client_id)
+        select(Task).where(Task.deleted_at.is_(None), Task.client_id == client_id, Task.workspace_id == workspace_id)
     )).scalars().all()
     by_status: dict[str, int] = {}
     overdue: list[dict[str, Any]] = []
@@ -358,6 +353,11 @@ async def _resolve_analytics_workspace(payload_workspace_id: int | None, user) -
         workspace, _ = await resolve_workspace(session, user, role_names, payload_workspace_id)
         from app.core.permissions import effective_permissions
         permissions = await effective_permissions(user, workspace.id)
+        from app.core.ai_assistant import authorize
+        from app.core.permissions import is_feature_available
+        await authorize(user, workspace.id)
+        if not ((permissions.get('all') or permissions.get('tasks')) and await is_feature_available(user, 'tasks', workspace.id) and (permissions.get('all') or permissions.get('clients')) and await is_feature_available(user, 'clients', workspace.id)):
+            raise HTTPException(403, 'Анализ требует доступа к задачам и клиентам')
         if not (permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others')):
             raise HTTPException(403, 'Анализ команды требует права просмотра чужих задач')
         return workspace.id

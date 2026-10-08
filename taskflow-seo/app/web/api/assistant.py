@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 
 from app.core import ai_assistant as queue
+from app.core.ai_security import redact_text, redact_value
 from app.core.database import async_session
 from app.core.models import AiRequest, AiQueueSettings, User
 from app.core.permissions import get_current_user, require_root
@@ -34,10 +35,10 @@ async def job_payload(session, job, user=None, signature=None, allowed_sources=N
         position = await session.scalar(select(func.count()).select_from(AiRequest).where(AiRequest.status == 'queued',
             (AiRequest.created_at < job.created_at) | ((AiRequest.created_at == job.created_at) & (AiRequest.id <= job.id))))
     visible = not user or not job.result or await queue.result_is_visible(job, user, signature, allowed_sources)
-    return {'id': job.id, 'workspace_id': job.workspace_id, 'conversation_id': job.conversation_id, 'kind': job.kind, 'message': job.message,
+    return {'id': job.id, 'workspace_id': job.workspace_id, 'conversation_id': job.conversation_id, 'kind': job.kind, 'message': redact_text(job.message),
             'status': job.status, 'position': position, 'cancel_requested': job.cancel_requested,
             'created_at': job.created_at.isoformat() + 'Z', 'error': job.error if visible else 'Доступ к данным изменился. Начните новый диалог.',
-            'result': json.loads(job.result) if job.result and visible else None}
+            'result': redact_value(json.loads(job.result)) if job.result and visible else None}
 
 
 async def owned_job(session, job_id, user, workspace_id, check_ai=True):
