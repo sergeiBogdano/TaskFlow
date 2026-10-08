@@ -396,3 +396,127 @@ def test_history_provenance_survives_context_sample_changes(queue_data, event_lo
         await ai.run_one(*(await ai.claim()))
         assert 'HISTORY_ONLY_DETAIL' not in json.dumps(captured[2])
     event_loop.run_until_complete(scenario())
+
+
+def test_dialogue_with_hidden_fields_filters_context(queue_data, event_loop, monkeypatch):
+    root, member, wid, _ = queue_data
+    captured = []
+    async def fake(messages, *args):
+        captured.append(messages)
+        return 'Safe dialogue', {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        from app.core.models import Sprint
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'permissions': {'kanban': True, 'notes': False}, 'fields': {'tasks': {'notes': 'hidden', 'deadline': 'hidden'}, 'sprints': {'goal': 'hidden'}}})
+            session.add(Task(title='Allowed task title', notes='HIDDEN_TASK_DESCRIPTION', deadline=ai.now(), workspace_id=wid, assignee_id=member.id))
+            session.add(Sprint(name='Allowed sprint', goal='HIDDEN_SPRINT_GOAL', workspace_id=wid))
+            session.add(Note(title='NOTES_NOT_ALLOWED', content='NOTES_NOT_ALLOWED', user_id=root.id, workspace_id=wid, is_public=True))
+            await session.commit()
+        _, permissions = await ai.authorize(member, wid)
+        context = await ai.context_for(member, wid, permissions)
+        assert 'notes' not in context
+        assert 'overdue_active' not in context['tasks']
+        assert 'deadline' not in context['tasks']['items'][0]
+        assert 'goal' not in context['sprints'][0]
+        job = await ai.enqueue(member, wid, 'Help with allowed work')
+        await ai.run_one(*(await ai.claim()))
+        payload = json.dumps(captured)
+        assert 'Allowed task title' in payload and 'Allowed sprint' in payload
+        for secret in ('HIDDEN_TASK_DESCRIPTION', 'HIDDEN_SPRINT_GOAL', 'NOTES_NOT_ALLOWED'):
+            assert secret not in payload
+        async with async_session() as session:
+            assert (await session.get(AiRequest, job.id)).status == 'completed'
+        from app.web.api.ai_analytics import _resolve_analytics_workspace
+        with pytest.raises(HTTPException) as denied:
+            await _resolve_analytics_workspace(wid, member)
+        assert denied.value.status_code == 403
+    event_loop.run_until_complete(scenario())
+
+
+def test_module_enabled_does_not_grant_ai_and_report_explains(sync_request, admin_cookies, queue_data, event_loop):
+    _, member, wid, _ = queue_data
+    async def revoke():
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            profile = await session.get(WorkspaceRole, membership.custom_role_id)
+            profile.permissions = json.dumps({'tasks': True})
+            await session.commit()
+        with pytest.raises(HTTPException) as denied:
+            await ai.authorize(member, wid)
+        assert denied.value.status_code == 403 and 'Нет рабочего права' in denied.value.detail
+    event_loop.run_until_complete(revoke())
+    report = sync_request('GET', f'/api/workspaces/{wid}/access', cookies=admin_cookies)
+    assert report.status_code == 200, report.text
+    row = next(item for item in report.json()['members'] if item['user_id'] == member.id)
+    assert row['permissions']['ai']['available'] is True
+    assert row['permissions']['ai']['granted'] is False
+    assert 'Нет права' in row['permissions']['ai']['reason']
+    response = sync_request('PUT', f'/api/workspaces/{wid}/members/{member.id}/access', cookies=admin_cookies, json={'permissions': {'ai': True}})
+    assert response.status_code == 200, response.text
+    event_loop.run_until_complete(ai.authorize(member, wid))
+
+
+def test_personal_feature_deny_is_explained_and_can_be_reset(queue_data, event_loop, sync_request, admin_cookies):
+    _, member, wid, _ = queue_data
+    async def scenario():
+        from app.core.models import FeatureOverride
+        from app.core.permissions import get_feature_access
+        async with async_session() as session:
+            override = FeatureOverride(scope='user', target_id=member.id, key='ai', enabled=False)
+            session.add(override); await session.commit(); await session.refresh(override)
+            oid = override.id
+        try:
+            access = (await get_feature_access(member, wid))['ai']
+            assert not access['available'] and 'лично' in access['reason']
+            with pytest.raises(HTTPException) as denied:
+                await ai.authorize(member, wid)
+            assert 'лично' in denied.value.detail
+        finally:
+            async with async_session() as session:
+                await session.execute(delete(FeatureOverride).where(FeatureOverride.id == oid)); await session.commit()
+        await ai.authorize(member, wid)
+    event_loop.run_until_complete(scenario())
+    payload = {'scope': 'user', 'target_id': member.id, 'key': 'ai', 'enabled': False}
+    try:
+        assert sync_request('PUT', '/api/features', cookies=admin_cookies, json=payload).status_code == 200
+        rows = sync_request('GET', f'/api/features?scope=user&target_id={member.id}&workspace_id={wid}', cookies=admin_cookies).json()
+        assert rows['scope_effective']['ai'] is False
+    finally:
+        payload['enabled'] = None
+        assert sync_request('PUT', '/api/features', cookies=admin_cookies, json=payload).status_code == 200
+    event_loop.run_until_complete(ai.authorize(member, wid))
+
+
+def test_group_feature_deny_does_not_grant_workspace_rights(queue_data, event_loop):
+    _, member, wid, _ = queue_data
+    async def scenario():
+        from app.core.models import FeatureOverride, Group, UserGroup
+        from app.core.permissions import get_feature_access, get_user_permissions
+        async with async_session() as session:
+            group = Group(name='Tester_'+str(wid), permissions=json.dumps({'workspaces_create': True}))
+            session.add(group); await session.flush()
+            gid = group.id
+            session.add(UserGroup(group_id=gid, user_id=member.id))
+            override = FeatureOverride(scope='group', target_id=gid, key='ai', enabled=False)
+            session.add(override); await session.commit(); await session.refresh(override)
+            oid = override.id
+        try:
+            assert (await get_user_permissions(member.id)).get('workspaces_create')
+            access = (await get_feature_access(member, wid))['ai']
+            assert not access['available'] and 'группе' in access['reason'] and 'Tester_' in access['reason']
+            async with async_session() as session:
+                override = await session.get(FeatureOverride, oid); override.enabled = True
+                membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+                membership.access_overrides = json.dumps({'permissions': {'ai': False}})
+                await session.commit()
+            with pytest.raises(HTTPException) as denied:
+                await ai.authorize(member, wid)
+            assert 'Нет рабочего права' in denied.value.detail
+        finally:
+            async with async_session() as session:
+                await session.execute(delete(FeatureOverride).where(FeatureOverride.id == oid))
+                await session.execute(delete(UserGroup).where(UserGroup.group_id == gid))
+                await session.execute(delete(Group).where(Group.id == gid)); await session.commit()
+    event_loop.run_until_complete(scenario())

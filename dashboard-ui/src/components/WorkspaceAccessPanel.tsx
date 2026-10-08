@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type WorkspaceAccessReport } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import type { FieldAccess } from '../lib/fieldAccess';
+import { FeaturesPanel } from './FeaturesPanel';
 import { FieldAccessEditor } from './FieldAccessEditor';
 
 const levels: Record<string, string> = { owner: 'Владелец', admin: 'Администратор окружения', member: 'Участник' };
@@ -9,18 +10,25 @@ const ranks: Record<string, number> = { owner: 3, admin: 2, member: 1 };
 
 export function WorkspaceAccessPanel({ workspaceId, level }: { workspaceId: number; level: string }) {
   const { user } = useAuth();
+  const currentWorkspace = useRef(workspaceId);
+  currentWorkspace.current = workspaceId;
+  const loadRevision = useRef(0);
   const [report, setReport] = useState<WorkspaceAccessReport | null>(null);
+  const [reportWorkspaceId, setReportWorkspaceId] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [fields, setFields] = useState<FieldAccess>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    try { setReport(await api.getWorkspaceAccess(workspaceId)); }
-    catch (err) { setError(err instanceof Error ? err.message : 'Не удалось загрузить доступ'); }
+    if (currentWorkspace.current !== workspaceId) return;
+    const revision = ++loadRevision.current;
+    try { const data = await api.getWorkspaceAccess(workspaceId); if (currentWorkspace.current === workspaceId && loadRevision.current === revision) { setReport(data); setReportWorkspaceId(workspaceId); } }
+    catch (err) { if (currentWorkspace.current === workspaceId && loadRevision.current === revision) setError(err instanceof Error ? err.message : 'Не удалось загрузить доступ'); }
   }, [workspaceId]);
-  useEffect(() => { void load(); }, [load]);
-  const member = report?.members.find(item => item.user_id === selected);
+  useEffect(() => { void load(); const reload = () => { void load(); }; window.addEventListener('taskflow:access-updated', reload); return () => window.removeEventListener('taskflow:access-updated', reload); }, [load]);
+  useEffect(() => { setReport(null); setSelected(null); setPermissions({}); setFields({}); setError(''); }, [workspaceId]);
+  const member = reportWorkspaceId === workspaceId ? report?.members.find(item => item.user_id === selected) : undefined;
   const canEdit = !!member && !member.is_root && member.user_id !== user?.id &&
     (user?.is_root || (ranks[level] || 0) > (ranks[member.level] || 0));
   const select = (id: number) => {
@@ -31,7 +39,7 @@ export function WorkspaceAccessPanel({ workspaceId, level }: { workspaceId: numb
     if (!member) return;
     setBusy(true); setError('');
     try { await api.setWorkspaceAccess(workspaceId, member.user_id, { permissions: reset ? {} : permissions, fields: reset ? {} : fields });
-      if (reset) { setPermissions({}); setFields({}); } await load(); }
+      if (reset) { setPermissions({}); setFields({}); } await load(); window.dispatchEvent(new Event('taskflow:access-updated')); }
     catch (err) { setError(err instanceof Error ? err.message : 'Не удалось сохранить'); }
     finally { setBusy(false); }
   };
@@ -54,6 +62,7 @@ export function WorkspaceAccessPanel({ workspaceId, level }: { workspaceId: numb
               <option value="">Как в профиле</option><option value="false">Запретить лично</option><option value="true" disabled={!user?.is_root && !user?.permissions[item.key]}>Разрешить лично</option>
             </select></div>;
         })}</div></details>)}
+      {user?.is_root && !member.is_root && <FeaturesPanel scope="user" targetId={member.user_id} workOnly title={`Доступность функций: ${member.username}`} description="Проверьте личные запреты, если рабочее право уже выдано, а функция недоступна. Эти личные переключатели действуют во всех пространствах пользователя и не обходят глобальный запрет, запрет пространства или отключённый модуль." />}
       <h4 className="font-semibold">Личные исключения для полей</h4>
       <FieldAccessEditor value={fields} onChange={setFields} disabled={!canEdit || busy} personal />
       <details className="text-sm"><summary className="cursor-pointer">Итоговый доступ к полям</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(member.fields).flatMap(([entity, values]) => Object.entries(values).map(([key, mode]) => <div key={`${entity}.${key}`} className="tf-chip">{report?.fields[entity]?.[key]?.label}: {mode === 'edit' ? 'редактирование' : mode === 'view' ? 'просмотр' : 'скрыто'}</div>))}</div></details>

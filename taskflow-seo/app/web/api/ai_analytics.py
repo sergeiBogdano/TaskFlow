@@ -356,6 +356,9 @@ async def _resolve_analytics_workspace(payload_workspace_id: int | None, user) -
         from app.core.ai_assistant import authorize
         from app.core.permissions import is_feature_available
         await authorize(user, workspace.id)
+        from app.core.access_policy import field_access
+        if any(mode == 'hidden' for fields in (await field_access(user, workspace.id)).values() for mode in fields.values()):
+            raise HTTPException(403, 'Полный анализ команды требует доступа ко всем полям. Используйте помощника: он учитывает скрытые поля.')
         if not ((permissions.get('all') or permissions.get('tasks')) and await is_feature_available(user, 'tasks', workspace.id) and (permissions.get('all') or permissions.get('clients')) and await is_feature_available(user, 'clients', workspace.id)):
             raise HTTPException(403, 'Анализ требует доступа к задачам и клиентам')
         if not (permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others')):

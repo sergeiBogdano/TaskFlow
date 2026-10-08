@@ -316,7 +316,7 @@ async def set_user_status(user_id: int, request: Request, actor=Depends(require_
 
 @router.get('/{user_id}/access')
 async def explain_access(user_id: int, actor=Depends(require_permission('users_manage'))):
-    from app.core.permissions import get_workspace_permissions, get_effective_features
+    from app.core.permissions import get_workspace_permissions, get_feature_access
     async with async_session() as session:
         account = await session.get(User, user_id)
         if not account:
@@ -325,10 +325,12 @@ async def explain_access(user_id: int, actor=Depends(require_permission('users_m
             Workspace, Workspace.id == WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user_id))).all()
     spaces = []
     for member, name in rows:
+        feature_access = await get_feature_access(account, member.workspace_id)
         spaces.append({'id': member.workspace_id, 'name': name, 'rank': member.role,
                        'custom_role_id': member.custom_role_id,
                        'permissions': await get_workspace_permissions(user_id, member.workspace_id),
-                       'features': await get_effective_features(account, member.workspace_id)})
+                       'features': {key: value['available'] for key, value in feature_access.items()},
+                       'feature_reasons': {key: value['reason'] for key, value in feature_access.items()}})
     from app.core.permission_catalog import work_scope_keys
     app_permissions = {key: value for key, value in (await get_user_permissions(user_id)).items() if key not in set(work_scope_keys())}
     return {'app_permissions': app_permissions, 'spaces': spaces}

@@ -340,7 +340,7 @@ async def get_global_feature_state(keys: list[str] | None = None) -> dict[str, b
 
 
 async def get_effective_features(user, workspace_id: int | None = None,
-                                 keys: list[str] | None = None) -> dict[str, bool]:
+                                 keys: list[str] | None = None, reasons: dict | None = None) -> dict[str, bool]:
     """Эффективная доступность функций: приоритет user > workspace > group > global.
 
     Новый ключ без явного разрешения выключен; выключенная функция
@@ -355,9 +355,11 @@ async def get_effective_features(user, workspace_id: int | None = None,
     if not keys:
         return {}
     async with async_session() as session:
-        group_ids = list((await session.execute(
-            select(UserGroup.group_id).join(Group, Group.id == UserGroup.group_id).where(UserGroup.user_id == user.id, Group.deleted_at.is_(None))
-        )).scalars())
+        user_groups = (await session.execute(
+            select(Group).join(UserGroup, Group.id == UserGroup.group_id).where(UserGroup.user_id == user.id, Group.deleted_at.is_(None))
+        )).scalars().all()
+        group_ids = [group.id for group in user_groups]
+        group_names = {group.id: group.name for group in user_groups}
         conds = [FeatureOverride.scope == 'global']
         if workspace_id is not None:
             conds.append((FeatureOverride.scope == 'workspace') & (FeatureOverride.target_id == workspace_id))
@@ -371,16 +373,24 @@ async def get_effective_features(user, workspace_id: int | None = None,
     from app.core.permission_catalog import WORKSPACE_ADMIN_DEFAULTS
     legacy_keys = set(WORKSPACE_ADMIN_DEFAULTS) | {'settings', 'users', 'users_password_own', 'users_password_reset', 'users_manage', 'workspaces_create', 'crm', 'crm_edit', 'crm_delete', 'crm_configure'}
     state = {key: is_root_user(user) or key in legacy_keys for key in keys}
+    reasons = reasons if reasons is not None else {}
+    reasons.update({key: '' if state[key] else 'Новая функция не включена явно' for key in keys})
+    scope_labels = {'global': 'Функция выключена для приложения', 'group': 'Функция запрещена в группе пользователя', 'workspace': 'Функция выключена в настройках пространства', 'user': 'Функция выключена лично для пользователя'}
     # At the same group priority, denial wins regardless of database row order.
     for scope in ('global', 'group', 'workspace', 'user'):
         for key in keys:
-            values = [bool(row.enabled) for row in rows if row.scope == scope and row.key == key]
+            matching = [row for row in rows if row.scope == scope and row.key == key]
+            values = [bool(row.enabled) for row in matching]
             if values and not is_root_user(user):
                 state[key] = all(values)
+                reasons[key] = '' if state[key] else scope_labels[scope]
+                if not state[key] and scope == 'group':
+                    reasons[key] += ': ' + ', '.join(sorted({group_names[row.target_id] for row in matching if not row.enabled}))
     # Global disable and space module disable are hard limits; user overrides cannot reopen them.
     for row in rows:
         if not is_root_user(user) and row.scope in ('global', 'workspace') and not row.enabled and row.key in state:
             state[row.key] = False
+            reasons[row.key] = scope_labels[row.scope]
     if workspace_id is not None:
         import json
         from app.core.models import Workspace
@@ -391,16 +401,25 @@ async def get_effective_features(user, workspace_id: int | None = None,
             module = module_for_permission(key)
             if module and module not in enabled_modules:
                 state[key] = False
+                reasons[key] = 'Модуль выключен в пространстве'
     if workspace_id and not is_root_user(user):
         from app.core.access_policy import field_access
         fields = await field_access(user, workspace_id)
         if any(mode == 'hidden' for values in fields.values() for mode in values.values()):
-            for derived in ('dashboard', 'reports', 'ai', 'modules'):
+            for derived in ('dashboard', 'reports', 'modules'):
                 if derived in state:
                     state[derived] = False
+                    reasons[derived] = 'Скрытые поля ограничивают этот раздел'
         if any(fields['tasks'].get(key) == 'hidden' for key in ('deadline', 'completionDate', 'assignee', 'client')) and 'calendar' in state:
             state['calendar'] = False
+            reasons['calendar'] = 'Для календаря скрыты необходимые поля задач'
     return state
+
+
+async def get_feature_access(user, workspace_id=None):
+    reasons = {}
+    state = await get_effective_features(user, workspace_id, reasons=reasons)
+    return {key: {'available': enabled, 'reason': reasons.get(key, '')} for key, enabled in state.items()}
 
 
 async def is_feature_available(user, key: str, workspace_id: int | None = None) -> bool:

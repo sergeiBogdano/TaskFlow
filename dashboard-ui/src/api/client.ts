@@ -534,7 +534,7 @@ export const api = {
     request<{ ok: boolean }>(`/api/users/${userId}`, { method: 'DELETE' }),
 
   setUserStatus: (id: number, is_active: boolean) => request(`/api/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ is_active }) }),
-  getUserAccess: (id: number) => request<{ app_permissions: Record<string, boolean>; spaces: { id: number; name: string; rank: string; permissions: Record<string, boolean>; features: Record<string, boolean> }[] }>(`/api/users/${id}/access`),
+  getUserAccess: (id: number) => request<{ app_permissions: Record<string, boolean>; spaces: { id: number; name: string; rank: string; permissions: Record<string, boolean>; features: Record<string, boolean>; feature_reasons: Record<string, string> }[] }>(`/api/users/${id}/access`),
   changePassword: (current_password: string, new_password: string) => request('/api/users/change-password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
   getSpaceModules: (id: number) => request<{ catalog: Record<string, { label: string; keys: string[] }>; enabled: string[] }>(`/api/workspaces/${id}/modules`),
   setSpaceModules: (id: number, enabled: string[]) => request(`/api/workspaces/${id}/modules`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
@@ -551,7 +551,7 @@ export const api = {
     scope: 'global' | 'workspace' | 'group' | 'user';
     target_id?: number | null;
     key: string;
-    enabled: boolean;
+    enabled: boolean | null;
   }) => request<{ ok: boolean }>('/api/features', { method: 'PUT', body: JSON.stringify(data) }),
   createRole: (data: { name: string; permissions?: Record<string, boolean> }) =>
     request<Role>('/api/roles', { method: 'POST', body: JSON.stringify(data) }),

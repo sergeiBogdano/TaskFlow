@@ -11,7 +11,7 @@ from app.core.database import async_session
 from app.core.models import User, WorkspaceMember, WorkspaceRole
 from app.core.permission_catalog import PERMISSION_GROUPS, work_scope_keys
 from app.core.permissions import (
-    assert_within_ceiling, get_effective_features, get_workspace_permissions,
+    assert_within_ceiling, get_feature_access, get_workspace_permissions,
     require_workspace_management, workspace_role_rank,
 )
 from app.web.api.access_validation import read_object, validate_permissions
@@ -21,7 +21,7 @@ router = APIRouter(prefix='/api/workspaces', tags=['workspace-access'])
 
 async def _report(member, user, role, workspace_id):
     permissions = await get_workspace_permissions(user.id, workspace_id) or {}
-    features = await get_effective_features(user, workspace_id)
+    features = await get_feature_access(user, workspace_id)
     overrides = parse_policy(member.access_overrides)
     fields = await field_access(user, workspace_id)
     return {
@@ -31,10 +31,10 @@ async def _report(member, user, role, workspace_id):
         'overrides': overrides, 'fields': fields,
         'permissions': {key: {
             'granted': user.is_root or bool(permissions.get(key)),
-            'available': bool(features.get(key)),
-            'allowed': bool((user.is_root or permissions.get(key)) and features.get(key)),
-            'source': 'Суперадмин' if user.is_root else 'Личное исключение' if key in overrides.get('permissions', {}) else 'Профиль доступа',
-            'reason': 'Скрытые поля ограничивают этот раздел' if key in ('dashboard', 'reports', 'ai', 'modules', 'calendar') and any(mode == 'hidden' for values in fields.values() for mode in values.values()) and not features.get(key) else 'Функция или модуль отключены' if not features.get(key) else 'Разрешено' if user.is_root or permissions.get(key) else 'Не выдано в профиле / запрещено лично',
+            'available': bool(features.get(key, {}).get('available')),
+            'allowed': bool((user.is_root or permissions.get(key)) and features.get(key, {}).get('available')),
+            'source': 'Суперадмин' if user.is_root else 'Личное исключение' if key in overrides.get('permissions', {}) else 'Профиль доступа' if role else 'Стандартный профиль уровня',
+            'reason': '; '.join(filter(None, [features.get(key, {}).get('reason'), '' if user.is_root or permissions.get(key) else 'Нет права: включите его в рабочем профиле или личном исключении'])) or 'Разрешено',
         } for key in work_scope_keys()},
     }
 

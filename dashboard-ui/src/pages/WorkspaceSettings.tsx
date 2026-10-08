@@ -294,7 +294,7 @@ export function WorkspaceSettings() {
       {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
 
       {tab === 'basic' && <>
-      <SpaceModulesPanel id={detail.id} onSaved={() => window.location.reload()} />
+      <SpaceModulesPanel id={detail.id} onSaved={() => window.location.reload()} onAccess={canManageProfiles ? () => setTab('access') : undefined} />
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Settings2 size={16} />Основное</h3>
         <form onSubmit={saveInfo} className="grid gap-3">
@@ -430,6 +430,7 @@ export function WorkspaceSettings() {
 
       </>}
       {tab === 'access' && canManageProfiles && <>
+        {isSuperadmin && <FeaturesPanel scope="workspace" targetId={detail.id} title="Доступность рабочих функций пространства" description="Включённый модуль разрешает использовать инструмент, но не выдаёт его участникам. Ниже выберите пользователя: проверьте рабочее право и причину недоступности. Если модуль раньше отключали, включите нужную функцию здесь явно." />}
         <WsRolesPanel workspaceId={detail.id} canManage={canManageProfiles} />
         <WorkspaceAccessPanel workspaceId={detail.id} level={detail.role} />
       </>}
