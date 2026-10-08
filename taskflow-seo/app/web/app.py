@@ -60,10 +60,13 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     await start_scheduler()
+    from app.core.ai_assistant import start_worker, stop_worker
+    start_worker()
 
     yield
 
     await stop_scheduler()
+    await stop_worker()
     await close_db()
 
 
@@ -129,6 +132,7 @@ from app.web.api.quick_tasks import router as quick_tasks_router
 from app.web.api.reports import router as reports_router
 from app.web.api.ai import router as ai_router
 from app.web.api.ai_analytics import router as ai_analytics_router
+from app.web.api.assistant import router as assistant_router
 from app.web.api.workspaces import router as workspaces_router
 from app.web.api.sprints import router as sprints_router
 from app.web.api.notes import router as notes_router
@@ -146,7 +150,7 @@ from fastapi import APIRouter
 from app.web.router import router as legacy_router
 _api_routers = (auth_router, users_router, roles_router, clients_router, tasks_router,
     modules_router, dashboard_router, calendar_router, notifications_router, saved_views_router,
-    quick_tasks_router, reports_router, ai_router, ai_analytics_router, workspaces_router,
+    quick_tasks_router, reports_router, ai_router, ai_analytics_router, assistant_router, workspaces_router,
     sprints_router, notes_router, permissions_router, groups_router, features_router,
     workspace_roles_router, workspace_access_router, crm_router)
 _signatures = {(method, route.path) for router in _api_routers for route in router.routes
@@ -175,6 +179,7 @@ app.include_router(quick_tasks_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
 app.include_router(ai_analytics_router)
+app.include_router(assistant_router)
 app.include_router(workspaces_router)
 app.include_router(sprints_router)
 app.include_router(notes_router)

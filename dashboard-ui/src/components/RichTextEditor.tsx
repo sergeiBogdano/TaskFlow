@@ -8,7 +8,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import { TableKit } from '@tiptap/extension-table';
 import { Bold, CheckSquare, Code2, Eraser, Eye, Heading2, Italic, Link2, List, ListOrdered, Loader2, Mic, Minus, Pilcrow, Quote, Redo2, SquareCode, Strikethrough, Table2, Underline, Undo2, Unlink, Wand2 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { api } from '../api/client';
+import { runAssistant, queueLabel, type AssistantJob } from '../api/assistant';
 import { useAuth } from '../hooks/useAuth';
 import { EditorButton, EditorFrame } from './EditorFrame';
 import { MAX_EDITOR_HTML, safeEditorLink } from '../lib/editorText';
@@ -22,6 +22,8 @@ export function RichTextEditor({ readOnly = false, value, onChange, minHeightCla
   const [preview, setPreview] = useState(false);
   const [listening, setListening] = useState(false);
   const [polishing, setPolishing] = useState(false);
+  const [aiJob, setAiJob] = useState<AssistantJob>();
+  const aiAbort = useRef<AbortController | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [error, setError] = useState('');
@@ -68,7 +70,7 @@ export function RichTextEditor({ readOnly = false, value, onChange, minHeightCla
     lastEmitted.current = value; editor.commands.setContent(richInputHtml(value || ''), { emitUpdate: false });
   }, [editor, value]);
   useEffect(() => { editor?.setEditable(!readOnly && !preview && !polishing); }, [editor, readOnly, preview, polishing]);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; recognitionRef.current?.abort(); }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; recognitionRef.current?.abort(); aiAbort.current?.abort(); }; }, []);
   useEffect(() => { if (readOnly || preview) { recognitionRef.current?.abort(); setLinkOpen(false); } }, [readOnly, preview]);
   if (!editor) return null;
   const disabled = readOnly || preview || polishing;
@@ -93,14 +95,16 @@ export function RichTextEditor({ readOnly = false, value, onChange, minHeightCla
     if (editor.isEmpty || polishing) return;
     const snapshot = current.current.value; setPolishing(true); setError('');
     try {
-      const result = await api.polishText(editor.getHTML());
+      if (editor.getHTML().length > 6000) { setError('Для ИИ нужен текст до 6 000 символов вместе с форматированием.'); return; }
+      const controller = new AbortController(); aiAbort.current = controller;
+      const result = await runAssistant(editor.getHTML(), 'polish', job => { if (mounted.current) setAiJob(job); }, controller.signal);
       if (!mounted.current || current.current.readOnly || current.current.value !== snapshot) return;
-      editor.commands.setContent(richInputHtml(result.html || snapshot), { emitUpdate: true });
+      editor.commands.setContent(richInputHtml(result.answer || snapshot), { emitUpdate: true });
     } catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'Не удалось улучшить текст.'); }
-    finally { if (mounted.current) setPolishing(false); }
+    finally { aiAbort.current = null; if (mounted.current) { setPolishing(false); setAiJob(undefined); } }
   };
   const button = (title: string, icon: ReactNode, action: () => unknown, active = false, extraDisabled = false) => <EditorButton key={title} title={title} active={active} disabled={disabled || extraDisabled} onClick={() => { if (!disabled) action(); }}>{icon}</EditorButton>;
-  return <EditorFrame label={label} readOnly={readOnly} error={error} footer={<span>{editor.getText().length.toLocaleString('ru-RU')} символов · Ctrl+Z — отменить · Shift+Enter — новая строка</span>} toolbar={<>
+  return <EditorFrame label={label} readOnly={readOnly} error={error} footer={<div>{polishing && <div role="status">{aiJob ? queueLabel(aiJob) : 'Отправляю запрос…'} <button type="button" className="tf-button" onClick={() => aiAbort.current?.abort()}>Отменить ИИ</button></div>}<span>{editor.getText().length.toLocaleString('ru-RU')} символов · Ctrl+Z — отменить · Shift+Enter — новая строка</span></div>} toolbar={<>
     {!readOnly && <>
       {button('Жирный (Ctrl+B)', <Bold size={16} />, () => editor.chain().focus().toggleBold().run(), editor.isActive('bold'))}
       {button('Курсив (Ctrl+I)', <Italic size={16} />, () => editor.chain().focus().toggleItalic().run(), editor.isActive('italic'))}

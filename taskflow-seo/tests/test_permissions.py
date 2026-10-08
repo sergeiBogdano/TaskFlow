@@ -75,11 +75,16 @@ class TestPermissions:
         resp = sync_request('GET', '/api/reports/data', cookies=admin_cookies)
         assert resp.status_code == 200
 
-    def test_admin_can_access_ai_command(self, sync_request, admin_cookies):
+    def test_admin_can_access_ai_command(self, sync_request, admin_cookies, monkeypatch):
+        from app.core import ai_assistant
+        async def fake(*args):
+            return '{"title":"Test draft","notes":"Description"}', {}
+        monkeypatch.setattr(ai_assistant, 'infer', fake)
         resp = sync_request('POST', '/api/ai/task-command',
                           json={'text': 'test command'},
                           cookies=admin_cookies)
-        assert resp.status_code in (200, 422, 500)
+        assert resp.status_code == 200
+        assert resp.json()['draft']['title'] == 'Test draft'
 
     def test_executor_cannot_delete_client(self, sync_request, admin_cookies, executor_cookies):
         resp = sync_request('POST', '/api/clients',

@@ -2,6 +2,8 @@ import secrets
 import uuid
 
 
+
+
 from sqlalchemy import (
     Boolean,
     Column,
@@ -20,6 +22,42 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+
+
+class AiQueueSettings(Base):
+    __tablename__ = 'ai_queue_settings'
+    id = Column(Integer, primary_key=True)
+    paused = Column(Boolean, nullable=False, default=False)
+    daily_limit = Column(Integer, nullable=False, default=40)
+    queue_limit = Column(Integer, nullable=False, default=32)
+    timeout_seconds = Column(Integer, nullable=False, default=180)
+    revision = Column(Integer, nullable=False, default=0)
+    lease_owner = Column(String(64), nullable=True)
+    lease_until = Column(DateTime, nullable=True)
+
+
+class AiRequest(Base):
+    __tablename__ = 'ai_requests'
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    conversation_id = Column(String(36), nullable=False, index=True)
+    kind = Column(String(20), nullable=False, default='chat')
+    message = Column(Text, nullable=False)
+    prepared_prompt = Column(Text, nullable=True)
+    access_signature = Column(Text, nullable=True)
+    source_ids = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default='queued', index=True)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    result = Column(Text, nullable=True)
+    error = Column(String(300), nullable=True)
+    model = Column(String(80), nullable=True)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    duration_ms = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, server_default=func.now(), index=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
 
 task_tags = Table(
     'task_tags', Base.metadata,

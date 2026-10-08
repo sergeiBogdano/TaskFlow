@@ -6,6 +6,7 @@ import { sectionLabel } from '../lib/uiconfig';
 import { availableWorkAreas, WORK_AREAS, type WorkArea } from '../lib/workAreas';
 import { SpaceDirectory } from '../components/SpaceDirectory';
 import { FeaturesPanel } from '../components/FeaturesPanel';
+import { AiAdminPanel } from '../components/AiAdminPanel';
 
 const tools = [
   { route: '/tasks', permission: 'tasks', icon: CheckSquare, description: 'Разбейте работу или обучение на понятные шаги.' },
@@ -38,6 +39,7 @@ export function WorkHome({ area = 'work' }: { area?: WorkArea }) {
     </Link>)}</div>
     {area === 'work' && !visible.length && <p className="tf-panel-flat p-5">В этом пространстве пока нет доступных инструментов. Попросите администратора проверить модули и ваш профиль.</p>}
     {area === 'admin' && user?.is_root && <section className="space-y-4"><div className="flex items-center gap-2 font-semibold"><ShieldCheck size={19} />Возможности системы</div><FeaturesPanel scope="global" title="Включение функций для приложения" /></section>}
+    {area === 'admin' && user?.is_root && <AiAdminPanel />}
     <div className="flex flex-wrap gap-3 text-sm"><Link className="tf-button" to="/settings">Личные настройки</Link><Link className="tf-button" to="/wiki">Руководство</Link></div>
   </div>;
 }

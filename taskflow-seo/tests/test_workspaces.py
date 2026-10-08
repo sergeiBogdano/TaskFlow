@@ -246,9 +246,9 @@ class TestKnowledge:
             cookies=admin_cookies,
         )
         assert resp.status_code == 200
-        assert resp.json()["intent"] == "remember"
+        assert resp.json()["intent"] == "draft_only"
         resp = sync_request("GET", f"/api/workspaces/{ws['id']}/knowledge", cookies=admin_cookies)
-        assert any("пятницам" in f["fact"] for f in resp.json())
+        assert not any("пятницам" in f["fact"] for f in resp.json())
 
 
 class TestWorkspaceTrash:

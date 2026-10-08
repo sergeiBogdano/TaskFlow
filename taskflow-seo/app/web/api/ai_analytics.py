@@ -7,20 +7,17 @@ LLM только narrates и рекомендует. Никаких самост
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
-import urllib.request
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
-from app.core.ai_lock import ollama_lock
 from app.core.database import async_session
 from app.core.models import Client, Task, User
 from app.core.permissions import get_current_user, require_role
@@ -29,7 +26,7 @@ from app.core.utils.timezone import utc_now
 router = APIRouter(prefix="/api/ai", tags=["ai-analytics"])
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
 admin_user = require_role(["superadmin", "admin"])
 
@@ -49,8 +46,8 @@ class ProjectPayload(BaseModel):
 
 
 class TaskDescriptionPayload(BaseModel):
-    title: str
-    client: str | None = None
+    title: str = Field(max_length=200)
+    client: str | None = Field(default=None, max_length=200)
     task_type: str | None = None
     model: str | None = None
     workspace_id: int | None = None
@@ -63,48 +60,28 @@ class PositionChange(BaseModel):
 
 
 class SeoReportPayload(BaseModel):
-    traffic: str | None = None
+    traffic: str | None = Field(default=None, max_length=4000)
     positions: list[PositionChange] = []
-    pages: str | None = None
-    notes: str | None = None
+    pages: str | None = Field(default=None, max_length=4000)
+    notes: str | None = Field(default=None, max_length=4000)
     model: str | None = None
 
 
 class ChatPayload(BaseModel):
-    message: str
+    message: str = Field(max_length=6000)
     model: str | None = None
     workspace_id: int | None = None
 
 
 def _model_name(explicit: str | None) -> str:
-    name = (explicit or "").strip() or OLLAMA_MODEL
+    name = OLLAMA_MODEL
     return name[:80]
 
 
-def _ollama_text(model: str, prompt: str, num_predict: int = 600) -> str:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.2, "num_predict": num_predict},
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=600) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    text = str(body.get("response") or "").strip()
-    text = re.sub(r"^```(?:\w+)?", "", text.strip(), flags=re.I).strip()
-    text = re.sub(r"```$", "", text.strip()).strip()
-    return text
-
-
-async def _ask_llm(model: str, prompt: str, num_predict: int = 600) -> str:
-    async with ollama_lock:
-        return await asyncio.to_thread(_ollama_text, model, prompt, num_predict)
+async def _ask_llm(model: str, prompt: str, num_predict: int = 600, *, user, workspace_id=None) -> str:
+    from app.core.ai_assistant import generate_prompt
+    answer, _ = await generate_prompt(user, workspace_id, prompt, 'Анализ и подготовка текста')
+    return answer
 
 
 async def _workspace_prompt_additions(session, user, workspace_id: int | None) -> str:
@@ -366,9 +343,11 @@ async def _analyze(
     async with async_session() as session:
         prompt += await _workspace_prompt_additions(session, user, workspace_id)
     try:
-        analysis = await _ask_llm(name, prompt)
-    except Exception as exc:
-        return JSONResponse({"error": f"AI недоступен: {exc}", "facts": facts, "model": name}, status_code=503)
+        analysis = await _ask_llm(name, prompt, user=user, workspace_id=workspace_id)
+    except HTTPException:
+        raise
+    except Exception:
+        return JSONResponse({"error": "Помощник недоступен. Проверьте модель и повторите запрос.", "facts": facts, "model": name}, status_code=503)
     return JSONResponse({"facts": facts, "analysis": analysis, "model": name})
 
 
@@ -377,6 +356,10 @@ async def _resolve_analytics_workspace(payload_workspace_id: int | None, user) -
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         workspace, _ = await resolve_workspace(session, user, role_names, payload_workspace_id)
+        from app.core.permissions import effective_permissions
+        permissions = await effective_permissions(user, workspace.id)
+        if not (permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others')):
+            raise HTTPException(403, 'Анализ команды требует права просмотра чужих задач')
         return workspace.id
 
 
@@ -440,9 +423,11 @@ async def task_description(payload: TaskDescriptionPayload, user=Depends(get_cur
     async with async_session() as session:
         prompt += await _workspace_prompt_additions(session, user, payload.workspace_id)
     try:
-        description = await _ask_llm(name, prompt, num_predict=500)
-    except Exception as exc:
-        return JSONResponse({"error": f"AI недоступен: {exc}"}, status_code=503)
+        description = await _ask_llm(name, prompt, num_predict=500, user=user, workspace_id=payload.workspace_id)
+    except HTTPException:
+        raise
+    except Exception:
+        return JSONResponse({"error": "Помощник недоступен. Проверьте модель и повторите запрос."}, status_code=503)
     return JSONResponse({"description": description, "model": name})
 
 
@@ -470,141 +455,27 @@ async def seo_report(payload: SeoReportPayload, user=Depends(get_current_user)):
         f"Данные: {json.dumps(facts, ensure_ascii=False)}"
     )
     try:
-        report = await _ask_llm(name, prompt, num_predict=800)
-    except Exception as exc:
-        return JSONResponse({"error": f"AI недоступен: {exc}", "facts": facts}, status_code=503)
+        report = await _ask_llm(name, prompt, num_predict=800, user=user, workspace_id=None)
+    except HTTPException:
+        raise
+    except Exception:
+        return JSONResponse({"error": "Помощник недоступен. Проверьте модель и повторите запрос.", "facts": facts}, status_code=503)
     return JSONResponse({"report": report, "facts": facts, "model": name})
-
-
-def _find_client(message: str, clients: list[dict[str, Any]]) -> dict[str, Any] | None:
-    lowered = message.lower()
-    for client in clients:
-        name = str(client.get("name") or "")
-        domain = str(client.get("domain") or "")
-        if name and name.lower() in lowered:
-            return client
-        if domain and domain.lower().strip() and domain.lower() in lowered:
-            return client
-    return None
 
 
 @router.post("/chat")
 async def ai_chat(payload: ChatPayload, user=Depends(get_current_user)):
-    from app.core.models import WorkspaceKnowledge
-    from app.core.permissions import get_user_role_names, resolve_workspace
-
-    message = (payload.message or "").strip()
+    from app.core import ai_assistant
+    message = payload.message.strip()
     if not message:
-        return JSONResponse({"error": "Пустое сообщение"}, status_code=400)
-    name = _model_name(payload.model)
-    lowered = message.lower()
-    async with async_session() as session:
-        role_names = await get_user_role_names(user.id)
-        workspace, ws_role = await resolve_workspace(session, user, role_names, payload.workspace_id)
-        wid = workspace.id
-        ws_extra = await _workspace_prompt_additions(session, user, wid)
-
-        remember = re.match(r"^запомни\s*[:\-]?\s*(.+)$", message, re.I | re.S)
-        if remember and ws_role in ("owner", "admin"):
-            fact = remember.group(1).strip()[:2000]
-            if fact:
-                session.add(WorkspaceKnowledge(workspace_id=wid, fact=fact, created_by=user.id))
-                await session.commit()
-                return JSONResponse({
-                    "answer": f"Запомнил в воркспейсе «{workspace.name}»: {fact}",
-                    "intent": "remember",
-                    "facts": {"fact": fact},
-                    "model": name,
-                })
-
-        users, clients = await _maps(session, wid)
-        now = _now()
-        client_list = [
-            {"id": item.id, "name": item.org_name, "domain": item.domain or ""}
-            for item in (await session.execute(
-                select(Client).where(Client.deleted_at.is_(None), Client.workspace_id == wid)
-            )).scalars().all()
-        ]
-
-        intent = "help"
-        facts: dict[str, Any] = {}
-        if "просроч" in lowered and ("мо" in lowered or "у меня" in lowered or "я " in lowered):
-            stmt = select(Task).where(
-                Task.deleted_at.is_(None),
-                Task.status.notin_(DONE_STATUSES),
-                Task.assignee_id == user.id,
-                Task.workspace_id == wid,
-                Task.deadline.isnot(None),
-                Task.deadline < now,
-            )
-            mine = (await session.execute(stmt)).scalars().all()
-            intent = "my_overdue"
-            facts = {
-                "count": len(mine),
-                "tasks": [
-                    {"title": t.title, "client": clients.get(t.client_id or -1, "Без клиента"),
-                     "days": _task_days(t, now)}
-                    for t in sorted(mine, key=lambda t: t.deadline or now)[:8]
-                ],
-            }
-        elif "просроч" in lowered:
-            facts = await collect_overdue(session, wid)
-            intent = "overdue"
-        elif ("открыт" in lowered or "задач" in lowered or "проект" in lowered) and _find_client(
-            message, client_list
-        ):
-            client = _find_client(message, client_list)
-            assert client is not None
-            open_tasks = (await session.execute(
-                select(Task).where(
-                    Task.deleted_at.is_(None),
-                    Task.status.notin_(DONE_STATUSES),
-                    Task.workspace_id == wid,
-                    Task.client_id == client["id"],
-                ).order_by(Task.deadline.asc().nullslast())
-            )).scalars().all()
-            intent = "client_tasks"
-            facts = {
-                "client": client["name"],
-                "count": len(open_tasks),
-                "tasks": [
-                    {"title": t.title, "status": t.status,
-                     "assignee": users.get(t.assignee_id or -1, "Не назначен")}
-                    for t in open_tasks[:10]
-                ],
-            }
-        elif "загруз" in lowered or "перегруж" in lowered:
-            facts = await collect_workload(session, wid)
-            intent = "workload"
-        elif "сколько" in lowered and "задач" in lowered:
-            total = (await session.execute(
-                select(func.count(Task.id)).where(Task.deleted_at.is_(None), Task.workspace_id == wid)
-            )).scalar() or 0
-            active = (await session.execute(
-                select(func.count(Task.id)).where(Task.deleted_at.is_(None), Task.status.notin_(DONE_STATUSES), Task.workspace_id == wid)
-            )).scalar() or 0
-            intent = "totals"
-            facts = {"total": total, "active": active}
-
-    if intent == "help":
-        answer = (
-            "Я помощник TaskFlow. Могу ответить: сколько у вас просроченных задач, "
-            "какие задачи открыты по клиенту (назовите клиента), "
-            "сколько всего задач в системе, кто перегружен. "
-            "Данные беру из TaskFlow, ничего сам не меняю. Спросите, например: "
-            "«Сколько у меня просроченных задач?»"
-        )
-        return JSONResponse({"answer": answer, "intent": intent, "facts": {}, "model": name})
-
-    prompt = (
-        "Ты помощник TaskFlow. Ответь пользователю по-русски коротко и дружелюбно, "
-        "1-4 предложения, используя только приведённые факты. Ничего не выдумывай. "
-        f"Вопрос: {message}. "
-        f"Факты: {json.dumps(facts, ensure_ascii=False)}"
-        f"{ws_extra}"
-    )
+        return JSONResponse({'error': 'Пустое сообщение'}, status_code=400)
+    if re.match(r'^запомни\s*[:\-]?', message, re.I):
+        return JSONResponse({'answer': 'Я подготовлю текст, но не сохраняю сведения. Добавьте их в заметку самостоятельно.', 'intent': 'draft_only', 'facts': {}, 'model': _model_name(None)})
     try:
-        answer = await _ask_llm(name, prompt, num_predict=300)
-    except Exception as exc:
-        return JSONResponse({"error": f"AI недоступен: {exc}", "facts": facts, "intent": intent}, status_code=503)
-    return JSONResponse({"answer": answer, "intent": intent, "facts": facts, "model": name})
+        job = await ai_assistant.enqueue(user, payload.workspace_id, message, 'chat')
+        result, model = await ai_assistant.wait_result(job)
+        return {'answer': result['answer'], 'intent': 'chat', 'facts': result.get('facts', {}), 'model': model}
+    except HTTPException:
+        raise
+    except Exception:
+        return JSONResponse({'error': 'Помощник недоступен. Повторите запрос позднее.'}, status_code=503)

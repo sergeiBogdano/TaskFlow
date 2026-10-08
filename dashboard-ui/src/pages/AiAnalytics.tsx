@@ -1,275 +1,85 @@
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bot, Copy, FilePlus2, Mic, Plus, Send, Square, Trash2 } from 'lucide-react';
+import { assistant, queueLabel, type AssistantJob } from '../api/assistant';
 import { TextEditor } from '../components/TextEditor';
-import { sectionLabel } from '../lib/uiconfig';
-import { useEffect, useState, type FormEvent } from 'react';
-import { AlertTriangle, BarChart3, Bot, CalendarClock, Send, Sparkles, Trash2, UsersRound, Wand2 } from 'lucide-react';
-import { api, type AiAnalyticsResult, type Client } from '../api/client';
-import { referenceCache } from '../api/cache';
-import { getActiveWorkspaceId } from '../lib/workspace';
 import { useAuth } from '../hooks/useAuth';
+import { useAssistantVoice } from '../hooks/useAssistantVoice';
+import { getActiveWorkspaceId } from '../lib/workspace';
 import { cn } from '../lib/taskflow';
-
-type AnalysisKind = 'overdue' | 'workload' | 'daily' | 'project' | 'bottlenecks';
-
-const ANALYSIS_META: Record<AnalysisKind, { title: string; hint: string }> = {
-  overdue: { title: 'Просрочки', hint: 'Кто и где срывает сроки' },
-  workload: { title: 'Загрузка', hint: 'Перегруз сотрудников' },
-  daily: { title: 'Сводка за сутки', hint: 'Создано, закрыто, клиенты' },
-  project: { title: 'Проект', hint: 'Анализ одного клиента' },
-  bottlenecks: { title: 'Проблемные места', hint: 'Узкие статусы потока' },
-};
-
-type ChatEntry = { role: 'user' | 'ai'; text: string };
-
-type PositionRow = { key: string; was: string; now: string };
+import { sectionLabel } from '../lib/uiconfig';
 
 export function AiAnalytics() {
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole('superadmin') || hasRole('admin');
-
-  const [clients, setClients] = useState<Client[]>([]);
-  const [projectId, setProjectId] = useState('');
-  const [activeKind, setActiveKind] = useState<AnalysisKind | null>(null);
-  const [result, setResult] = useState<AiAnalyticsResult | null>(null);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState('');
-
-  const [chat, setChat] = useState<ChatEntry[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-
-  const [traffic, setTraffic] = useState('');
-  const [pages, setPages] = useState('');
-  const [seoNotes, setSeoNotes] = useState('');
-  const [positions, setPositions] = useState<PositionRow[]>([{ key: '', was: '', now: '' }]);
-  const [seoResult, setSeoResult] = useState('');
-  const [seoLoading, setSeoLoading] = useState(false);
-  const [seoError, setSeoError] = useState('');
-
-  useEffect(() => {
-    referenceCache.clients().then(setClients).catch(() => {});
+  const { user } = useAuth(); const navigate = useNavigate();
+  const [jobs, setJobs] = useState<AssistantJob[]>([]);
+  const [otherActive, setOtherActive] = useState<AssistantJob | null>(null);
+  const [conversation, setConversation] = useState<string>();
+  const [text, setText] = useState(''); const [kind, setKind] = useState('chat');
+  const [error, setError] = useState(''); const [sending, setSending] = useState(false);
+  const [copyStatus, setCopyStatus] = useState(''); const mounted = useRef(true);
+  const voice = useAssistantVoice(spoken => setText(prev => [prev, spoken].filter(Boolean).join(' ').slice(0, 6000)));
+  const active = jobs.find(job => job.status === 'queued' || job.status === 'running') || otherActive;
+  const canDraft = user?.features?.tasks !== false && Boolean(user?.is_root || user?.permissions?.all || user?.permissions?.tasks_create);
+  const refresh = useCallback(async () => {
+    try { const [result, pending] = await Promise.all([assistant.history(), assistant.active()]); if (mounted.current) { setJobs(result.filter(job => job.message)); setOtherActive(pending && !result.some(job => job.id === pending.id) ? pending : null); } }
+    catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'Не удалось загрузить диалоги'); }
   }, []);
-
-  const runAnalysis = async (kind: AnalysisKind) => {
-    setRunning(true);
-    setError('');
-    setResult(null);
-    setActiveKind(kind);
-    const wsId = (() => {
-      const raw = getActiveWorkspaceId();
-      return raw ? Number(raw) : null;
-    })();
-    try {
-      if (kind === 'overdue') setResult(await api.aiOverdue(undefined, wsId));
-      else if (kind === 'workload') setResult(await api.aiWorkload(undefined, wsId));
-      else if (kind === 'daily') setResult(await api.aiDaily(undefined, wsId));
-      else if (kind === 'bottlenecks') setResult(await api.aiBottlenecks(undefined, wsId));
-      else {
-        if (!projectId) {
-          setError('Выберите проект для анализа.');
-          setRunning(false);
-          return;
-        }
-        setResult(await api.aiProject(Number(projectId), undefined, wsId));
+  useEffect(() => { mounted.current = true; void refresh(); return () => { mounted.current = false; }; }, [refresh]);
+  useEffect(() => {
+    if (!active) return;
+    let waiting = false;
+    const timer = setInterval(async () => {
+      if (waiting) return; waiting = true;
+      try {
+        if (otherActive?.id === active.id) { const pending = await assistant.active(); if (mounted.current) setOtherActive(pending); }
+        else { const job = await assistant.status(active.id, active.workspace_id); if (mounted.current) setJobs(prev => prev.map(item => item.id === job.id ? job : item)); }
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'AI недоступен.');
-    } finally {
-      setRunning(false);
-    }
+      catch (err) { if (mounted.current) setError(String(err)); }
+      finally { waiting = false; }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [active?.id, otherActive?.id]);
+  const send = async (event: FormEvent) => {
+    event.preventDefault(); if (!text.trim() || active || sending) return;
+    setSending(true); setError('');
+    try { const job = await assistant.submit(text.trim(), kind, conversation || undefined); if (!mounted.current) return; setJobs(prev => [...prev, job]); setConversation(job.conversation_id); setText(''); }
+    catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'Не удалось отправить запрос'); }
+    finally { if (mounted.current) setSending(false); }
   };
-
-  const sendChat = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = chatInput.trim();
-    if (!text || chatLoading) return;
-    setChatInput('');
-    setChat(prev => [...prev, { role: 'user', text }]);
-    setChatLoading(true);
-    try {
-      const raw = getActiveWorkspaceId();
-      const res = await api.aiChat(text, undefined, raw ? Number(raw) : null);
-      setChat(prev => [...prev, { role: 'ai', text: res.answer }]);
-    } catch (err) {
-      setChat(prev => [...prev, { role: 'ai', text: err instanceof Error ? err.message : 'AI недоступен.' }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  const runSeo = async () => {
-    setSeoLoading(true);
-    setSeoError('');
-    setSeoResult('');
-    try {
-      const rows = positions
-        .filter(row => row.key.trim())
-        .map(row => ({
-          key: row.key.trim(),
-          was: row.was.trim() === '' ? null : Number(row.was.replace(',', '.')),
-          now: row.now.trim() === '' ? null : Number(row.now.replace(',', '.')),
-        }));
-      const res = await api.seoReport({ traffic, positions: rows, pages, notes: seoNotes });
-      setSeoResult(res.report);
-    } catch (err) {
-      setSeoError(err instanceof Error ? err.message : 'AI недоступен.');
-    } finally {
-      setSeoLoading(false);
-    }
-  };
-
-  return (
-    <div className="mx-auto max-w-[1200px] space-y-5">
-      <div>
-        <h2 className="tf-page-title">{sectionLabel('/ai')}</h2>
-        <p className="tf-page-subtitle">TaskFlow готовит выборку из базы, локальная модель Ollama анализирует. Модель ничего не меняет — только текст.</p>
-      </div>
-
-      {isAdmin && (
-        <section className="tf-panel-flat p-4 sm:p-5">
-          <div className="mb-1 flex items-center gap-2 text-sm font-bold"><BarChart3 size={16} className="text-[var(--color-accent)]" />Анализ данных</div>
-          <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Кнопка собирает свежие данные и передаёт их модели.</p>
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(ANALYSIS_META) as AnalysisKind[]).filter(kind => kind !== 'project').map(kind => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => runAnalysis(kind)}
-                disabled={running}
-                className={cn('tf-button', activeKind === kind && result && 'tf-button-primary')}
-              >
-                <Sparkles size={15} />{ANALYSIS_META[kind].title}
-              </button>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <select
-              className="tf-input min-w-[220px] flex-1 sm:max-w-xs"
-              value={projectId}
-              onChange={event => setProjectId(event.target.value)}
-            >
-              <option value="">Проект для анализа...</option>
-              {clients.map(client => <option key={client.id} value={client.id}>{client.org_name}</option>)}
-            </select>
-            <button type="button" onClick={() => runAnalysis('project')} disabled={running || !projectId} className="tf-button tf-button-primary">
-              <Sparkles size={15} />Анализ проекта
-            </button>
-          </div>
-
-          <div className="mt-4">
-            {running && <div className="grid h-32 place-items-center text-sm text-[var(--color-text-secondary)]">Модель думает... это может занять минуту.</div>}
-            {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
-            {result && !running && (
-              <div className="anim-rise space-y-3">
-                <FactsLine facts={result.facts} />
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-                  <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)]">
-                    <Bot size={14} /> Вывод модели · {result.model}
-                  </div>
-                  <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{result.analysis}</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {isAdmin && (
-        <section className="tf-panel-flat p-4 sm:p-5">
-          <div className="mb-1 flex items-center gap-2 text-sm font-bold"><CalendarClock size={16} className="text-[var(--color-accent)]" />SEO-отчёт</div>
-          <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Вставьте трафик, страницы и позиции «было → стало». Модель напишет что выросло, что упало и почему.</p>
-          <div className="grid gap-3 lg:grid-cols-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Трафик</span>
-              <TextEditor minHeightClassName="min-h-24" value={traffic} onChange={setTraffic} placeholder="Например: органический трафик +10% за месяц..." />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Страницы</span>
-              <TextEditor minHeightClassName="min-h-24" value={pages} onChange={setPages} placeholder="Какие страницы смотрели..." />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Заметки</span>
-              <TextEditor minHeightClassName="min-h-24" value={seoNotes} onChange={setSeoNotes} placeholder="Изменения на сайте, контекст..." />
-            </label>
-          </div>
-          <div className="mt-3 space-y-2">
-            <div className="text-xs font-semibold text-[var(--color-text-secondary)]">Позиции: запрос, было, стало</div>
-            {positions.map((row, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_110px_110px_auto] items-center gap-2">
-                <input className="tf-input" value={row.key} onChange={event => setPositions(prev => prev.map((r, i) => i === index ? { ...r, key: event.target.value } : r))} placeholder="Ключевой запрос" />
-                <input className="tf-input" value={row.was} onChange={event => setPositions(prev => prev.map((r, i) => i === index ? { ...r, was: event.target.value } : r))} placeholder="Было" inputMode="decimal" />
-                <input className="tf-input" value={row.now} onChange={event => setPositions(prev => prev.map((r, i) => i === index ? { ...r, now: event.target.value } : r))} placeholder="Стало" inputMode="decimal" />
-                <button
-                  type="button"
-                  onClick={() => setPositions(prev => prev.filter((_, i) => i !== index))}
-                  disabled={positions.length <= 1}
-                  className="tf-button w-9 px-0 text-[var(--color-danger)]"
-                  aria-label="Убрать строку"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setPositions(prev => [...prev, { key: '', was: '', now: '' }])} className="tf-button">+ Строка</button>
-              <button type="button" onClick={runSeo} disabled={seoLoading} className="tf-button tf-button-primary"><Wand2 size={15} />{seoLoading ? 'Модель думает...' : 'Составить отчёт'}</button>
+  const cancel = async () => { if (!active) return; try { await assistant.cancel(active.id, active.workspace_id); await refresh(); } catch (err) { setError(String(err)); } };
+  const conversations = [...new Set(jobs.map(job => job.conversation_id))].reverse();
+  const selected = conversation === '' ? '' : conversation || conversations[0];
+  const visible = jobs.filter(job => job.conversation_id === selected);
+  const openDraft = (job: AssistantJob) => { if (job.result?.draft && canDraft) navigate('/tasks', { state: { assistantDraft: job.result.draft, workspace: getActiveWorkspaceId(), userId: user?.id } }); };
+  return <div className="mx-auto max-w-6xl space-y-5">
+    <header><h2 className="tf-page-title flex items-center gap-2"><Bot />{sectionLabel('/ai')}</h2><p className="tf-page-subtitle">Обсуждайте работу и учёбу, готовьте отчёты и черновики. Проверяйте важные сведения в ответах.</p></header>
+    <div className="tf-panel-flat p-4 text-sm leading-6">Помощник видит ограниченную выборку доступных вам задач и заметок выбранного пространства. Он не сохраняет задачи, не меняет настройки и не выполняет команды на сервере. История хранится 30 дней.</div>
+    <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="tf-panel-flat space-y-2 p-3">
+        <button className="tf-button w-full" onClick={() => { setConversation(''); setText(''); setKind('chat'); }}><Plus size={16} />Новый диалог</button>
+        <div className="max-h-96 space-y-1 overflow-auto">{conversations.map(id => <button key={id} onClick={() => setConversation(id)} className={cn('w-full rounded-lg p-2 text-left text-sm', selected === id && 'bg-[var(--color-surface-3)]')}><span className="line-clamp-2">{jobs.find(job => job.conversation_id === id)?.message}</span></button>)}</div>
+        <button className="tf-button w-full text-[var(--color-danger)]" disabled={Boolean(active)} onClick={async () => { if (!confirm('Удалить текст своих диалогов в этом пространстве? Статистика использования останется.')) return; try { await assistant.clear(); setJobs([]); setConversation(''); } catch (err) { setError(String(err)); } }}><Trash2 size={15} />Очистить историю</button>
+      </aside>
+      <section className="tf-panel-flat min-w-0 space-y-4 p-4 sm:p-5">
+        <div role="log" aria-label="Диалог с помощником" className="max-h-[55vh] min-h-48 space-y-4 overflow-auto">
+          {!visible.length && <div className="py-8 text-center text-[var(--color-muted)]">Задайте вопрос или опишите задачу. Голосовой ввод сначала добавляет текст — вы проверяете его и отправляете сами.</div>}
+          {visible.map(job => <div key={job.id} className="space-y-2">
+            <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-xl bg-[var(--color-accent)] p-3 text-sm text-white">{job.message}</div>
+            <div className="rounded-xl bg-[var(--color-surface-2)] p-3 text-sm leading-6">
+              {job.result ? <><div className="whitespace-pre-wrap break-words">{job.result.draft ? `${job.result.draft.title}\n\n${job.result.draft.notes}` : job.result.answer}</div><div className="mt-3 flex flex-wrap gap-2"><button className="tf-button" onClick={async () => { try { await navigator.clipboard.writeText(job.result!.draft ? `${job.result!.draft.title}\n${job.result!.draft.notes}` : job.result!.answer); setCopyStatus('Скопировано'); } catch { setCopyStatus('Выделите текст и скопируйте вручную.'); } }}><Copy size={14} />Копировать</button>{job.result.draft && canDraft && <button className="tf-button" onClick={() => openDraft(job)}><FilePlus2 size={14} />Открыть черновик задачи</button>}</div></> : <span>{queueLabel(job)}</span>}
             </div>
-          </div>
-          {seoError && <div className="mt-3 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{seoError}</div>}
-          {seoResult && !seoLoading && (
-            <div className="anim-rise mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)]"><Bot size={14} /> Отчёт модели</div>
-              <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{seoResult}</div>
-            </div>
-          )}
-        </section>
-      )}
-
-      <section className="tf-panel-flat p-4 sm:p-5">
-        <div className="mb-1 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} className="text-[var(--color-accent)]" />Чат с TaskFlow</div>
-        <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Спросите про свои просрочки, задачи клиента или загрузку. Отвечаю только по данным системы.</p>
-        <div className="max-h-80 space-y-2 overflow-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-          {chat.length === 0 && <div className="p-4 text-center text-sm text-[var(--color-text-secondary)]">Например: «Сколько у меня просроченных задач?»</div>}
-          {chat.map((entry, index) => (
-            <div key={index} className={cn('max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed', entry.role === 'user' ? 'ml-auto bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-3)]')}>
-              <div className="whitespace-pre-wrap">{entry.text}</div>
-            </div>
-          ))}
-          {chatLoading && <div className="text-sm text-[var(--color-text-secondary)]">Модель думает...</div>}
+          </div>)}
         </div>
-        <form onSubmit={sendChat} className="mt-3 flex gap-2">
-          <input
-            className="tf-input flex-1"
-            value={chatInput}
-            onChange={event => setChatInput(event.target.value)}
-            placeholder="Сколько у меня просроченных задач?"
-          />
-          <button type="submit" disabled={chatLoading || !chatInput.trim()} className="tf-button tf-button-primary shrink-0"><Send size={15} />Спросить</button>
+        {active && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] p-3 text-sm"><span>{otherActive ? `Ваш запрос в пространстве №${active.workspace_id}. ` : ''}{queueLabel(active)}</span><button className="tf-button" disabled={active.cancel_requested} onClick={() => void cancel()}><Square size={14} />Отменить запрос</button></div>}
+        <form onSubmit={send} className="space-y-3">
+          <label className="flex flex-wrap items-center gap-2 text-sm">Режим<select className="tf-input max-w-xs" value={kind} disabled={Boolean(active)} onChange={event => setKind(event.target.value)}><option value="chat">Диалог и вопросы</option><option value="report">Подготовить отчёт</option>{canDraft && <option value="task">Черновик задачи</option>}<option value="polish">Улучшить текст</option></select></label>
+          <TextEditor value={text} onChange={setText} maxLength={6000} label="Запрос помощнику" placeholder="Чем помочь? Опишите вопрос, задачу или нужный отчёт…" minHeightClassName="min-h-28" />
+          <div className="flex flex-wrap gap-2"><button type="button" className="tf-button" onClick={voice.toggle}><Mic size={16} />{voice.listening ? 'Остановить запись' : 'Голосовой ввод'}</button><button className="tf-button tf-button-primary" disabled={Boolean(active) || sending || !text.trim()}><Send size={16} />{sending ? 'Отправляю…' : 'Отправить'}</button></div>
+          <p className="text-xs text-[var(--color-muted)]">Речь распознаёт браузер; он может использовать свой внешний сервис. Доступность зависит от браузера и HTTPS.</p>
         </form>
-        {!isAdmin && (
-          <p className="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><AlertTriangle size={13} />Кнопки анализа выше доступны администраторам.</p>
-        )}
+        {(error || voice.error) && <p role="alert" className="text-sm text-[var(--color-danger)]">{error || voice.error}</p>}
+        {copyStatus && <p role="status" className="text-xs">{copyStatus}</p>}
       </section>
     </div>
-  );
-}
-
-function FactsLine({ facts }: { facts: Record<string, any> }) {
-  const chips: { label: string; danger?: boolean }[] = [];
-  if (typeof facts.total === 'number') chips.push({ label: `Всего: ${facts.total}` });
-  if (typeof facts.total_active === 'number') chips.push({ label: `Активно: ${facts.total_active}` });
-  if (typeof facts.overdue_total === 'number') chips.push({ label: `Просрочено: ${facts.overdue_total}`, danger: facts.overdue_total > 0 });
-  if (typeof facts.overdue_count === 'number') chips.push({ label: `Просрочено: ${facts.overdue_count}`, danger: facts.overdue_count > 0 });
-  if (typeof facts.created === 'number') chips.push({ label: `Создано: ${facts.created}` });
-  if (typeof facts.closed === 'number') chips.push({ label: `Закрыто: ${facts.closed}` });
-  if (typeof facts.waiting_share === 'number') chips.push({ label: `В ожидании: ${facts.waiting_share}%`, danger: facts.waiting_share > 20 });
-  if (typeof facts.max_lag_days === 'number' && facts.max_lag_days > 0) chips.push({ label: `Отставание: ${facts.max_lag_days} дн.`, danger: true });
-  if (typeof facts.client === 'string') chips.push({ label: facts.client });
-  if (!chips.length) return null;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {chips.map((chip, index) => (
-        <span key={index} className={cn('tf-chip', chip.danger && 'border-[var(--color-danger)]/50 text-[var(--color-danger)]')}>{chip.label}</span>
-      ))}
-    </div>
-  );
+  </div>;
 }

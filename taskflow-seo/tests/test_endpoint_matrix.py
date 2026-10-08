@@ -35,6 +35,7 @@ STRONG_GUARDS = {'permission', 'role', 'ws_role'}
 # Осознанные исключения (помимо middleware/skip/guard) с причиной.
 # Ключ — (METHOD, path-шаблон как в FastAPI).
 ALLOWLIST: dict[tuple[str, str], str] = {
+    ('GET', '/api/assistant/active'): 'only the authenticated user queue metadata; needed to cancel own requests after AI access is revoked',
     ('GET', '/api/auth/me'): 'карта прав текущего пользователя для фронта (401 без сессии)',
     ('GET', '/api/permissions/catalog'): 'каталог прав читает любой авторизованный (только чтение)',
     ('GET', '/api/workspaces/directory/list'): 'visible directory without private data',

@@ -1,6 +1,8 @@
 import { currentFieldAccess } from '../lib/fieldAccess';
+import { runAssistant, queueLabel, type AssistantJob } from '../api/assistant';
+import { richInputHtml } from '../lib/editorHtml';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { AlertCircle, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, ListFilter, Lock, MessageSquare, Paperclip, Pin, PinOff, Plus, Search, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../api/client';
@@ -27,6 +29,9 @@ function plainText(value: string) {
 
 export function Tasks() {
   const { user: currentUser } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [assistantDraft, setAssistantDraft] = useState<Partial<Task>>();
   const crmEnabled = currentUser?.features?.clients !== false;
   const [searchParams] = useSearchParams();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -44,6 +49,12 @@ export function Tasks() {
   const [loading, setLoading] = useState(true);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showModal, setShowModal] = useState(false);
+  useEffect(() => {
+    const state = location.state as { assistantDraft?: Partial<Task>; workspace?: string | null; userId?: number } | null;
+    if (!state?.assistantDraft || state.workspace !== getActiveWorkspaceId() || state.userId !== currentUser?.id || !(currentUser?.is_root || currentUser?.permissions?.tasks_create)) return;
+    setAssistantDraft(state.assistantDraft); setEditingTask(null); setShowModal(true);
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [location, currentUser, navigate]);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [viewName, setViewName] = useState('');
@@ -172,6 +183,7 @@ export function Tasks() {
   const openCreate = () => {
     if (!(currentUser?.is_root || currentUser?.permissions?.tasks_create)) return;
     setEditingTask(null);
+    setAssistantDraft(undefined);
     setShowModal(true);
   };
 
@@ -573,7 +585,7 @@ export function Tasks() {
         {totalTasks === 0 && <div className="p-10 text-center text-sm text-[var(--color-text-secondary)]">Задач по этим фильтрам нет</div>}
       </section>
 
-      {showModal && <TaskModal task={editingTask} clients={clients} users={users} onClose={() => setShowModal(false)} onSave={saveTask} onDelete={editingTask ? deleteTask : undefined} />}
+      {showModal && <TaskModal task={editingTask} initialTask={assistantDraft} clients={clients} users={users} onClose={() => { setShowModal(false); setAssistantDraft(undefined); }} onSave={saveTask} onDelete={editingTask ? deleteTask : undefined} />}
     </div>
   );
 }
@@ -623,6 +635,10 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [sprintOptions, setSprintOptions] = useState<{ value: string; label: string }[]>([]);
   const [aiDescLoading, setAiDescLoading] = useState(false);
   const [aiDescError, setAiDescError] = useState('');
+  const [aiDescJob, setAiDescJob] = useState<AssistantJob>();
+  const aiDescAbort = useRef<AbortController | null>(null);
+  const aiSource = useRef({ title, notes }); aiSource.current = { title, notes };
+  useEffect(() => () => aiDescAbort.current?.abort(), []);
 
   const generateDescription = async () => {
     if (!title.trim()) {
@@ -633,24 +649,16 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
     setAiDescError('');
     try {
       const clientName = clients.find(c => String(c.id) === clientId)?.org_name || '';
-      const wsRaw = (() => {
-        try {
-          return localStorage.getItem('taskflow:workspace');
-        } catch {
-          return null;
-        }
-      })();
-      const res = await api.describeTask(title.trim(), clientName, taskType, undefined, wsRaw ? Number(wsRaw) : null);
-      const html = res.description
-        .split('\n')
-        .map(line => line.trim().replace(/^[•\-*]\s*/, ''))
-        .filter(Boolean)
-        .map(line => `<p>${line}</p>`)
-        .join('');
+      const source = { title, notes };
+      const controller = new AbortController(); aiDescAbort.current = controller;
+      const res = await runAssistant(`Подготовь описание задачи по пунктам. Название: ${title.trim()}. Клиент: ${clientName}. Тип: ${taskType}.`, 'task', setAiDescJob, controller.signal);
+      if (controller.signal.aborted || aiSource.current.title !== source.title || aiSource.current.notes !== source.notes) return;
+      const html = richInputHtml(res.draft?.notes || res.answer);
       setNotes(prev => (prev ? `${prev}<br>${html}` : html));
     } catch (err) {
       setAiDescError(err instanceof Error ? err.message : 'AI недоступен.');
     } finally {
+      aiDescAbort.current = null; setAiDescJob(undefined);
       setAiDescLoading(false);
     }
   };
@@ -976,6 +984,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                     </button> : undefined
                   }
                 >
+                  {aiDescJob && <div role="status" className="mb-2 flex flex-wrap items-center gap-2 text-sm">{queueLabel(aiDescJob)}<button type="button" className="tf-button" onClick={() => aiDescAbort.current?.abort()}>Отменить ИИ</button></div>}
                   <RichTextEditor readOnly={!uiFields.notes.editable} value={notes} onChange={setNotes} minHeightClassName="min-h-52" placeholder="Контекст, ссылки, требования, что считать готовым..." />
                   {aiDescError && <div className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{aiDescError}</div>}
                 </Panel>

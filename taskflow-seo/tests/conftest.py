@@ -33,7 +33,16 @@ async def client(event_loop):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url='http://test', follow_redirects=False) as ac:
         yield ac
+    from app.core.ai_assistant import stop_worker
+    await stop_worker()
     await close_db()
+
+
+@pytest.fixture(autouse=True)
+def stop_test_ai_worker(event_loop):
+    yield
+    from app.core.ai_assistant import stop_worker
+    event_loop.run_until_complete(stop_worker())
 
 
 @pytest.fixture

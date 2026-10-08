@@ -187,28 +187,7 @@ def _build_facts(client: Client, tasks: list[Task], start: datetime, end: dateti
     }
 
 
-def _ollama_generate(model: str, prompt: str) -> str:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.25,
-            "num_predict": 650,
-        },
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=3600) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    return (body.get("response") or "").strip()
-
-
-async def _ai_text(facts: dict[str, Any], model: str | None) -> tuple[str, str]:
+async def _ai_text(facts: dict[str, Any], model: str | None, user, workspace_id: int) -> tuple[str, str]:
     selected_model = model or OLLAMA_MODEL
     compact = {
         "client": facts["client"],
@@ -230,11 +209,11 @@ async def _ai_text(facts: dict[str, Any], model: str | None) -> tuple[str, str]:
         f"Факты JSON: {json.dumps(compact, ensure_ascii=False)}"
     )
     try:
-        from app.core.ai_lock import ollama_lock
-        async with ollama_lock:
-            text = await asyncio.to_thread(_ollama_generate, selected_model, prompt)
-        return text, selected_model
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        from app.core.ai_assistant import generate_prompt
+        return await generate_prompt(user, workspace_id, prompt, 'Текст клиентского отчёта')
+    except HTTPException:
+        raise
+    except Exception:
         fallback = (
             "Итог периода\n"
             f"За период обработано задач: {facts['total']}, завершено: {facts['done']}, в работе осталось: {facts['active']}.\n\n"
@@ -243,7 +222,7 @@ async def _ai_text(facts: dict[str, Any], model: str | None) -> tuple[str, str]:
             "План следующего периода\n"
             "Продолжить выполнение активных задач, подготовить новые работы по приоритетам клиента и обновить статистику вручную."
         )
-        return f"{fallback}\n\nAI недоступен: {exc}", selected_model
+        return f"{fallback}\n\nПомощник недоступен: приведена автоматическая сводка без анализа модели.", selected_model
 
 
 def _html_list(items: list[str]) -> str:
@@ -769,6 +748,15 @@ async def _generate_report(report_id: int):
             client = await session.get(Client, report.client_id)
             if not client:
                 raise RuntimeError("Клиент не найден")
+            from app.core.models import User
+            from app.core.permissions import effective_permissions, resolve_workspace
+            author = await session.get(User, report.created_by) if report.created_by else None
+            if not author or not author.is_active:
+                raise RuntimeError('Автор отчёта недоступен')
+            await resolve_workspace(session, author, await get_user_role_names(author.id), client.workspace_id)
+            permissions = await effective_permissions(author, client.workspace_id)
+            if not (permissions.get('all') or permissions.get('reports')):
+                raise RuntimeError('Доступ к отчётам изменился')
             settings = json.loads(report.settings_json or "{}")
             start = report.period_start
             end = report.period_end
@@ -777,6 +765,9 @@ async def _generate_report(report_id: int):
                 .where(Task.client_id == client.id, Task.deleted_at.is_(None))
                 .order_by(Task.created_at.desc())
             )
+            if not (permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others')):
+                query = query.where(or_(Task.creator_id == author.id, Task.assignee_id == author.id, Task.co_executor_id == author.id,
+                    Task.id.in_(select(TaskCoExecutor.task_id).where(TaskCoExecutor.user_id == author.id))))
             result = await session.execute(query)
             all_tasks = result.scalars().all()
             tasks = [task for task in all_tasks if _task_completed_in_period(task, start, end)]
@@ -784,7 +775,7 @@ async def _generate_report(report_id: int):
             ai_text = ""
             ai_model = report.ai_model
             if settings.get("use_ai", True):
-                ai_text, ai_model = await _ai_text(facts, ai_model)
+                ai_text, ai_model = await _ai_text(facts, ai_model, author, client.workspace_id)
             else:
                 ai_text = "AI отключен для этого отчета. Выводы и рекомендации можно дополнить вручную."
             html_doc = _build_report_html(client, tasks, facts, ai_text, settings.get("blocks") or [])

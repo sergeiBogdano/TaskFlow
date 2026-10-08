@@ -46,14 +46,12 @@ export function Reports() {
   const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
   const [clients, setClients] = useState<Client[]>([]);
   const [reports, setReports] = useState<GeneratedReport[]>([]);
-  const [models, setModels] = useState<string[]>([]);
   const [selectedReport, setSelectedReport] = useState<GeneratedReport | null>(null);
   const [clientId, setClientId] = useState('');
   const [dateFrom, setDateFrom] = useState(oneMonthAgo);
   const [dateTo, setDateTo] = useState(() => isoDate(new Date()));
   const [blocks, setBlocks] = useState(() => reportBlocks.map(block => block.key));
   const [useAi, setUseAi] = useState(true);
-  const [aiModel, setAiModel] = useState('');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -64,14 +62,11 @@ export function Reports() {
     Promise.all([
       referenceCache.clients().catch(() => []),
       api.getGeneratedReports().catch(() => []),
-      api.getOllamaModels().catch(() => ({ models: [] })),
     ])
-      .then(([clientList, reportList, modelList]) => {
+      .then(([clientList, reportList]) => {
         setClients(clientList);
         setReports(reportList);
-        setModels(modelList.models);
         setClientId(clientList[0]?.id ? String(clientList[0].id) : '');
-        setAiModel(modelList.models[0] || '');
         setSelectedReport(reportList[0] || null);
       })
       .finally(() => setLoading(false));
@@ -111,7 +106,6 @@ export function Reports() {
         period_end: dateTo,
         blocks,
         use_ai: useAi,
-        ai_model: aiModel || undefined,
       });
       setSelectedReport(report);
       setReports(prev => [report, ...prev]);
@@ -202,22 +196,12 @@ export function Reports() {
             <div className="rounded-lg border border-[var(--color-border)] p-3">
               <label className="flex items-center gap-2 text-sm font-semibold">
                 <input type="checkbox" checked={useAi} onChange={event => setUseAi(event.target.checked)} />
-                Помочь текстом через Ollama
+                Подготовить текст с помощником
               </label>
               <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
                 В модель отправляется только короткая сводка по задачам, без доступов и больших текстов.
               </p>
-              {useAi && (
-                <div className="mt-3">
-                  <SearchSelect
-                    value={aiModel}
-                    options={models.map(model => ({ value: model, label: model }))}
-                    onChange={setAiModel}
-                    placeholder="Выбрать модель"
-                    searchPlaceholder="Найти модель..."
-                  />
-                </div>
-              )}
+
             </div>
 
             {error && <div className="rounded-lg border border-red-400/40 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}

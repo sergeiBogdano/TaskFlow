@@ -1,5 +1,4 @@
-import { TextEditor } from './TextEditor';
-import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -22,7 +21,6 @@ import {
   Layers,
   NotebookPen,
   Puzzle,
-  Send,
   Settings,
   Sparkles,
   Timer,
@@ -31,16 +29,13 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { referenceCache } from '../api/cache';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { availableWorkAreas, workAreaForRoute, WORK_AREAS } from '../lib/workAreas';
 import { WORKSPACE_EVENT } from '../lib/workspace';
 import { isNavVisible, navOverride, sectionLabel } from '../lib/uiconfig';
-import type { Client, Task, User, VoiceTaskDraft } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { cn, roleMeta } from '../lib/taskflow';
 
-const TaskModal = lazy(() => import('../pages/Tasks').then(module => ({ default: module.TaskModal })));
 
 const nav = [
   {
@@ -67,7 +62,7 @@ const nav = [
       { to: '/clients', icon: Users, label: 'Клиенты', hint: 'CRM и договоры', permission: 'clients' },
       { to: '/modules', icon: Puzzle, label: 'Модули', hint: 'Автоматизация', permission: 'modules' },
       { to: '/reports', icon: BarChart3, label: 'Отчёты', hint: 'Метрики', permission: 'reports' },
-      { to: '/ai', icon: Sparkles, label: 'AI-аналитика', hint: 'Ollama', permission: 'ai' },
+      { to: '/ai', icon: Sparkles, label: 'Помощник', hint: 'Диалог и черновики', permission: 'ai' },
     ],
   },
   {
@@ -141,7 +136,6 @@ export function Layout() {
   const location = useLocation();
   const { user, logout, hasRole } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem('taskflow:intro-closed') !== '1');
   const [navOrder, setNavOrder] = useState<Record<string, string[]>>({});
   const [activeNavRoute, setActiveNavRoute] = useState<string | null>(null);
@@ -149,7 +143,7 @@ export function Layout() {
   const [, setUiTick] = useState(0);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const notificationsAvailable = Boolean(user?.is_root || (user?.features?.notifications !== false && (user?.permissions?.all || user?.permissions?.notifications)));
-  const voiceAvailable = ['ai', 'tasks'].every(key => user?.features?.[key] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[key]));
+  const voiceAvailable = ['ai'].every(key => user?.features?.[key] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[key]));
 
   useEffect(() => {
     const sync = () => {
@@ -329,7 +323,7 @@ export function Layout() {
             <p className="text-xs text-[var(--color-text-secondary)]">{WORK_AREAS[area].hint}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-          {area === 'work' && voiceAvailable && <button onClick={() => setVoiceOpen(true)} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
+          {area === 'work' && voiceAvailable && <button onClick={() => navigate('/ai')} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Помощник">
             <Mic size={16} />
           </button>}
           {notificationsAvailable && <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
@@ -363,200 +357,6 @@ export function Layout() {
           </div>
         </main>
       </div>
-      {voiceOpen && voiceAvailable && <VoiceTaskAssistant onClose={() => setVoiceOpen(false)} />}
     </div>
-  );
-}
-
-function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const [text, setText] = useState('');
-  const [draft, setDraft] = useState<VoiceTaskDraft>({});
-  const [questions, setQuestions] = useState<string[]>([]);
-  const [modalDraft, setModalDraft] = useState<VoiceTaskDraft | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [error, setError] = useState('');
-  const [createdTask, setCreatedTask] = useState<Task | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-
-  useEffect(() => {
-    Promise.all([referenceCache.clients().catch(() => []), referenceCache.users().catch(() => [])]).then(([clientList, userList]) => {
-      setClients(clientList);
-      setUsers(userList);
-    });
-  }, []);
-
-  const startListening = () => {
-    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!Recognition) {
-      setError('Браузер не поддерживает распознавание речи. Можно ввести команду текстом.');
-      return;
-    }
-    const recognition = new Recognition();
-    recognition.lang = 'ru-RU';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setListening(true);
-    recognition.onerror = () => {
-      setListening(false);
-      setError('Не удалось распознать голос. Попробуйте еще раз или введите текстом.');
-    };
-    recognition.onend = () => setListening(false);
-    recognition.onresult = (event: any) => {
-      const spoken = event.results?.[0]?.[0]?.transcript || '';
-      setText(prev => [prev, spoken].filter(Boolean).join(' ').trim());
-    };
-    recognition.start();
-  };
-
-  const analyze = async () => {
-    const command = text.trim();
-    if (!command) return;
-    setLoading(true);
-    setError('');
-    try {
-      const result = await api.parseVoiceTask(command, draft);
-      setDraft(result.draft);
-      setQuestions([]);
-      setModalDraft(result.draft);
-      setText('');
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Не удалось разобрать команду.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createTask = async () => {
-    if (text.trim()) {
-      await analyze();
-      return;
-    }
-    setQuestions([]);
-    setError('');
-    setModalDraft(draft);
-  };
-
-  const saveDraftTask = async (data: Partial<Task>) => {
-    setLoading(true);
-    setError('');
-    try {
-      const task = await api.createTask({
-        ...data,
-        title: data.title || draft.title || 'Новая задача',
-        status: data.status || 'todo',
-      });
-      navigate('/tasks');
-      setCreatedTask(task);
-      setModalDraft(null);
-      setQuestions([]);
-      setDraft({});
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Не удалось создать задачу.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEnter = async (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey) return;
-    event.preventDefault();
-    if (text.trim()) await analyze();
-    else if (draft.title) await createTask();
-  };
-
-  const saveCreatedTask = async (data: Partial<Task>) => {
-    if (!createdTask) return;
-    await api.updateTask(createdTask.id, data);
-    setCreatedTask(null);
-    onClose();
-  };
-
-  const requestClose = () => {
-    const dirty = text.trim() !== '' || Object.keys(draft).length > 0;
-    if (!dirty || confirm('Есть несохранённый текст команды. Закрыть без сохранения?')) onClose();
-  };
-
-  const summary = [
-    ['Задача', draft.title],
-    ['Клиент', draft.client_name],
-    ['Исполнитель', draft.assignee_name],
-    ['Дата выполнения', draft.completion_date],
-    ['Дедлайн', draft.deadline],
-    ['Приоритет', draft.priority],
-    ['Тип', draft.task_type],
-  ];
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={requestClose} />
-      <section className="fixed right-4 top-20 z-50 w-[min(460px,calc(100vw-32px))] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-          <div>
-            <h2 className="text-sm font-black">Голосовая задача</h2>
-            <p className="text-xs text-[var(--color-text-secondary)]">Скажите команду, затем Enter или OK.</p>
-          </div>
-          <button type="button" onClick={requestClose} className="tf-button w-9 px-0"><X size={15} /></button>
-        </div>
-        <div className="space-y-3 p-4">
-          <TextEditor
-            minHeightClassName="min-h-28"
-            value={text}
-            onChange={setText}
-            onKeyDown={handleEnter}
-            placeholder="Например: поставь админу задачу проверить title клиенту Альфа Климат завтра"
-            autoFocus
-          />
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs leading-5 text-[var(--color-text-secondary)]">
-            <div className="mb-1 font-bold text-[var(--color-text)]">Как лучше писать запрос</div>
-            <p>Формула: кому поставить, что сделать, для какого клиента, когда выполнить. Описание добавляйте после слова “описание”. Дедлайн называйте отдельно, только если это крайний срок.</p>
-            <div className="mt-2 space-y-1">
-              <div>Например: “Поставь Ивану задачу проверить title для Альфа Климат завтра”.</div>
-              <div>Например: “Создай задачу админу подготовить отчет для клиента Ромашка на 15 июля, дедлайн 18 июля, описание: проверить позиции и добавить ссылки на статьи”.</div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={startListening} className={cn('tf-button', listening && 'text-[var(--color-danger)]')}><Mic size={15} />{listening ? 'Слушаю...' : 'Говорить'}</button>
-            <button type="button" onClick={analyze} disabled={loading || !text.trim()} className="tf-button"><Send size={15} />OK</button>
-            <button type="button" onClick={createTask} disabled={loading || !draft.title} className="tf-button tf-button-primary">Открыть задачу</button>
-          </div>
-          {questions.length > 0 && (
-            <div className="rounded-lg border border-[var(--color-warning)]/45 bg-[var(--color-warning)]/10 p-3 text-sm">
-              <div className="font-bold text-[var(--color-warning)]">Нужно уточнить</div>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--color-text-secondary)]">
-                {questions.map(question => <li key={question}>{question}</li>)}
-              </ul>
-            </div>
-          )}
-          {Object.keys(draft).length > 0 && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-sm">
-              <div className="mb-2 font-bold">Черновик</div>
-              <div className="grid gap-1">
-                {summary.filter(([, value]) => value).map(([label, value]) => (
-                  <div key={label} className="grid grid-cols-[130px_1fr] gap-2">
-                    <span className="text-[var(--color-muted)]">{label}</span>
-                    <span>{String(value)}</span>
-                  </div>
-                ))}
-              </div>
-              {draft.notes && <div className="mt-2 text-xs text-[var(--color-text-secondary)]">{draft.notes}</div>}
-            </div>
-          )}
-          {error && <div className="text-sm font-semibold text-[var(--color-danger)]">{error}</div>}
-        </div>
-      </section>
-      {modalDraft && !createdTask && (
-        <Suspense fallback={null}>
-          <TaskModal task={null} initialTask={modalDraft} clients={clients} users={users} onClose={() => setModalDraft(null)} onSave={saveDraftTask} />
-        </Suspense>
-      )}
-      {createdTask && (
-        <Suspense fallback={null}>
-          <TaskModal task={createdTask} clients={clients} users={users} onClose={() => { setCreatedTask(null); onClose(); }} onSave={saveCreatedTask} />
-        </Suspense>
-      )}
-    </>
   );
 }

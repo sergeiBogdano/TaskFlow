@@ -8,11 +8,11 @@ from app.web.api import ai_analytics as analytics
 def llm_calls(monkeypatch):
     calls = []
 
-    def fake(model, prompt, num_predict=600):
-        calls.append({"model": model, "prompt": prompt})
-        return f"[{model}] Анализ готов."
-
-    monkeypatch.setattr(analytics, "_ollama_text", fake)
+    from app.core import ai_assistant
+    async def queued_fake(messages, model, timeout):
+        calls.append({'model': model, 'prompt': messages[-1]['content']})
+        return f"[{model}] Анализ готов.", {}
+    monkeypatch.setattr(ai_assistant, 'infer', queued_fake)
     return calls
 
 
@@ -73,7 +73,7 @@ class TestAnalyticsOverdue:
         data = resp.json()
         assert data["facts"]["total"] >= 2
         assert "Анализ готов" in data["analysis"]
-        assert data["model"] == "qwen2.5:3b"
+        assert data["model"] == "qwen2.5:7b"
         assert any(row["name"] == "testexec" for row in data["facts"]["by_assignee"])
         assert any(row["name"] == "AI Test Client" for row in data["facts"]["by_client"])
         assert data["facts"]["buckets"]["over_14"] >= 1
@@ -90,7 +90,9 @@ class TestAnalyticsOverdue:
         def boom(model, prompt, num_predict=600):
             raise ConnectionError("no ollama")
 
-        monkeypatch.setattr(analytics, "_ollama_text", boom)
+        from app.core import ai_assistant
+        async def queued_boom(*args): raise ConnectionError('no ollama')
+        monkeypatch.setattr(ai_assistant, 'infer', queued_boom)
         resp = sync_request("POST", "/api/ai/analytics/overdue", json={}, cookies=admin_cookies)
         assert resp.status_code == 503
         assert "facts" in resp.json()
@@ -202,8 +204,8 @@ class TestAiChat:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["intent"] == "my_overdue"
-        assert data["facts"]["count"] >= 1
+        assert data["intent"] == "chat"
+        assert data["facts"]["tasks_overdue"] >= 1
         assert "Анализ готов" in data["answer"]
 
     def test_chat_totals(self, sync_request, admin_cookies, seed_ai_data, llm_calls):
@@ -211,16 +213,16 @@ class TestAiChat:
             "POST", "/api/ai/chat", json={"message": "Сколько всего задач?"}, cookies=admin_cookies,
         )
         assert resp.status_code == 200
-        assert resp.json()["intent"] == "totals"
-        assert resp.json()["facts"]["total"] >= resp.json()["facts"]["active"]
+        assert resp.json()["intent"] == "chat"
+        assert resp.json()["facts"]["tasks_total"] >= 1
 
-    def test_chat_help_without_llm(self, sync_request, admin_cookies, llm_calls):
+    def test_chat_general_question_uses_model(self, sync_request, admin_cookies, llm_calls):
         resp = sync_request(
             "POST", "/api/ai/chat", json={"message": "привет, как дела?"}, cookies=admin_cookies,
         )
         assert resp.status_code == 200
-        assert resp.json()["intent"] == "help"
-        assert llm_calls == []
+        assert resp.json()["intent"] == "chat"
+        assert len(llm_calls) == 1
 
     def test_chat_empty(self, sync_request, admin_cookies, llm_calls):
         resp = sync_request("POST", "/api/ai/chat", json={"message": "  "}, cookies=admin_cookies)

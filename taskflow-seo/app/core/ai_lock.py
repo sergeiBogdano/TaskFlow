@@ -1,9 +1,4 @@
-"""Один общий семифор для всех обращений к локальной Ollama.
-
-Модель на CPU тянет один запрос за раз: параллельные инференсы
-кладут сервер. Все AI-вызовы идут через этот лок.
-"""
-
+"""Process guard; the durable queue also holds a cross-process database lease."""
 import asyncio
 
 ollama_lock = asyncio.Lock()
