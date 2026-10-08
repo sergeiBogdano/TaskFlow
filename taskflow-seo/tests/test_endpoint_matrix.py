@@ -198,7 +198,7 @@ def test_anonymous_api_gets_401(sync_request, url):
 
 def test_public_auth_endpoints_work_without_session(sync_request):
     assert sync_request('POST', '/api/auth/login',
-                        json={'username': 'x', 'password': 'y'}).status_code in (401, 400)
+                        json={'username': 'unknown-user', 'password': 'y'}).status_code in (401, 400)
     assert sync_request('GET', '/api/auth/me').status_code == 401
 
 

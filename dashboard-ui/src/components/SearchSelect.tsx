@@ -2,6 +2,7 @@ import { Select } from './Select';
 
 export type SearchSelectOption = { value: string; label: string; description?: string; searchText?: string };
 type SearchSelectProps = {
+  disabled?: boolean;
   value: string;
   options: SearchSelectOption[];
   onChange: (value: string) => void;

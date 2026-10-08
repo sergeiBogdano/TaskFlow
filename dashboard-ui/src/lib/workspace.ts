@@ -54,7 +54,7 @@ export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; acti
   } catch {
     /* ignore */
   }
-  const detail = workspaces.find(w => String(w.id) === activeId);
+  const detail = await api.getWorkspace(Number(activeId)).catch(() => workspaces.find(w => String(w.id) === activeId));
   try { localStorage.setItem(DETAIL_KEY, JSON.stringify(detail)); } catch { /* ignore */ }
   return { workspaces, activeId };
 }

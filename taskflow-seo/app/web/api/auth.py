@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -11,8 +11,10 @@ from app.services.user_service import authenticate, get_user
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=1, max_length=512)
+
+from app.core.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -39,9 +41,13 @@ def _get_user_data(user: User, roles_list: list = None, permissions: dict | None
 
 @router.post('/login')
 async def login(body: LoginRequest):
+    from app.web.security import check_login_limit, record_login_failure, login_succeeded
+    check_login_limit(body.username)
     u = await authenticate(body.username, body.password)
     if not u:
+        record_login_failure(body.username)
         return JSONResponse({'error': 'Неверное имя или пароль'}, status_code=401)
+    login_succeeded(body.username)
     token = make_session_token(u.id, u.session_version)
     async with async_session() as session:
         r = await session.execute(
@@ -52,14 +58,21 @@ async def login(body: LoginRequest):
     from app.core.permissions import get_user_permissions
     response = JSONResponse({
         'user': _get_user_data(u, roles, await get_user_permissions(u.id)),
-        'token': token,
     })
-    response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 30, samesite='lax')
+    response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 30, samesite='lax', secure=settings.COOKIE_SECURE)
     return response
 
 
 @router.post('/logout')
-async def logout():
+async def logout(request: Request):
+    token = request.cookies.get(COOKIE_NAME, '')
+    uid = verify_session_token(token)
+    if uid is not None:
+        async with async_session() as session:
+            user = await session.get(User, uid)
+            if session_matches_user(token, user):
+                user.session_version += 1  # Explicit logout revokes sessions on all devices.
+                await session.commit()
     resp = JSONResponse({'ok': True})
     resp.delete_cookie(COOKIE_NAME)
     return resp
@@ -88,4 +101,6 @@ async def me(request: Request):
     payload = _get_user_data(user, roles, await effective_permissions(user, workspace_id))
     # Эффективные функции (кран, Ф6): false = отключено, отсутствие = доступно
     payload['features'] = await get_effective_features(user, workspace_id)
+    from app.core.access_policy import field_access
+    payload['field_access'] = await field_access(user, workspace_id)
     return JSONResponse({'user': payload})

@@ -70,6 +70,9 @@ async def _migrate():
             'ALTER TABLE file_attachments ADD COLUMN contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
             'ALTER TABLE file_attachments ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
             'ALTER TABLE activity_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+            "ALTER TABLE workspace_roles ADD COLUMN access_version INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE workspace_roles ADD COLUMN field_access TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE workspace_members ADD COLUMN access_overrides TEXT NOT NULL DEFAULT '{}'",
             'ALTER TABLE workspace_members ADD COLUMN custom_role_id INTEGER REFERENCES workspace_roles(id) ON DELETE SET NULL',
             'ALTER TABLE users ADD COLUMN is_root BOOLEAN NOT NULL DEFAULT 0',
             'ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1',
@@ -160,6 +163,9 @@ async def _ensure_indexes():
     # Списки разъезжались (custom_role_id падал прод) — при добавлении колонки
     # дописывать в оба места.
     pg_statements = [
+        "ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS access_version INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS field_access TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS access_overrides TEXT NOT NULL DEFAULT '{}'",
         'ALTER TABLE file_attachments ALTER COLUMN task_id DROP NOT NULL',
         'ALTER TABLE file_attachments ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE',
         'ALTER TABLE clients ADD COLUMN IF NOT EXISTS org_data TEXT',
@@ -262,6 +268,28 @@ async def _ensure_indexes():
                 await conn.execute(text(idx))
             except Exception as e:
                 logger.warning('Index creation error for "%s": %s', idx[:60], e)
+
+
+async def _migrate_access_profiles():
+    """Preserve existing actions exactly once when splitting view/edit permissions."""
+    from app.core.models import WorkspaceRole, WorkspaceMember
+    async with async_session() as session:
+        rows = (await session.execute(select(WorkspaceRole).where(WorkspaceRole.access_version == 0))).scalars().all()
+        for role in rows:
+            permissions = json.loads(role.permissions or '{}')
+            if permissions.get('tasks'):
+                for key in ('tasks_create', 'tasks_edit', 'tasks_delete'):
+                    permissions.setdefault(key, True)
+            if permissions.get('kanban'):
+                permissions.setdefault('sprints_plan', True)
+            managers = (await session.execute(select(WorkspaceMember.id).where(
+                WorkspaceMember.custom_role_id == role.id, WorkspaceMember.role.in_(['owner', 'admin'])))).first()
+            if managers:
+                for key in ('workspace_settings', 'workspace_members', 'workspace_profiles'):
+                    permissions.setdefault(key, True)
+            role.permissions = json.dumps(permissions)
+            role.access_version = 1
+        await session.commit()
 
 
 async def _ensure_admin():
@@ -499,6 +527,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     await _migrate()
     await _ensure_indexes()
+    await _migrate_access_profiles()
     await _ensure_admin()
     await _ensure_root()
     await _migrate_role_permissions()

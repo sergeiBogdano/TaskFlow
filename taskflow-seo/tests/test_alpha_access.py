@@ -36,7 +36,7 @@ def test_shared_role_update_obeys_rank_and_own_ceiling(sync_request, admin_cooki
     actor, cookies = account(sync_request, admin_cookies, ws, 'admin')
     peer, _ = account(sync_request, admin_cookies, ws, 'admin')
     member, _ = account(sync_request, admin_cookies, ws)
-    own = profile(sync_request, admin_cookies, ws, actor, {'tasks': True})
+    own = profile(sync_request, admin_cookies, ws, actor, {'tasks': True, 'workspace_profiles': True})
     peer_role = profile(sync_request, admin_cookies, ws, peer, {'tasks': True})
     member_role = profile(sync_request, admin_cookies, ws, member, {'tasks': True})
     for role in (own, peer_role):

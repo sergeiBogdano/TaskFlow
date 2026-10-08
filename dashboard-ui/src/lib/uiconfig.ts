@@ -1,3 +1,4 @@
+import { currentFieldAccess } from './fieldAccess';
 import { getActiveWorkspaceDetail, workspaceClientsLabel, WORKSPACE_EVENT } from './workspace';
 import { resolveSectionLabel } from './uiLabels';
 
@@ -36,7 +37,7 @@ export function isNavVisible(to: string): boolean {
 }
 
 export function sectionLabel(route: string): string {
-  return resolveSectionLabel(getUiConfig(), route, workspaceClientsLabel());
+  return resolveSectionLabel(getUiConfig(), route === '/overview' ? '/' : route, workspaceClientsLabel());
 }
 
 export const TASK_FIELD_DEFAULTS: Record<string, string> = {
@@ -56,13 +57,14 @@ export const TASK_FIELD_DEFAULTS: Record<string, string> = {
   sprint: 'Спринт',
 };
 
-export function taskField(key: string): { label: string; visible: boolean; order: number } {
+export function taskField(key: string): { label: string; visible: boolean; editable: boolean; order: number } {
   const cfg = getUiConfig();
   const item = cfg.tasks?.fields?.[key];
   return {
     order: (cfg.tasks?.order || Object.keys(TASK_FIELD_DEFAULTS)).indexOf(key),
     label: item?.label?.trim() || TASK_FIELD_DEFAULTS[key] || key,
-    visible: item?.visible !== false,
+    visible: item?.visible !== false && currentFieldAccess().tasks?.[key] !== 'hidden',
+    editable: (!currentFieldAccess().tasks?.[key] || currentFieldAccess().tasks[key] === 'edit') && (getActiveWorkspaceDetail()?.permissions?.all === true || getActiveWorkspaceDetail()?.permissions?.tasks_edit === true),
   };
 }
 
@@ -73,13 +75,14 @@ export const SPRINT_FIELD_DEFAULTS: Record<string, string> = {
   end: 'Конец',
 };
 
-export function sprintField(key: string): { label: string; visible: boolean; order: number } {
+export function sprintField(key: string): { label: string; visible: boolean; editable: boolean; order: number } {
   const cfg = getUiConfig();
   const item = cfg.sprints?.fields?.[key];
   return {
     order: (cfg.sprints?.order || Object.keys(SPRINT_FIELD_DEFAULTS)).indexOf(key),
     label: item?.label?.trim() || SPRINT_FIELD_DEFAULTS[key] || key,
-    visible: item?.visible !== false,
+    visible: item?.visible !== false && currentFieldAccess().sprints?.[key] !== 'hidden',
+    editable: (!currentFieldAccess().sprints?.[key] || currentFieldAccess().sprints[key] === 'edit') && (getActiveWorkspaceDetail()?.permissions?.all === true || getActiveWorkspaceDetail()?.permissions?.sprints_plan === true),
   };
 }
 

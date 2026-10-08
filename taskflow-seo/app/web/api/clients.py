@@ -51,29 +51,8 @@ class _FaviconParser(HTMLParser):
 
 
 async def _discover_favicon(domain: str | None) -> str | None:
-    if not domain:
-        return None
-    fallback_url = f'https://www.google.com/s2/favicons?domain={domain}&sz=64'
-
-    def fetch():
-        for scheme in ('https://', 'http://'):
-            site_url = f'{scheme}{domain}/'
-            try:
-                request = Request(site_url, headers={'User-Agent': 'TaskFlow favicon resolver/1.0', 'Accept': 'text/html'})
-                with urlopen(request, timeout=3) as response:
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'html' not in content_type.lower():
-                        continue
-                    parser = _FaviconParser()
-                    parser.feed(response.read(512_000).decode('utf-8', errors='ignore'))
-                    if parser.href:
-                        return urljoin(site_url, parser.href)
-                    return urljoin(site_url, '/favicon.ico')
-            except Exception:
-                continue
-        return fallback_url
-
-    return await asyncio.to_thread(fetch)
+    # No outbound requests to user-supplied hosts; local initials are used by the UI.
+    return None
 
 
 async def _ensure_domain_unique(session, domain: str, client_id: int | None = None, workspace_id: int | None = None):
@@ -793,20 +772,15 @@ async def upload_client_file(client_id: int, file: UploadFile, user=Depends(requ
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_client_workspace(session, client, user, role_names)
-        data = await file.read()
-        if not data:
-            raise HTTPException(status_code=400, detail='File is empty')
-        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
-            )
-        original_name = file.filename or 'file'
+        from app.core.uploads import read_upload, assert_upload_quota
+        data, original_name, mime = await read_upload(file)
+        file_client = await session.get(Client, client_id)
+        await assert_upload_quota(session, file_client.workspace_id, len(data))
         attachment = FileAttachment(
             client_id=client_id,
             filename=original_name,
             original_name=original_name,
-            content_type=file.content_type or 'application/octet-stream',
+            content_type=mime,
             size=len(data),
             data=data,
         )
@@ -840,21 +814,16 @@ async def upload_contract_file(client_id: int, contract_id: int, file: UploadFil
         contract = await session.get(Contract, contract_id)
         if not contract or contract.client_id != client_id:
             raise HTTPException(status_code=404, detail='Contract not found')
-        data = await file.read()
-        if not data:
-            raise HTTPException(status_code=400, detail='File is empty')
-        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
-            )
-        original_name = file.filename or 'file'
+        from app.core.uploads import read_upload, assert_upload_quota
+        data, original_name, mime = await read_upload(file)
+        file_client = await session.get(Client, client_id)
+        await assert_upload_quota(session, file_client.workspace_id, len(data))
         attachment = FileAttachment(
             client_id=client_id,
             contract_id=contract_id,
             filename=original_name,
             original_name=original_name,
-            content_type=file.content_type or 'application/octet-stream',
+            content_type=mime,
             size=len(data),
             data=data,
         )
@@ -926,7 +895,7 @@ async def download_client_file(client_id: int, file_id: int, user=Depends(get_cu
             raise HTTPException(status_code=404, detail='File not found')
         await _ensure_client_file_access(session, client_id, user, contract=bool(attachment.contract_id))
         filename = (attachment.original_name or attachment.filename or 'file').replace('"', '')
-        disposition = 'inline' if (attachment.content_type or '').startswith(('image/', 'application/pdf')) else 'attachment'
+        disposition = 'inline' if attachment.content_type in ('image/png', 'image/jpeg', 'image/webp', 'image/gif') else 'attachment'
         return Response(
             content=attachment.data,
             media_type=attachment.content_type or 'application/octet-stream',

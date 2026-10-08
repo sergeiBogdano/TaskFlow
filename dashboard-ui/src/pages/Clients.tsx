@@ -1,3 +1,4 @@
+import { RichTextEditor } from '../components/RichTextEditor';
 import { sectionLabel } from '../lib/uiconfig';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -491,11 +492,10 @@ function Metric({ label, value, icon, tone = 'accent' }: { label: string; value:
 
 function FaviconBadge({ client }: { client: Client | null }) {
   const initials = client?.org_name?.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'OR';
-  const fallbackUrl = client?.domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(client.domain)}&sz=64` : '';
-  const source = client?.favicon_url || fallbackUrl;
+
   return <span className="relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-accent)]/15 text-[11px] font-black text-[var(--color-accent)]">
     {initials}
-    {source && <img src={source} alt="" className="absolute inset-0 h-full w-full bg-[var(--color-surface-2)] object-contain p-1" onError={event => { if (fallbackUrl && event.currentTarget.src !== fallbackUrl) event.currentTarget.src = fallbackUrl; else event.currentTarget.style.display = 'none'; }} />}
+
   </span>;
 }
 
@@ -789,12 +789,7 @@ function ClientModal({
               </Panel>
               <aside className="grid content-start gap-4">
                 <Panel title="Рабочие заметки" icon={<NotebookText size={16} />}>
-                  <textarea
-                    className="tf-input min-h-56 resize-y text-sm leading-6"
-                    value={clientNotes}
-                    onChange={event => setClientNotes(event.target.value)}
-                    placeholder="Любые внутренние заметки: особенности согласований, кому писать, что проверять перед работами, нестандартные правила клиента..."
-                  />
+                  <RichTextEditor value={clientNotes} onChange={setClientNotes} minHeightClassName="min-h-56" placeholder="Договорённости и внутренние заметки" />
                 </Panel>
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 text-sm leading-6 text-[var(--color-text-secondary)]">
                   <div className="mb-1 font-bold text-[var(--color-text)]">Для чего эта вкладка</div>

@@ -14,7 +14,7 @@ class TestAuth:
         assert resp.status_code == 200
         data = resp.json()
         assert 'user' in data
-        assert 'token' in data
+        assert 'token' not in data
         assert data['user']['username'] == '4dmin'
 
     def test_login_wrong_password(self, sync_request, client):

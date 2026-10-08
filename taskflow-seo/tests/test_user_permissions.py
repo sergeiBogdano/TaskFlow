@@ -154,7 +154,7 @@ class TestWorkspaceOwnerPermissions:
 
 
 class TestWorkspaceAdminPermissions:
-    def test_ws_admin_cannot_update_workspace_settings(self, sync_request, admin_cookies):
+    def test_ws_admin_can_update_workspace_settings(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]
         ws = _make_workspace(sync_request, admin_cookies, f"WS админ настройки {uniq}")
         uid, cookies = _make_user(sync_request, admin_cookies, f"wsadmin_{uniq}")
@@ -166,9 +166,9 @@ class TestWorkspaceAdminPermissions:
             "PATCH", f"/api/workspaces/{ws['id']}",
             json={"name": "Хакнуто"}, cookies=cookies,
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200, resp.text
 
-    def test_ws_admin_cannot_update_ui_config(self, sync_request, admin_cookies):
+    def test_ws_admin_can_update_ui_config(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]
         ws = _make_workspace(sync_request, admin_cookies, f"WS админ UI {uniq}")
         uid, cookies = _make_user(sync_request, admin_cookies, f"wsadmin2_{uniq}")
@@ -180,7 +180,7 @@ class TestWorkspaceAdminPermissions:
             "PATCH", f"/api/workspaces/{ws['id']}",
             json={"ui_config": {"titles": {"/tasks": "Хакнуто"}}}, cookies=cookies,
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200, resp.text
 
     def test_ws_admin_can_manage_members(self, sync_request, admin_cookies):
         uniq = uuid.uuid4().hex[:8]

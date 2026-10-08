@@ -8,7 +8,9 @@ from app.core.config import settings
 
 
 def get_cipher():
-    key = settings.CRYPTO_SECRET.encode() if settings.CRYPTO_SECRET else b'0'*32
+    if not settings.CRYPTO_SECRET:
+        raise RuntimeError('CRYPTO_SECRET не задан; шифрование остановлено')
+    key = settings.CRYPTO_SECRET.encode()
     if len(key) != 32:
         key = hashlib.sha256(key).digest()
     return Fernet(base64.urlsafe_b64encode(key))
@@ -47,13 +49,18 @@ def decrypt_accesses_value(raw) -> list:
     if isinstance(raw, list):
         return raw
     if isinstance(raw, str):
-        try:
-            return json.loads(get_cipher().decrypt(raw.encode()).decode())
-        except Exception:
-            pass
-        try:
+        # Legacy plaintext is recognizable, rather than a fallback after any crypto error.
+        if raw.lstrip().startswith('['):
             parsed = json.loads(raw)
-        except ValueError:
-            return []
-        return parsed if isinstance(parsed, list) else []
+            return parsed if isinstance(parsed, list) else []
+        try:
+            parsed = json.loads(get_cipher().decrypt(raw.encode()).decode())
+            if not isinstance(parsed, list):
+                raise ValueError('Expected access list')
+            return parsed
+        except Exception:
+            import logging
+            from fastapi import HTTPException
+            logging.getLogger(__name__).error('Cannot decrypt stored client accesses; check key and backup integrity')
+            raise HTTPException(503, 'Не удалось расшифровать доступы. Проверьте серверный ключ; данные не изменены.')
     return []

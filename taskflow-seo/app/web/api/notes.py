@@ -15,7 +15,7 @@ router = APIRouter(prefix='/api/notes', tags=['notes'])
 
 NOTE_FORMATS = {'markdown', 'text', 'code', 'html'}
 MAX_TITLE = 200
-MAX_CONTENT = 500_000
+MAX_CONTENT = 100_000
 
 
 def _parse_tags(raw) -> list[str]:

@@ -1,3 +1,4 @@
+import { linkedNotes } from '../lib/noteLinks';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Eye, FolderPlus, Globe, HardDrive, Lock, Pencil, Plus, RotateCcw, Search, Server, StickyNote, Tag, Trash2, X } from 'lucide-react';
@@ -21,7 +22,7 @@ import {
   type LocalNote,
 } from '../lib/localNotes';
 
-const APPLE_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', Inter, 'Segoe UI', sans-serif";
+const APPLE_FONT = 'inherit';
 const ACCENT = 'var(--color-accent)';
 const ON_ACCENT = 'var(--color-on-accent)';
 
@@ -92,6 +93,15 @@ function toViewLocal(n: LocalNote, folderName: (id: string) => string): ViewNote
 export function Notes() {
   const [tab, setTab] = useState<Tab>('mine');
   const [notes, setNotes] = useState<ViewNote[]>([]);
+  const [inventory, setInventory] = useState<ViewNote[]>([]);
+  const [inventoryVersion, setInventoryVersion] = useState(0);
+  useEffect(() => {
+    let active = true;
+    Promise.all([listLocalNotes({}), api.getNotes('').catch(() => ({ notes: [] as Note[] }))]).then(([local, server]) => {
+      if (active) setInventory([...local.notes.map(note => toViewLocal(note, () => '')), ...server.notes.filter(note => !note.deleted_at).map(toViewServer)]);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [inventoryVersion]);
   const [tags, setTags] = useState<string[]>([]);
   const [serverFolders, setServerFolders] = useState<NoteFolder[]>([]);
   const [localFolders, setLocalFolders] = useState<LocalFolder[]>([]);
@@ -113,6 +123,7 @@ export function Notes() {
   const trash = tab === 'trash';
 
   const load = async () => {
+    setInventoryVersion(value => value + 1);
     setLoading(true);
     setError('');
     try {
@@ -540,7 +551,7 @@ export function Notes() {
                     {note.username && <span>· {note.username}</span>}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition group-hover:opacity-100" onClick={event => event.stopPropagation()}>
+                <div className="flex shrink-0 items-center gap-1.5 opacity-100 transition" onClick={event => event.stopPropagation()}>
                   {!trash && (
                     <CircleButton onClick={() => openEdit(note)} title={note.is_owner ? 'Редактировать' : 'Просмотр'}>
                       {note.is_owner ? <Pencil size={15} /> : <Eye size={15} />}
@@ -600,6 +611,9 @@ export function Notes() {
 
       {editorOpen && (
         <NoteModal
+          key={editing?.uid || "new"}
+          inventory={inventory}
+          onNavigate={openEdit}
           note={editing}
           serverFolders={serverFolders}
           localFolders={localFolders}
@@ -666,7 +680,9 @@ function CircleButton({ onClick, title, danger, children }: {
   );
 }
 
-function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave }: {
+function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, saving, onClose, onSave }: {
+  inventory: ViewNote[];
+  onNavigate: (note: ViewNote) => void;
   note: ViewNote | null;
   serverFolders: NoteFolder[];
   localFolders: LocalFolder[];
@@ -674,6 +690,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
   onClose: () => void;
   onSave: (data: Record<string, any>) => Promise<void>;
 }) {
+  const readOnly = Boolean(note && !note.is_owner);
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
   const [format, setFormat] = useState(note?.format || 'markdown');
@@ -721,6 +738,8 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    if (readOnly) return;
+    if (content.length > 100000) { setError('Максимальный размер заметки — 100 000 символов.'); return; }
     if (!title.trim()) {
       setError('Заголовок не может быть пустым.');
       return;
@@ -737,6 +756,11 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
     } catch {
       setError('Не удалось сохранить заметку.');
     }
+  };
+
+  const links = linkedNotes({ uid: note?.uid || '', title, content }, inventory);
+  const navigateNote = (target: ViewNote) => {
+    if (!isDirty || confirm('Есть несохранённые изменения. Перейти без сохранения?')) onNavigate(target);
   };
 
   return (
@@ -766,6 +790,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
         </div>
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-7 pb-2 sm:px-9">
+          <fieldset disabled={readOnly} className="min-w-0 space-y-6">
           <input
             value={title}
             onChange={event => setTitle(event.target.value)}
@@ -833,15 +858,23 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
               <input
                 value={tags}
                 onChange={event => setTags(event.target.value)}
-                placeholder="идеи, seo, черновик"
+                placeholder="идеи, учёба, проект"
                 className="tf-input h-12 rounded-2xl text-[15px]"
               />
             </label>
           </div>
 
           <div className="overflow-hidden rounded-[20px] border border-[var(--color-border)] bg-[var(--color-input-bg)] p-1">
-            <RichTextEditor value={content} onChange={setContent} minHeightClassName="min-h-64" placeholder="Начните писать..." />
+            {format === 'html' ? <RichTextEditor readOnly={readOnly} value={content} onChange={setContent} minHeightClassName="min-h-64" placeholder="Начните писать..." /> : <textarea value={content} onChange={event => setContent(event.target.value)} readOnly={readOnly} maxLength={100000} className="tf-input min-h-64 resize-y font-mono text-sm" placeholder="Начните писать. Ссылка на заметку: [[Название]]" />}
           </div>
+          </fieldset>
+          <section className="rounded-xl border border-[var(--color-border)] p-4 text-sm">
+            <h3 className="font-semibold">Связи между заметками</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)]">Добавьте [[Название заметки]] в текст. Здесь показаны связи с доступными вам заметками.</p>
+            <div className="mt-3 flex flex-wrap gap-2">{links.outgoing.map(link => link.matches.length ? link.matches.map(target => <button key={target.uid} type="button" className="tf-button" onClick={() => navigateNote(target)}>{link.title}{link.matches.length > 1 ? ` · ${target.origin === 'local' ? 'на ПК' : 'сервер'} · ${target.id}` : ''}</button>) : <span key={link.title} className="tf-chip">{link.title} · не найдена</span>)}</div>
+            <h4 className="mt-4 text-xs font-semibold">Ссылаются на эту заметку</h4>
+            <div className="mt-2 flex flex-wrap gap-2">{links.incoming.map(target => <button key={target.uid} type="button" className="tf-button" onClick={() => navigateNote(target)}>{target.title}</button>)}{!links.incoming.length && <span className="text-xs text-[var(--color-muted)]">Пока нет обратных ссылок</span>}</div>
+          </section>
 
           {error && <div className="text-[14.5px] font-medium text-[var(--color-danger)]">{error}</div>}
         </div>
@@ -856,7 +889,7 @@ function NoteModal({ note, serverFolders, localFolders, saving, onClose, onSave 
           </button>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || readOnly}
             className="rounded-full px-8 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98] disabled:opacity-60"
             style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
           >

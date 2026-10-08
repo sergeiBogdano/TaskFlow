@@ -1,3 +1,4 @@
+import { WorkspaceAccessPanel } from '../components/WorkspaceAccessPanel';
 import { SECTION_LABELS, resolveSectionLabel, resolveFieldLabels } from '../lib/uiLabels';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
@@ -15,6 +16,7 @@ import { WsRolesPanel } from '../components/WsRolesPanel';
 export function WorkspaceSettings() {
   const { user, hasRole } = useAuth();
   const isSuperadmin = hasRole('superadmin');
+  const [tab, setTab] = useState('basic');
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [wsRoles, setWsRoles] = useState<WorkspaceRole[]>([]);
@@ -107,8 +109,10 @@ export function WorkspaceSettings() {
   }
 
   const isOwner = detail.role === 'owner';
-  const canManage = isOwner || detail.role === 'admin' || isSuperadmin;
-  const canEditSettings = isOwner || isSuperadmin;
+  const administrativeLevel = isOwner || detail.role === 'admin';
+  const canManage = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_members && user?.features?.workspace_members !== false);
+  const canManageProfiles = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_profiles && user?.features?.workspace_profiles !== false);
+  const canEditSettings = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_settings && user?.features?.workspace_settings !== false);
 
   const saveInfo = async (event: FormEvent) => {
     event.preventDefault();
@@ -269,6 +273,11 @@ export function WorkspaceSettings() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
+      {tab === 'access' && <section className="tf-panel-flat space-y-2 p-5 text-sm">
+        <h3 className="font-bold">Как настроить доступ</h3>
+        <ol className="list-decimal space-y-1 pl-5"><li>В «Пользователях» создайте аккаунт и назначьте профиль приложения: он отвечает за общие настройки и учётные записи.</li><li>Пригласите человека в это окружение и выберите уровень управления. Изменять можно только участников ниже своего уровня.</li><li>Создайте профиль доступа ниже: отметьте действия и режимы доступа к полям. Назначьте профиль участнику в списке команды.</li><li>В «Кому что доступно» проверьте результат и при необходимости задайте личные исключения.</li></ol>
+        <p className="text-[var(--color-muted)]">Скрытие в конструкторе интерфейса меняет оформление для всех. Защита данных и запрет редактирования настраиваются в профилях и личных исключениях.</p>
+      </section>}
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h2 className="tf-page-title">{sectionLabel('/workspace')}</h2>
@@ -277,15 +286,13 @@ export function WorkspaceSettings() {
         <span className="tf-chip ml-auto">роль в окружении: {detail.role === 'owner' ? 'владелец' : detail.role === 'admin' ? 'администратор' : 'участник'}</span>
       </div>
 
-      <section className="tf-panel-flat border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-4">
-        <h3 className="mb-2 text-sm font-bold">Как устроен доступ</h3>
-        <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
-          Роль приложения отвечает за глобальные возможности аккаунта. Роль в этом окружении отвечает только за команду и данные выбранного окружения. Роль пространства задаёт точный набор рабочих прав и не меняет административный ранг. Суперадмин (root) имеет полный доступ платформы и не может быть изменён или удалён другими пользователями.
-        </p>
-      </section>
+      <nav className="flex flex-wrap gap-2" aria-label="Настройки пространства">{[
+        ['basic', 'Основное'], ['team', 'Команда'], ['access', 'Доступ'], ['appearance', 'Оформление'], ['service', 'Обслуживание'],
+      ].map(([key, label]) => <button key={key} type="button" aria-pressed={tab === key} className={tab === key ? 'tf-button tf-button-primary' : 'tf-button'} onClick={() => setTab(key)}>{label}</button>)}</nav>
 
       {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
 
+      {tab === 'basic' && <>
       <SpaceModulesPanel id={detail.id} onSaved={() => window.location.reload()} />
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Settings2 size={16} />Основное</h3>
@@ -304,7 +311,7 @@ export function WorkspaceSettings() {
                 <option value="graphite">Графит</option>
               </select>
             </label>
-            <a href="#interface-settings" className="self-end text-sm text-[var(--color-accent)] underline">Названия разделов и полей — в конструкторе интерфейса</a>
+            <button type="button" onClick={() => setTab('appearance')} className="self-end text-left text-sm text-[var(--color-accent)] underline">Названия разделов и полей — в конструкторе интерфейса</button>
           </div>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Инструкции для AI</span>
@@ -318,6 +325,8 @@ export function WorkspaceSettings() {
         </form>
       </section>
 
+      </>}
+      {tab === 'team' && <>
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} />Участники окружения · {members.length}</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
@@ -393,8 +402,8 @@ export function WorkspaceSettings() {
                 )}
                 {(wsRoles.length > 0 || member.custom_role) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-secondary)]">Профиль доступа (заменяет базовые права):</span>
-                    {canTouch && wsRoles.length > 0 ? (
+                    <span className="text-xs text-[var(--color-text-secondary)]">Профиль доступа (заменяет Стандартный профиль уровня):</span>
+                    {canManageProfiles && user?.id !== member.user_id && (isSuperadmin || (isOwner && !protectedOwner) || (detail.role === 'admin' && member.role === 'member')) && wsRoles.length > 0 ? (
                       <select
                         className="tf-input h-8 w-auto py-0 text-xs"
                         value={member.custom_role_id == null ? '' : String(member.custom_role_id)}
@@ -402,13 +411,13 @@ export function WorkspaceSettings() {
                           changeCustomRole(member.user_id, event.target.value ? Number(event.target.value) : null)
                         }
                       >
-                        <option value="">базовые права</option>
+                        <option value="">Стандартный профиль уровня</option>
                         {wsRoles.map(role => (
                           <option key={role.id} value={role.id}>{role.name}</option>
                         ))}
                       </select>
                     ) : (
-                      <span className="tf-chip">{member.custom_role || 'базовые права'}</span>
+                      <span className="tf-chip">{member.custom_role || 'Стандартный профиль уровня'}</span>
                     )}
                   </div>
                 )}
@@ -418,16 +427,20 @@ export function WorkspaceSettings() {
         </div>
       </section>
 
-      {canManage && (
-        <WsRolesPanel workspaceId={detail.id} canManage={canManage} />
-      )}
+      </>}
+      {tab === 'access' && canManageProfiles && <>
+        <WsRolesPanel workspaceId={detail.id} canManage={canManageProfiles} />
+        <WorkspaceAccessPanel workspaceId={detail.id} level={detail.role} />
+      </>}
 
-      <section className="tf-panel-flat p-5">
+      {tab === 'access' && !canManageProfiles && <p className="tf-panel-flat p-5">Для настройки доступа нужно право «Профили доступа» и уровень владельца или администратора пространства.</p>}
+      {tab === 'appearance' && <section className="tf-panel-flat p-5">
         <h3 id="interface-settings" className="mb-1 flex scroll-mt-24 items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Единые названия разделов для меню и страниц. Подписи полей используются в формах, фильтрах и таблице задач. {(isOwner || isSuperadmin) ? 'Изменения действуют после нажатия «Применить».' : 'Менять оформление может только владелец окружения.'}</p>
-        <UiEditor detail={detail} canManage={isOwner || isSuperadmin} onSaved={load} />
-      </section>
+        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Единые названия разделов для меню и страниц. Подписи полей используются в формах, фильтрах и таблице задач. {(isOwner || isSuperadmin) ? 'Изменения действуют после нажатия «Применить».' : 'Для изменения нужно разрешение «Настройки и оформление окружения».'}</p>
+        <UiEditor detail={detail} canManage={canEditSettings} onSaved={load} />
+      </section>}
 
+      {tab === 'service' && <>
       {isSuperadmin && (
         <FeaturesPanel
           scope="workspace"
@@ -486,11 +499,12 @@ export function WorkspaceSettings() {
           </div>
         </section>
       )}
+      </>}
     </div>
   );
 }
 
-const KNOWN_ROUTES = Object.entries(SECTION_LABELS).map(([to, label]) => ({ to, label }));
+const KNOWN_ROUTES = Object.entries(SECTION_LABELS).filter(([route]) => !['/work', '/manage', '/admin'].includes(route)).map(([to, label]) => ({ to, label }));
 
 function UiEditor({ detail, canManage, onSaved }: {
   detail: WorkspaceDetail;

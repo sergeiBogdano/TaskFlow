@@ -209,7 +209,7 @@ class TestRoleCeiling:
         executor_role = next(r for r in roles if r['name'] == 'executor')
         resp = sync_request('PUT', f'/api/users/{target_id}/role',
                             json={'role_id': executor_role['id']}, cookies=cookies)
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 200, resp.text
 
         self._delete_role(sync_request, admin_cookies, tall_role_id)
 

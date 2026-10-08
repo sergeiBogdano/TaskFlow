@@ -21,9 +21,12 @@ from app.core.permissions import (
     get_effective_features,
     get_user_permissions,
     require_workspace_role,
+    require_workspace_management,
     is_root_user,
     workspace_role_rank,
 )
+
+from app.core.access_policy import parse_policy, validate_fields, assert_field_ceiling
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspace-roles"])
 
@@ -45,6 +48,7 @@ def _role_to_dict(role: WorkspaceRole) -> dict:
         "workspace_id": role.workspace_id,
         "name": role.name,
         "permissions": _role_permissions(role),
+        "field_access": parse_policy(role.field_access),
         "created_at": role.created_at.isoformat() if role.created_at else None,
     }
 
@@ -103,7 +107,7 @@ async def _assert_role_editable(session, ctx, role_id: int) -> None:
 
 
 @router.get("/{workspace_id}/roles")
-async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_role("owner", "admin"))):
+async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_management("workspace_profiles"))):
     """Роли окружения + эффективные фичи (чекбоксы, отключённые краном, скрыты)."""
     async with async_session() as session:
         rows = (await session.execute(
@@ -120,8 +124,11 @@ async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_role("o
 
 @router.post("/{workspace_id}/roles", status_code=201)
 async def create_ws_role(workspace_id: int, request: Request,
-                         ctx=Depends(require_workspace_role("owner", "admin"))):
-    name, permissions = _validate_payload(await read_object(request))
+                         ctx=Depends(require_workspace_management("workspace_profiles"))):
+    data = await read_object(request)
+    name, permissions = _validate_payload(data)
+    fields = validate_fields(data.get("field_access", {}))
+    await assert_field_ceiling(ctx["user"], workspace_id, fields)
     await _assert_grantable(ctx["user"], ctx["workspace"].id, permissions)
     async with async_session() as session:
         existing = (await session.execute(
@@ -135,6 +142,7 @@ async def create_ws_role(workspace_id: int, request: Request,
         role = WorkspaceRole(
             workspace_id=ctx["workspace"].id,
             name=name,
+            field_access=json.dumps(fields),
             permissions=json.dumps(permissions, ensure_ascii=False),
         )
         session.add(role)
@@ -145,14 +153,18 @@ async def create_ws_role(workspace_id: int, request: Request,
 
 @router.put("/{workspace_id}/roles/{role_id}")
 async def update_ws_role(workspace_id: int, role_id: int, request: Request,
-                         ctx=Depends(require_workspace_role("owner", "admin"))):
+                         ctx=Depends(require_workspace_management("workspace_profiles"))):
     data = await read_object(request)
     async with async_session() as session:
         role = await session.get(WorkspaceRole, role_id)
         if role is None or role.workspace_id != ctx["workspace"].id:
             raise HTTPException(status_code=404, detail="Роль не найдена")
         await _assert_role_editable(session, ctx, role_id)
-        if "name" in data or "permissions" in data:
+        if "field_access" in data:
+            fields = validate_fields(data["field_access"])
+            await assert_field_ceiling(ctx["user"], workspace_id, fields)
+            role.field_access = json.dumps(fields)
+        if "name" in data or "permissions" in data or "field_access" in data:
             name, _ = _validate_payload({'name': data.get('name', role.name)})
             if "permissions" in data:
                 _, permissions = _validate_payload({"name": name, "permissions": data.get("permissions")})
@@ -184,7 +196,7 @@ async def update_ws_role(workspace_id: int, role_id: int, request: Request,
 
 @router.delete("/{workspace_id}/roles/{role_id}")
 async def delete_ws_role(workspace_id: int, role_id: int,
-                         ctx=Depends(require_workspace_role("owner", "admin"))):
+                         ctx=Depends(require_workspace_management("workspace_profiles"))):
     async with async_session() as session:
         role = await session.get(WorkspaceRole, role_id)
         if role is None or role.workspace_id != ctx["workspace"].id:
@@ -201,7 +213,7 @@ async def delete_ws_role(workspace_id: int, role_id: int,
 
 @router.put("/{workspace_id}/members/{user_id}/custom-role")
 async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
-                         ctx=Depends(require_workspace_role("owner", "admin"))):
+                         ctx=Depends(require_workspace_management("workspace_profiles"))):
     """Назначение/снятие кастомной роли участнику (role_id=null → снять)."""
     data = await read_object(request)
     role_id = data.get("role_id")
@@ -233,6 +245,7 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
             # выдавать можно только то, что вправе выдавать сам:
             # иначе админ раздаёт чужие привилегированные профили
             await _assert_grantable(ctx["user"], ctx["workspace"].id, _role_permissions(role))
+            await assert_field_ceiling(ctx["user"], workspace_id, parse_policy(role.field_access))
             member.custom_role_id = role.id
             role_name = role.name
         else:
@@ -241,6 +254,7 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
             from app.core.permissions import get_workspace_permissions
             ceiling = {'all': True} if is_root_user(ctx['user']) else await get_workspace_permissions(ctx['user'].id, workspace_id) or {}
             assert_within_ceiling(ceiling, workspace_default_permissions(member.role))
+            await assert_field_ceiling(ctx["user"], workspace_id, {})
             member.custom_role_id = None
         await session.commit()
         username = (await session.get(User, user_id)).username

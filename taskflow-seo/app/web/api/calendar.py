@@ -176,6 +176,8 @@ async def update_calendar_event(task_id: int, data: dict, user=Depends(get_curre
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
         await resolve_workspace(session, user, role_names, t.workspace_id)
+        from app.core.access_policy import assert_field_writes
+        assert_field_writes("tasks", data, t)
         if data.get('deadline'):
             dl = datetime.fromisoformat(data['deadline'])
             t.deadline = to_utc(dl)

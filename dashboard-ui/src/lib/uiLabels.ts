@@ -1,5 +1,5 @@
 export const SECTION_LABELS: Record<string, string> = {
-  '/wiki': 'Вики', '/': 'Дашборд', '/tasks': 'Задачи', '/sprints': 'Спринты',
+  '/work': 'Рабочий стол', '/manage': 'Управление пространством', '/admin': 'Администрирование', '/wiki': 'Вики', '/': 'Дашборд', '/tasks': 'Задачи', '/sprints': 'Спринты',
   '/kanban': 'Канбан', '/calendar': 'Календарь', '/notifications': 'Уведомления',
   '/trash': 'Корзина', '/crm': 'CRM', '/clients': 'Клиенты', '/modules': 'Модули',
   '/reports': 'Отчёты', '/ai': 'AI-аналитика', '/notes': 'Заметки',

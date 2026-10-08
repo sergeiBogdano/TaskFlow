@@ -26,6 +26,8 @@ from app.core.config import settings
 from app.services.activity_service import list_activity, log_activity
 from app.services.task_service import TaskService, dump_checklist, load_checklist
 
+from app.core.access_policy import redact_fields, assert_field_writes, field_is_visible
+
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 TASK_FIELD_LABELS = {
@@ -225,7 +227,7 @@ def _task_to_dict(t: Task) -> dict:
     co_executor_ids = [link.user_id for link in getattr(t, 'co_executor_links', []) or [] if link.user_id]
     if t.co_executor_id and t.co_executor_id not in co_executor_ids:
         co_executor_ids.insert(0, t.co_executor_id)
-    return {
+    return redact_fields("tasks", {
         'id': t.id,
         'title': t.title,
         'status': t.status,
@@ -257,7 +259,7 @@ def _task_to_dict(t: Task) -> dict:
         'client_access_ids': json.loads(t.client_access_ids) if isinstance(t.client_access_ids, str) and t.client_access_ids else [],
         'deleted_at': safe_dt(t.deleted_at).isoformat() if t.deleted_at else None,
         'sprint_ids': [],
-    }
+    })
 
 
 async def _attach_sprint_ids(session, items: list[dict]) -> None:
@@ -272,7 +274,8 @@ async def _attach_sprint_ids(session, items: list[dict]) -> None:
         by_task.setdefault(task_id, []).append(sprint_id)
     for item in items:
         if isinstance(item.get('id'), int):
-            item['sprint_ids'] = by_task.get(item['id'], [])
+            if field_is_visible('tasks', 'sprint'):
+                item['sprint_ids'] = by_task.get(item['id'], [])
 
 
 def _client_accesses_for_task(task: Task) -> list[dict]:
@@ -365,12 +368,14 @@ async def list_tasks(
             conditions.append(Task.deadline <= datetime.fromisoformat(date_to))
         if search:
             needle = f'%{search.strip()}%'
-            conditions.append(or_(
-                Task.title.ilike(needle),
-                Task.notes.ilike(needle),
-                Task.comment.ilike(needle),
-                Task.client.has(Client.org_name.ilike(needle)),
-            ))
+            search_fields = [Task.title.ilike(needle)]
+            if field_is_visible('tasks', 'notes'):
+                search_fields.append(Task.notes.ilike(needle))
+            if field_is_visible('tasks', 'comment'):
+                search_fields.append(Task.comment.ilike(needle))
+            if field_is_visible('tasks', 'client'):
+                search_fields.append(Task.client.has(Client.org_name.ilike(needle)))
+            conditions.append(or_(*search_fields))
 
         total = (await session.execute(
             select(func.count(Task.id)).where(*conditions)
@@ -438,6 +443,7 @@ async def empty_trash(workspace_id: int = Query(None), user=Depends(get_current_
 async def bulk_update_tasks(request: Request, data: dict, user=Depends(get_current_user)):
     ids = [int(item) for item in (data.get('ids') or []) if item]
     fields = data.get('fields') or {}
+    assert_field_writes('tasks', fields)
     if not ids:
         raise HTTPException(status_code=400, detail='No tasks selected')
 
@@ -449,6 +455,9 @@ async def bulk_update_tasks(request: Request, data: dict, user=Depends(get_curre
     unknown = set(fields) - allowed_fields
     if unknown:
         raise HTTPException(status_code=400, detail=f'Unsupported fields: {", ".join(sorted(unknown))}')
+    if fields.get('deleted'):
+        from app.core.permissions import require_permission
+        await require_permission('tasks_delete')(request, user)
     if fields.get('status') and fields['status'] not in allowed_statuses:
         raise HTTPException(status_code=400, detail='Invalid status')
 
@@ -545,6 +554,8 @@ async def get_task_accesses(task_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         permissions = await request_permissions(user)
+        if not field_is_visible('tasks', 'client') or not (user.is_root or permissions.get('all') or permissions.get('client_tab_access')):
+            raise HTTPException(status_code=403, detail='Нет доступа к учётным данным клиента')
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
         if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, permissions):
             raise HTTPException(status_code=403, detail='Forbidden')
@@ -578,6 +589,9 @@ async def task_activity(task_id: int, user=Depends(get_current_user)):
 
 @router.post('')
 async def create_task(data: dict, workspace_id: int = Query(None), user=Depends(get_current_user)):
+    if any(data.get(key) is not None for key in ('recurring_interval', 'recurring_count', 'recurring_remaining')):
+        raise HTTPException(400, 'Повторяющиеся задачи настраиваются через модуль автоматизации')
+    assert_field_writes("tasks", data)
     if not isinstance(data.get('title'), str) or not data['title'].strip() or len(data['title']) > 200:
         raise HTTPException(status_code=400, detail='Укажите название задачи (до 200 символов)')
     async with async_session() as session:
@@ -634,6 +648,7 @@ async def update_task(task_id: int, data: dict, user=Depends(get_current_user)):
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, t, user, role_names)
+        assert_field_writes("tasks", data, t)
         if 'workspace_id' in data:
             raise HTTPException(status_code=400, detail='Task workspace cannot be changed')
         old_assignee_ids = _assignment_user_ids(
@@ -764,6 +779,7 @@ async def delete_task(task_id: int, user=Depends(get_current_user)):
 
 @router.post('/{task_id}/move')
 async def move_task(task_id: int, data: dict, user=Depends(get_current_user)):
+    assert_field_writes('tasks', data)
     new_status = data.get('status')
     if new_status not in ('todo', 'in_progress', 'waiting', 'client_check', 'done', 'overdue'):
         raise HTTPException(status_code=400, detail='Invalid status')
@@ -847,17 +863,14 @@ async def upload_file(task_id: int, file: UploadFile, user=Depends(get_current_u
         if not task_is_editable_by_user(t, user, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, t, user, role_names)
-        data = await file.read()
-        if len(data) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail=f'Файл больше лимита {settings.MAX_UPLOAD_SIZE_MB} МБ',
-            )
+        from app.core.uploads import read_upload, assert_upload_quota
+        data, original_name, mime = await read_upload(file)
+        await assert_upload_quota(session, t.workspace_id, len(data))
         att = FileAttachment(
             task_id=task_id,
-            filename=file.filename or 'file',
-            original_name=file.filename or 'file',
-            content_type=file.content_type or 'application/octet-stream',
+            filename=original_name,
+            original_name=original_name,
+            content_type=mime,
             size=len(data),
             data=data,
         )
@@ -908,7 +921,7 @@ async def download_file(task_id: int, file_id: int, user=Depends(get_current_use
             raise HTTPException(status_code=404, detail='File not found')
         filename = (att.original_name or att.filename or 'file').replace('"', '')
         encoded_filename = quote(filename)
-        disposition = 'inline' if (att.content_type or '').startswith(('image/', 'application/pdf')) else 'attachment'
+        disposition = 'inline' if att.content_type in ('image/png', 'image/jpeg', 'image/webp', 'image/gif') else 'attachment'
         return Response(
             content=att.data,
             media_type=att.content_type or 'application/octet-stream',

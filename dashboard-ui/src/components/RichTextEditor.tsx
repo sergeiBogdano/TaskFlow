@@ -1,33 +1,46 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Code2, Eraser, Eye, Heading1, Heading2, Italic, List, ListOrdered, Loader2, Mic, Pilcrow, Quote, Redo2, Strikethrough, Undo2, Wand2 } from 'lucide-react';
+import { Bold, Underline, Link2, Unlink, Code2, Eraser, Eye, Heading1, Heading2, Italic, List, ListOrdered, Loader2, Mic, Pilcrow, Quote, Redo2, Strikethrough, Undo2, Wand2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 
 type Props = {
+  readOnly?: boolean;
   value: string;
   onChange: (value: string) => void;
   minHeightClassName?: string;
   placeholder?: string;
 };
 
-export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28', placeholder }: Props) {
+export function RichTextEditor({ readOnly = false, value, onChange, minHeightClassName = 'min-h-28', placeholder }: Props) {
   const { user } = useAuth();
   const aiEnabled = user?.features?.ai !== false && Boolean(user?.is_root || user?.permissions?.ai);
   const [listening, setListening] = useState(false);
   const [polishing, setPolishing] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceValue, setSourceValue] = useState(value || '');
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [count, setCount] = useState(0);
   const [error, setError] = useState('');
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ link: { openOnClick: false, protocols: ['http', 'https', 'mailto'] } }),
       Placeholder.configure({ placeholder: placeholder || '' }),
     ],
     content: value || '',
-    onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    editable: !readOnly,
+    shouldRerenderOnTransaction: true,
+    onUpdate: ({ editor }) => { setCount(editor.getText().length); onChange(editor.getHTML()); },
+    editorProps: { handlePaste: (_view, event) => {
+      if ((event.clipboardData?.getData('text/plain').length || 0) + _view.state.doc.textContent.length > 20_000) { setError('Максимум 20 000 символов.'); return true; }
+      return false;
+    }, handleTextInput: (view, _from, _to, text) => {
+      if (view.state.doc.textContent.length + text.length > 20_000) { setError('Максимум 20 000 символов.'); return true; }
+      return false;
+    } },
   });
 
   useEffect(() => {
@@ -36,9 +49,12 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
       editor.commands.setContent(value || '', { emitUpdate: false });
     }
     setSourceValue(value || '');
+    setCount(editor.getText().length);
   }, [editor, value]);
 
+  useEffect(() => { editor?.setEditable(!readOnly); }, [editor, readOnly]);
   if (!editor || !editor.schema) return null;
+  if (readOnly) return <div className="rounded-lg bg-[var(--color-surface-2)] p-3"><p className="mb-2 text-xs text-[var(--color-muted)]">Только просмотр</p><EditorContent editor={editor} /></div>;
 
   const toggleSource = () => {
     if (!sourceMode) setSourceValue(editor.getHTML());
@@ -46,6 +62,7 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
   };
 
   const applySource = () => {
+    if (sourceValue.length > 100_000) { setError('HTML: максимум 100 000 символов.'); return; }
     editor.commands.setContent(sourceValue || '', { emitUpdate: true });
     onChange(editor.getHTML());
     setSourceMode(false);
@@ -70,7 +87,10 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
     recognition.onend = () => setListening(false);
     recognition.onresult = (event: any) => {
       const spoken = event.results?.[0]?.[0]?.transcript || '';
-      if (spoken.trim()) editor.chain().focus().insertContent(`<p>${spoken.trim()}</p>`).run();
+      if (spoken.trim()) {
+        if (editor.getText().length + spoken.trim().length > 20000) { setError('Максимум 20 000 символов.'); return; }
+        editor.chain().focus().insertContent({ type: 'paragraph', content: [{ type: 'text', text: spoken.trim() }] }).run();
+      }
     };
     recognition.start();
   };
@@ -98,6 +118,9 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
       <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-2">
         <ToolbarButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Жирный"><Bold size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Курсив"><Italic size={15} /></ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Подчеркнутый"><Underline size={15} /></ToolbarButton>
+        <ToolbarButton onClick={() => { setLinkUrl(editor.getAttributes('link').href || ''); setLinkOpen(!linkOpen); }} active={editor.isActive('link')} title="Ссылка"><Link2 size={15} /></ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().unsetLink().run()} disabled={!editor.isActive('link')} title="Убрать ссылку"><Unlink size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Зачеркнутый"><Strikethrough size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Очистить форматирование"><Eraser size={15} /></ToolbarButton>
         <Separator />
@@ -109,16 +132,18 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
         <ToolbarButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Цитата"><Quote size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} title="Блок кода"><Code2 size={15} /></ToolbarButton>
         <Separator />
-        <ToolbarButton onClick={() => editor.chain().focus().undo().run()} title="Отменить"><Undo2 size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().redo().run()} title="Повторить"><Redo2 size={15} /></ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Отменить"><Undo2 size={15} /></ToolbarButton>
+        <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Повторить"><Redo2 size={15} /></ToolbarButton>
         <Separator />
         <ToolbarButton onClick={toggleSource} active={sourceMode} title={sourceMode ? 'Визуальный режим' : 'HTML-код'}>{sourceMode ? <Eye size={15} /> : <Code2 size={15} />}</ToolbarButton>
         <ToolbarButton onClick={startListening} active={listening} title={listening ? 'Слушаю...' : 'Надиктовать текст'}><Mic size={15} /></ToolbarButton>
         {aiEnabled && <ToolbarButton onClick={polish} active={polishing} title="Улучшить текст ИИ">{polishing ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}</ToolbarButton>}
       </div>
+      {linkOpen && <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-2"><input aria-label="Адрес ссылки" type="url" className="tf-input flex-1" value={linkUrl} placeholder="https://example.com" maxLength={2048} onChange={e => setLinkUrl(e.target.value)} /><button type="button" className="tf-button" onClick={() => { if (!/^(https?:\/\/|mailto:)/i.test(linkUrl)) { setError('Разрешены ссылки http, https и mailto.'); return; } editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run(); setLinkOpen(false); setError(''); }}>Применить ссылку</button></div>}
       {sourceMode ? (
         <div>
           <textarea
+            maxLength={100000}
             rows={14}
             className={`w-full resize-y bg-[var(--color-overlay)] px-4 py-3 font-mono text-[13px] leading-[1.75] tracking-[.01em] text-[var(--color-text)] outline-none [tab-size:2] ${minHeightClassName}`}
             value={sourceValue}
@@ -141,6 +166,7 @@ export function RichTextEditor({ value, onChange, minHeightClassName = 'min-h-28
           className={`w-full px-3 py-2 text-sm leading-6 [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--color-accent)] [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_code]:rounded [&_.ProseMirror_code]:bg-black/20 [&_.ProseMirror_code]:px-1 [&_.ProseMirror_h1]:text-xl [&_.ProseMirror_h1]:font-black [&_.ProseMirror_h2]:text-lg [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_li]:ml-5 [&_.ProseMirror_pre]:overflow-auto [&_.ProseMirror_pre]:rounded-lg [&_.ProseMirror_pre]:bg-black/25 [&_.ProseMirror_pre]:p-3 ${minHeightClassName}`}
         />
       )}
+      <div className="border-t border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-muted)]">{count.toLocaleString()} / 20 000 символов · файлы прикрепляются отдельно, изображения сжимаются перед загрузкой</div>
       {error && <div className="border-t border-[var(--color-border)] px-3 py-2 text-xs font-semibold text-[var(--color-danger)]">{error}</div>}
     </div>
   );
@@ -150,11 +176,12 @@ function Separator() {
   return <div className="mx-1 h-8 w-px bg-[var(--color-border)]" />;
 }
 
-function ToolbarButton({ children, onClick, active, title }: { children: ReactNode; onClick: () => void; active?: boolean; title: string }) {
+function ToolbarButton({ children, onClick, active, title, disabled = false }: { children: ReactNode; onClick: () => void; active?: boolean; title: string; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={title}
       aria-label={title}
       className={`grid h-8 w-8 place-items-center rounded-md border transition-colors ${

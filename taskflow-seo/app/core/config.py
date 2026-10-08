@@ -23,10 +23,19 @@ class Settings(BaseSettings):
     BOOTSTRAP_USERNAME: str = 'admin'
     BOOTSTRAP_PASSWORD: str = ''
     MAX_UPLOAD_SIZE_MB: int = 10
+    WORKSPACE_STORAGE_MB: int = 512
+    COOKIE_SECURE: bool = False
+    TRUSTED_ORIGINS: list[str] = []
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
+
+    def validate_runtime_secrets(self):
+        if os.environ.get('TESTING'):
+            return
+        if len(self.WEB_APP_SECRET) < 32 or len(self.CRYPTO_SECRET) < 32 or self.CRYPTO_SECRET == 'taskflow-secret-key-change-in-production':
+            raise RuntimeError('Задайте отдельные случайные WEB_APP_SECRET и CRYPTO_SECRET длиной от 32 символов. Существующий ключ шифрования нельзя заменять без миграции данных.')
 
     @property
     def tz(self) -> ZoneInfo:

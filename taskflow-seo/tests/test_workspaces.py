@@ -201,14 +201,14 @@ class TestSprints:
         resp = sync_request("POST", f"/api/sprints/{sid}/tasks", json={"task_ids": tids}, cookies=admin_cookies)
         assert resp.status_code == 200
 
-        resp = sync_request("PUT", f"/api/tasks/{tids[0]}", json={"status": "done"}, cookies=admin_cookies)
+        resp = sync_request("PUT", f"/api/tasks/{tids[0]}", json={"status": "done", "unfinished_policy": "keep"}, cookies=admin_cookies)
         assert resp.status_code == 200
 
         resp = sync_request("GET", f"/api/sprints/{sid}", cookies=admin_cookies)
         assert resp.status_code == 200
         assert resp.json()["progress"] == {"total": 2, "done": 1, "percent": 50}
 
-        resp = sync_request("PATCH", f"/api/sprints/{sid}", json={"status": "done"}, cookies=admin_cookies)
+        resp = sync_request("PATCH", f"/api/sprints/{sid}", json={"status": "done", "unfinished_policy": "keep"}, cookies=admin_cookies)
         assert resp.status_code == 200
         assert resp.json()["status"] == "done"
 
@@ -349,7 +349,7 @@ class TestUiConfig:
         )
         assert resp.status_code == 403
 
-    def test_admin_cannot_patch_ui_config(self, sync_request, admin_cookies):
+    def test_admin_with_settings_permission_can_patch_ui_config(self, sync_request, admin_cookies):
         import uuid as uuid_mod
         uniq = uuid_mod.uuid4().hex[:8]
         ws = _make_workspace(sync_request, admin_cookies, f"Интерфейс админ ТС {uniq}")
@@ -365,12 +365,12 @@ class TestUiConfig:
             "PATCH", f"/api/workspaces/{ws['id']}", json={"ui_config": {"titles": {"/tasks": "Дела"}}},
             cookies=cookies,
         )
-        assert resp.status_code == 403
-        # настройки окружения менять может только владелец
+        assert resp.status_code == 200
+        # Администратор с явным разрешением может менять настройки
         resp = sync_request(
             "PATCH", f"/api/workspaces/{ws['id']}", json={"name": f"Переименовано {uniq}"}, cookies=cookies
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
     def test_labels_truncated(self, sync_request, admin_cookies):
         ws = _make_workspace(sync_request, admin_cookies, "Интерфейс обрезка ТС")

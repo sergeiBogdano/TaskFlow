@@ -94,7 +94,7 @@ async def work_permission_middleware(request: Request, call_next):
     if len(segments) >= 3 and segments[0] == 'api' and segments[2].isdigit():
         from app.core import models
         object_models = {'tasks': models.Task, 'clients': models.Client, 'notes': models.Note,
-                         'sprints': models.Sprint, 'modules': models.Module, 'reports': models.GeneratedReport}
+                         'calendar': models.Task, 'sprints': models.Sprint, 'modules': models.Module, 'reports': models.GeneratedReport}
         model = object_models.get(segments[1])
         if model is not None:
             from app.core.database import async_session
@@ -125,11 +125,23 @@ async def work_permission_middleware(request: Request, call_next):
     # один набор прав на весь запрос: эндпоинты читают через request_permissions()
     set_request_permissions(user.id, permissions)
     key = required_permission(path, method)
-    if key is None:
-        return await call_next(request)
+    action = None
+    if path.startswith('/api/tasks') and method != 'GET':
+        if path == '/api/tasks' and method == 'POST':
+            action = 'tasks_create'
+        elif method == 'DELETE' or path.endswith('/restore') or path.endswith('/clear-trash'):
+            action = 'tasks_delete'
+        else:
+            action = 'tasks_edit'
+    if path.startswith('/api/calendar') and method != 'GET':
+        action = 'tasks_edit'
+    if path.startswith('/api/sprints') and method != 'GET':
+        action = 'sprints_plan'
+    if action and not permissions.get('all') and not (permissions.get(action) and await is_feature_available(user, action, workspace_id)):
+        return JSONResponse({'detail': 'Нет разрешения на действие: ' + action}, status_code=403)
     if key and not (permissions.get('all') or permissions.get(key)):
         return JSONResponse({'detail': f'Нет права доступа: {key}'}, status_code=403)
-    if workspace_id is not None and not permissions.get('all'):
+    if key and workspace_id is not None and not permissions.get('all'):
         # явное окружение: право считается по членству в нём (Ф8);
         # не участник — доступ отклонит сам эндпоинт («Нет доступа к воркспейсу»)
         ws_perms = await get_workspace_permissions(user.id, workspace_id)
@@ -137,6 +149,37 @@ async def work_permission_middleware(request: Request, call_next):
             return JSONResponse({'detail': f'Нет права доступа: {key}'}, status_code=403)
     # без указания окружения work-право проверяет эндпоинт: app-права (legacy)
     # и его внятные сообщения («нет окружения», «Нет доступа к воркспейсу»)
-    if not await is_feature_available(user, key, workspace_id):
+    if key and not await is_feature_available(user, key, workspace_id):
         return JSONResponse({'detail': f'Функция "{key}" отключена краном доступности'}, status_code=403)
-    return await call_next(request)
+    from app.core.access_policy import field_access, set_field_context, reset_field_context
+    fields = await field_access(user, workspace_id)
+    # Reports/AI and templates can copy restricted task fields to unstructured text.
+    # Require a full field view before giving access to those derived outputs.
+    has_hidden = any(mode == 'hidden' for values in fields.values() for mode in values.values())
+    if has_hidden and any(path.startswith(prefix) for prefix in
+                          ('/api/ai', '/api/reports', '/api/modules', '/api/quick-tasks', '/api/templates', '/api/activity', '/api/search', '/api/dashboard')):
+        return JSONResponse({'detail': 'Раздел формирует данные из скрытых полей. Требуется профиль без скрытых полей.'}, status_code=403)
+    if has_hidden and (path.endswith('/activity') or path.endswith('/export')):
+        return JSONResponse({'detail': 'История и выгрузки требуют просмотра всех полей'}, status_code=403)
+    if path.startswith('/api/calendar') and any(fields['tasks'][key] == 'hidden' for key in ('deadline', 'completionDate', 'assignee', 'client')):
+        return JSONResponse({'detail': 'Календарь требует просмотра сроков, исполнителя и клиента'}, status_code=403)
+    if path.startswith('/api/tasks') and method == 'GET':
+        query_fields = {'client': ('client', 'client_id'), 'assignee': ('assignee', 'scope_user_id'), 'priority': ('priority',), 'taskType': ('task_type',),
+                        'sprint': ('sprint', 'sprint_id'), 'deadline': ('date_from', 'date_to')}
+        for field, params in query_fields.items():
+            if fields['tasks'][field] == 'hidden' and any(request.query_params.get(param) for param in params):
+                return JSONResponse({'detail': 'Нельзя фильтровать по скрытому полю'}, status_code=403)
+    token = set_field_context(fields)
+    try:
+        response = await call_next(request)
+        if response.status_code < 400 and 'application/json' in response.headers.get('content-type', ''):
+            import json
+            from app.core.access_policy import redact_nested_fields
+            body = b''.join([chunk async for chunk in response.body_iterator])
+            from app.core.rich_text import clean_payload
+            value = clean_payload(redact_nested_fields(json.loads(body)))
+            headers = {key: value for key, value in response.headers.items() if key not in ('content-length', 'content-type')}
+            return JSONResponse(value, status_code=response.status_code, headers=headers, background=response.background)
+        return response
+    finally:
+        reset_field_context(token)

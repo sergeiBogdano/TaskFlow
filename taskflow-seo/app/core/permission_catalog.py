@@ -94,14 +94,31 @@ PERMISSION_GROUPS.extend([
     ]},
 ])
 
+PERMISSION_GROUPS.append({'id': 'workspace_management', 'scope': SCOPE_WORK,
+    'title': 'Управление окружением', 'description': 'Уровень участника ограничивает, кого можно изменять. Эти разрешения определяют доступные административные действия.', 'items': [
+        {'key': 'workspace_settings', 'label': 'Настройки и оформление окружения', 'hint': 'Название, оформление, справочники и общий интерфейс', 'level': 'sensitive'},
+        {'key': 'workspace_members', 'label': 'Управление участниками', 'hint': 'Приглашение, исключение и изменение участников ниже своего уровня', 'level': 'sensitive'},
+        {'key': 'workspace_profiles', 'label': 'Профили и личные исключения', 'hint': 'Настройка действий и полей для участников ниже своего уровня', 'level': 'sensitive'},
+    ]})
+
+PERMISSION_GROUPS.append({'id': 'work_actions', 'scope': SCOPE_WORK, 'title': 'Действия с задачами и спринтами',
+    'description': 'Просмотр раздела не равен изменению данных.', 'items': [
+        {'key': 'tasks_create', 'label': 'Создавать задачи', 'hint': 'Создание задач', 'level': 'basic'},
+        {'key': 'tasks_edit', 'label': 'Изменять доступные задачи', 'hint': 'Поля и статус задач, в которых пользователь участвует', 'level': 'basic'},
+        {'key': 'tasks_delete', 'label': 'Удалять и восстанавливать задачи', 'hint': 'Корзина задач', 'level': 'sensitive'},
+        {'key': 'sprints_plan', 'label': 'Управлять спринтами', 'hint': 'Создание, изменение сроков и состава спринтов', 'level': 'advanced'},
+    ]})
+
 # Freeze defaults: new catalogue keys never expand rank permissions implicitly.
 WORKSPACE_ADMIN_DEFAULTS = [
     'dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes',
+    'tasks_create', 'tasks_edit', 'tasks_delete', 'sprints_plan',
+    'workspace_settings', 'workspace_members', 'workspace_profiles',
     'modules', 'reports', 'ai', 'workspace', 'tasks_view_team', 'tasks_view_others',
     'tasks_view_all', 'dashboard_team', 'client_tab_contacts', 'client_tab_access',
     'client_tab_contracts', 'client_tab_notes', 'client_tab_related', 'client_tab_activity', 'client_edit', 'client_delete',
 ]
-WORKSPACE_MEMBER_DEFAULTS = ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'client_tab_contacts']
+WORKSPACE_MEMBER_DEFAULTS = ['tasks_create', 'tasks_edit', 'tasks_delete', 'dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'client_tab_contacts']
 
 ROLE_PRESETS = {
     'executor': ['dashboard', 'tasks', 'kanban', 'calendar', 'clients', 'notifications', 'notes', 'workspace', 'users_password_own'],

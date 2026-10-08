@@ -1,3 +1,5 @@
+import { FieldAccessEditor } from './FieldAccessEditor';
+import type { FieldAccess } from '../lib/fieldAccess';
 import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import {
@@ -26,11 +28,13 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
   const isSuper = Boolean(user?.permissions?.all);
   const canGrant = (key: string) => isSuper || Boolean(user?.permissions?.[key]);
 
+  const [formOpen, setFormOpen] = useState(false);
   const [roles, setRoles] = useState<WorkspaceRole[]>([]);
   const [features, setFeatures] = useState<Record<string, boolean>>({});
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
+  const [fieldAccess, setFieldAccess] = useState<FieldAccess>({});
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,16 +60,20 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
   const groups: PermissionGroup[] = (catalog?.groups || []).filter(group => group.scope === 'work');
 
   const startEdit = (role: WorkspaceRole) => {
+    setFormOpen(true);
     setEditingId(role.id);
     setName(role.name);
     setPermissions({ ...role.permissions });
+    setFieldAccess({ ...role.field_access });
     setMsg('');
   };
 
   const cancelEdit = () => {
+    setFormOpen(false);
     setEditingId(null);
     setName('');
     setPermissions({});
+    setFieldAccess({});
     setMsg('');
   };
 
@@ -78,10 +86,10 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
     setMsg('');
     try {
       if (editingId == null) {
-        await api.createWsRole(workspaceId, { name: name.trim(), permissions });
+        await api.createWsRole(workspaceId, { name: name.trim(), permissions, field_access: fieldAccess });
         setMsg(`Роль «${name.trim()}» создана.`);
       } else {
-        await api.updateWsRole(workspaceId, editingId, { name: name.trim(), permissions });
+        await api.updateWsRole(workspaceId, editingId, { name: name.trim(), permissions, field_access: fieldAccess });
         setMsg(`Роль «${name.trim()}» обновлена.`);
       }
       cancelEdit();
@@ -136,7 +144,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
 
   const visibleGroups = groups.map(group => ({
     ...group,
-    items: group.items.filter(item => features[item.key] !== false),
+    items: group.items,
   }));
 
   const permissionCount = (role: WorkspaceRole) =>
@@ -145,21 +153,21 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
   return (
     <section className="tf-panel-flat p-5">
       <div className="mb-1 flex items-center gap-2 text-sm font-bold">
-        <ShieldCheck size={16} />Роли окружения
-        <span className="tf-chip ml-auto">Ролей: {roles.length}</span>
+        <ShieldCheck size={16} />Профили доступа окружения
+        <span className="tf-chip ml-auto">Профилей: {roles.length}</span>
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-        Роль — это точный итоговый набор прав: участник с этой ролью видит и может
-        ровно отмеченное, база его ранга не добавляется. Ранг (владелец/админ/участник)
-        влияет только на управление окружением: участники, роли, настройки, удаление.
-        Отключённые краном доступности функции в конструкторе не показываются.
+        Профиль — набор разрешённых рабочих и административных действий и доступа к полям.
+        Уровень участника (владелец/администратор/участник) ограничивает, кого можно изменять.
+        Личные исключения уточняют профиль. Выключенная функция или модуль блокируют действие независимо от профиля.
       </p>
 
-      {canManage && (
+      {canManage && !formOpen && <button type="button" className="tf-button mb-4" onClick={() => setFormOpen(true)}><Plus size={15} />Новый профиль доступа</button>}
+      {canManage && formOpen && (
         <div className="mb-4 space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-black uppercase tracking-wide text-[var(--color-text-secondary)]">
-              {editingId == null ? 'Новая роль' : 'Редактирование роли'}
+              {editingId == null ? 'Новый профиль' : 'Редактирование профиля'}
             </span>
             <button type="button" onClick={() => applyBasePreset('member')} className="tf-button h-8 px-2 text-xs" title="Отметить базовый набор участника">
               Как участник
@@ -167,7 +175,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
             <button type="button" onClick={() => applyBasePreset('admin')} className="tf-button h-8 px-2 text-xs" title="Отметить полный набор">
               Как админ
             </button>
-            {editingId != null && (
+            {formOpen && (
               <button type="button" onClick={cancelEdit} className="tf-button h-8 px-2 text-xs">
                 <X size={14} />Отмена
               </button>
@@ -177,7 +185,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
             className="tf-input"
             value={name}
             onChange={event => setName(event.target.value)}
-            placeholder="Название роли (например, «Трафик-менеджер»)"
+            placeholder="Название профиля (например, «Участник проекта»)"
             maxLength={100}
           />
           {visibleGroups.length > 0 ? (
@@ -206,12 +214,12 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
                         >
                           <span className="min-w-0">
                             <span className="font-semibold">{item.label}</span>
-                            <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{item.hint}</span>
+                            <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{item.hint}{features[item.key] === false ? ' · Функция или модуль отключены' : overCeiling ? ' · Вы не можете выдать это право' : ''}</span>
                           </span>
                           <input
                             className="mt-1 accent-[var(--color-accent)]"
                             type="checkbox"
-                            disabled={overCeiling}
+                            disabled={overCeiling || features[item.key] === false}
                             checked={Boolean(permissions[item.key])}
                             onChange={event =>
                               setPermissions(prev => ({ ...prev, [item.key]: event.target.checked }))
@@ -227,8 +235,9 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
           ) : (
             <p className="text-sm text-[var(--color-text-secondary)]">Каталог прав недоступен.</p>
           )}
+          <FieldAccessEditor value={fieldAccess} onChange={setFieldAccess} disabled={busy} />
           <button type="button" className="tf-button tf-button-primary" onClick={save} disabled={busy}>
-            {busy ? 'Сохранение...' : editingId == null ? 'Создать роль' : 'Сохранить'}
+            {busy ? 'Сохранение...' : editingId == null ? 'Создать профиль' : 'Сохранить'}
           </button>
         </div>
       )}
@@ -264,7 +273,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
           </div>
         ))}
         {roles.length === 0 && (
-          <div className="text-sm text-[var(--color-text-secondary)]">Кастомных ролей нет.</div>
+          <div className="text-sm text-[var(--color-text-secondary)]">Профилей пока нет. Создайте профиль, затем назначьте его участнику выше.</div>
         )}
       </div>
       {msg && <p className="mt-3 text-sm text-[var(--color-text-secondary)]">{msg}</p>}

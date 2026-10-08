@@ -7,7 +7,7 @@ import { roleMeta } from '../lib/taskflow';
 import { applyTheme, getTheme, type ThemeName } from '../lib/theme';
 import { disconnectNotesDirectory, listLocalFolders, listLocalNotes, pickNotesDirectory, storageInfo, type LocalStorageInfo } from '../lib/localNotes';
 import { PasswordChange } from '../components/PasswordChange';
-import { FeaturesPanel } from '../components/FeaturesPanel';
+
 
 export function Settings() {
   const { user } = useAuth();
@@ -153,9 +153,7 @@ export function Settings() {
         <p className="text-sm text-[var(--color-text-secondary)]">Рабочее пространство для задач, клиентов, календаря, модулей и отчётов команды.</p>
       </section>
 
-      {Boolean(user?.permissions?.all) && (
-        <FeaturesPanel scope="global" title="Функции контура (глобально)" />
-      )}
+
     </div>
   );
 }

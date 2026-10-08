@@ -485,6 +485,9 @@ class WorkspaceRole(Base):
     workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     permissions = Column(Text, nullable=False, default='{}')
+    field_access = Column(Text, nullable=False, default='{}', server_default='{}')
+    access_version = Column(Integer, nullable=False, default=1, server_default='1')
+    field_access = Column(Text, nullable=False, default='{}', server_default='{}')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workspace = relationship('Workspace', backref='roles')
@@ -502,6 +505,8 @@ class WorkspaceMember(Base):
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     role = Column(String(20), nullable=False, default=WS_ROLE_MEMBER)
     custom_role_id = Column(Integer, ForeignKey('workspace_roles.id', ondelete='SET NULL'), nullable=True)
+    access_overrides = Column(Text, nullable=False, default='{}', server_default='{}')
+    access_overrides = Column(Text, nullable=False, default='{}', server_default='{}')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workspace = relationship('Workspace', backref='member_links')
@@ -664,3 +669,28 @@ class CrmField(Base):
     required = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=False, default=0)
     __table_args__ = (Index('ix_crm_field_unique', 'workspace_id', 'key', unique=True),)
+
+
+# All write paths (API, scheduler and services) share the same rich-text sanitizer.
+from sqlalchemy import event as _event, inspect as _inspect
+from app.core.rich_text import clean_html as _clean_html
+
+
+def _sanitize_model(_mapper, _connection, target):
+    def clean(field):
+        return _clean_html(getattr(target, field), enforce=_inspect(target).attrs[field].history.has_changes())
+
+    if isinstance(target, Task):
+        target.notes = clean('notes')
+        target.comment = clean('comment')
+    elif isinstance(target, TaskComment):
+        target.content = clean('content')
+    elif isinstance(target, Note) and target.format == 'html':
+        target.content = clean('content')
+    elif isinstance(target, Client):
+        target.client_notes = clean('client_notes')
+
+
+for _model in (Task, TaskComment, Note, Client):
+    _event.listen(_model, 'before_insert', _sanitize_model)
+    _event.listen(_model, 'before_update', _sanitize_model)

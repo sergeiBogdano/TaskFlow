@@ -32,6 +32,7 @@ import {
 import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { availableWorkAreas, workAreaForRoute, WORK_AREAS } from '../lib/workAreas';
 import { WORKSPACE_EVENT } from '../lib/workspace';
 import { isNavVisible, navOverride, sectionLabel } from '../lib/uiconfig';
 import type { Client, Task, User, VoiceTaskDraft } from '../api/client';
@@ -48,7 +49,7 @@ const nav = [
   {
     section: 'Работа',
     items: [
-      { to: '/', icon: LayoutDashboard, label: 'Дашборд', hint: 'Обзор команды', permission: 'dashboard' },
+      { to: '/overview', icon: LayoutDashboard, label: 'Дашборд', hint: 'Обзор команды', permission: 'dashboard' },
       { to: '/tasks', icon: CheckSquare, label: 'Задачи', hint: 'Список и фильтры', permission: 'tasks' },
       { to: '/sprints', icon: Timer, label: 'Спринты', hint: 'Отрезки и прогресс', permission: 'kanban' },
       { to: '/kanban', icon: Columns3, label: 'Канбан', hint: 'Поток работы', permission: 'kanban' },
@@ -59,7 +60,7 @@ const nav = [
     ],
   },
   {
-    section: 'Клиенты',
+    section: 'Дополнительно',
     items: [
       { to: '/crm', icon: Building2, label: 'CRM', hint: 'Сделки и контакты', permission: 'crm' },
       { to: '/clients', icon: Users, label: 'Клиенты', hint: 'CRM и договоры', permission: 'clients' },
@@ -195,7 +196,9 @@ export function Layout() {
     if (isSuperadmin) return true;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };
-  const pageTitle = sectionLabel(location.pathname);
+  const area = workAreaForRoute(location.pathname);
+  const areas = availableWorkAreas(user);
+  const pageTitle = sectionLabel(location.pathname === '/' ? '/work' : location.pathname);
 
   const handleLogout = async () => {
     await logout();
@@ -216,7 +219,7 @@ export function Layout() {
   };
 
   const orderedItems = (section: string, items: typeof nav[number]['items']) => {
-    const saved = navOrder[section] || [];
+    const saved = navOrder[section] || (section === 'Дополнительно' ? navOrder['Клиенты'] : undefined) || [];
     const byRoute = new Map(items.map(item => [item.to, item]));
     return [...saved.filter(route => byRoute.has(route)).map(route => byRoute.get(route)!), ...items.filter(item => !saved.includes(item.to))];
   };
@@ -243,7 +246,7 @@ export function Layout() {
   return (
     <div className="min-h-screen">
       <aside className={cn('z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
-        <div className="mb-2 flex items-center gap-3 px-2 py-2 lg:mb-4">
+        <div className="mb-2 flex shrink-0 items-center gap-3 px-2 py-2 lg:mb-4">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
@@ -258,9 +261,11 @@ export function Layout() {
         <div className={cn(sidebarCollapsed && 'lg:hidden')}>
           <WorkspaceSwitcher compact={sidebarCollapsed} />
         </div>
-        <nav className={cn('flex gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
+        <div className="my-3 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-[var(--color-surface-2)] p-1 lg:flex-col" aria-label="Режим приложения">{areas.map(key => <NavLink key={key} to={WORK_AREAS[key].route} title={WORK_AREAS[key].hint} className={cn('rounded-md px-3 py-2 text-xs font-semibold transition', area === key ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]')}>{sidebarCollapsed ? WORK_AREAS[key].title.slice(0, 1) : WORK_AREAS[key].title}</NavLink>)}</div>
+        <NavLink to={WORK_AREAS[area].route} className="tf-button mb-3 w-full shrink-0">{sidebarCollapsed ? '⌂' : area === 'work' ? 'Мой рабочий стол' : 'Обзор режима'}</NavLink>
+        <nav className={cn('flex shrink-0 gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
-            const visibleItems = group.items.filter(item => canSee(item.permission));
+            const visibleItems = group.items.filter(item => workAreaForRoute(item.to) === area && item.to !== '/settings' && canSee(item.permission));
             if (!visibleItems.length) return null;
             const shownItems = orderedItems(group.section, visibleItems)
               .filter(item => item.to === '/wiki' || isNavVisible(item.to))
@@ -293,7 +298,7 @@ export function Layout() {
         <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-[var(--color-text)] shadow-xl">{sectionLabel(activeNavRoute)}</div> : null}</DragOverlay>
         </DndContext>
 
-        <div className={cn('mt-auto hidden space-y-3 lg:block', sidebarCollapsed && 'lg:hidden')}>
+        <div className={cn('mt-auto hidden shrink-0 space-y-3 lg:block', sidebarCollapsed && 'lg:hidden')}>
           {user && (
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]/86 p-3 shadow-[0_1px_0_rgba(255,255,255,.05)_inset]">
               <div className="flex items-center gap-2">
@@ -308,6 +313,7 @@ export function Layout() {
               <div className="mt-2 text-[11px] leading-4 text-[var(--color-muted)]">{role.hint}</div>
             </div>
           )}
+          <NavLink to="/settings" className="tf-button w-full justify-start"><Settings size={16} />Личные настройки</NavLink>
           <button onClick={handleLogout} className="tf-button w-full justify-start text-[var(--color-text-secondary)] hover:text-[var(--color-danger)]">
             <LogOut size={16} />
             Выйти
@@ -319,10 +325,10 @@ export function Layout() {
         <header className="sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
           <div className="min-w-0">
             <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
-            <p className="text-xs text-[var(--color-text-secondary)]">Задачи и инструменты текущего пространства</p>
+            <p className="text-xs text-[var(--color-text-secondary)]">{WORK_AREAS[area].hint}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-          {voiceAvailable && <button onClick={() => setVoiceOpen(true)} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
+          {area === 'work' && voiceAvailable && <button onClick={() => setVoiceOpen(true)} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Голосовая задача">
             <Mic size={16} />
           </button>}
           {notificationsAvailable && <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
@@ -336,7 +342,7 @@ export function Layout() {
         </header>
 
         <main className="min-h-[calc(100vh-64px)] p-4 sm:p-8">
-          {showIntro && (
+          {showIntro && area === 'work' && (
             <section className="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">

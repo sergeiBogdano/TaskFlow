@@ -30,6 +30,7 @@ from app.core.models import (
 from app.core.permissions import (
     get_current_user,
     get_user_permissions,
+    require_workspace_management,
     require_root,
     get_user_role_names,
     get_workspace_role,
@@ -417,6 +418,10 @@ async def get_workspace(workspace_id: int, user=Depends(get_current_user)):
         workspace, role = await resolve_workspace(session, user, role_names, workspace_id)
         data = _ws_to_dict(workspace, role)
         data["ai_instructions"] = workspace.ai_instructions or ""
+        from app.core.access_policy import field_access
+        data["field_access"] = await field_access(user, workspace_id)
+        from app.core.permissions import request_permissions
+        data["permissions"] = await request_permissions(user, workspace_id)
         return JSONResponse(data)
 
 
@@ -430,7 +435,7 @@ class WorkspaceUpdate(BaseModel):
 
 
 @router.patch("/{workspace_id}")
-async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depends(require_workspace_role("owner"))):
+async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depends(require_workspace_management("workspace_settings"))):
     workspace = ctx["workspace"]
     async with async_session() as session:
         ws = await session.get(Workspace, workspace.id)
@@ -455,10 +460,6 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
         if payload.ai_instructions is not None:
             ws.ai_instructions = payload.ai_instructions[:10000] or None
         if payload.ui_config is not None:
-            # Оформление меняет только владелец окружения (или суперадмин)
-            role_names = await get_user_role_names(ctx["user"].id)
-            if ctx["role"] != WS_ROLE_OWNER and not user_is_superadmin(role_names):
-                return JSONResponse({"error": "Оформление меняет только владелец"}, status_code=403)
             if not isinstance(payload.ui_config, dict):
                 return JSONResponse({"error": "ui_config должен быть объектом"}, status_code=400)
             if len(json.dumps(payload.ui_config, ensure_ascii=False)) > 50000:
@@ -573,7 +574,7 @@ async def _can_leave_ownership(session, workspace_id: int, actor_id: int, target
 
 
 @router.post("/{workspace_id}/members", status_code=201)
-async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(require_workspace_role("owner", "admin"))):
+async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(require_workspace_management("workspace_members"))):
     if payload.role not in (WS_ROLE_ADMIN, WS_ROLE_MEMBER):
         return JSONResponse({"error": "Роль: admin или member"}, status_code=400)
     async with async_session() as session:
@@ -597,6 +598,12 @@ async def add_member(workspace_id: int, payload: MemberCreate, ctx=Depends(requi
         )).scalar_one_or_none()
         if existing:
             return JSONResponse({"error": "Уже участник"}, status_code=400)
+        if not actor_is_super:
+            from app.core.permission_catalog import workspace_default_permissions
+            from app.core.permissions import get_workspace_permissions, assert_within_ceiling
+            from app.core.access_policy import assert_field_ceiling
+            assert_within_ceiling(await get_workspace_permissions(ctx['user'].id, workspace_id) or {}, workspace_default_permissions(payload.role))
+            await assert_field_ceiling(ctx['user'], workspace_id, {})
         member = WorkspaceMember(workspace_id=ctx["workspace"].id, user_id=payload.user_id, role=payload.role)
         session.add(member)
         # повторное приглашение стирает tombstone явного удаления
@@ -616,7 +623,7 @@ class MemberUpdate(BaseModel):
 
 
 @router.patch("/{workspace_id}/members/{user_id}")
-async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, ctx=Depends(require_workspace_role("owner", "admin"))):
+async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, ctx=Depends(require_workspace_management("workspace_members"))):
     async with async_session() as session:
         role_names = await get_user_role_names(ctx["user"].id)
         actor_is_super = user_is_superadmin(role_names)
@@ -641,6 +648,11 @@ async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, 
             err = _can_manage(ctx["role"], actor_is_super, member.role, payload.role)
         if err:
             return JSONResponse({"error": err}, status_code=403)
+        if not actor_is_super and not member.custom_role_id:
+            from app.core.permission_catalog import workspace_default_permissions
+            from app.core.permissions import get_workspace_permissions, assert_within_ceiling
+            candidate = {**workspace_default_permissions(payload.role), **__import__('json').loads(member.access_overrides or '{}').get('permissions', {})}
+            assert_within_ceiling(await get_workspace_permissions(ctx['user'].id, workspace_id) or {}, candidate)
         member.role = payload.role
         await session.commit()
         username = (await session.get(User, user_id)).username
@@ -648,7 +660,7 @@ async def update_member(workspace_id: int, user_id: int, payload: MemberUpdate, 
 
 
 @router.delete("/{workspace_id}/members/{user_id}")
-async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_workspace_role("owner", "admin"))):
+async def remove_member(workspace_id: int, user_id: int, ctx=Depends(require_workspace_management("workspace_members"))):
     async with async_session() as session:
         role_names = await get_user_role_names(ctx["user"].id)
         actor_is_super = user_is_superadmin(role_names)

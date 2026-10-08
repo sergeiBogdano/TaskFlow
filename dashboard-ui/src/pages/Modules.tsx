@@ -40,8 +40,8 @@ function plainText(value: string) {
 }
 
 export function Modules() {
-  const { hasRole } = useAuth();
-  const canManage = hasRole('superadmin') || hasRole('admin');
+  const { user } = useAuth();
+  const canManage = !!user?.is_root || (!!user?.permissions?.modules && user?.features?.modules !== false);
   const [modules, setModules] = useState<ModuleRule[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);

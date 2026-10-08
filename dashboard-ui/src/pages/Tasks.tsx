@@ -1,3 +1,4 @@
+import { currentFieldAccess } from '../lib/fieldAccess';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -169,6 +170,7 @@ export function Tasks() {
   }, {});
 
   const openCreate = () => {
+    if (!(currentUser?.is_root || currentUser?.permissions?.tasks_create)) return;
     setEditingTask(null);
     setShowModal(true);
   };
@@ -190,15 +192,16 @@ export function Tasks() {
     else {
       const created = await api.createTask(rest);
       id = created.id;
+      setEditingTask(created);
     }
-    if (id != null) {
+    if (id != null && taskField('sprint').editable && (currentUser?.is_root || currentUser?.permissions?.sprints_plan)) {
       const current: number[] = editingTask?.sprint_ids || [];
       const want = sprintRef ? [Number(sprintRef)] : [];
       for (const sid of current.filter(s => !want.includes(s))) {
-        await api.removeSprintTask(sid, id).catch(() => {});
+        await api.removeSprintTask(sid, id);
       }
       for (const sid of want.filter(s => !current.includes(s))) {
-        await api.addSprintTasks(sid, [id]).catch(() => {});
+        await api.addSprintTasks(sid, [id]);
       }
     }
     setShowModal(false);
@@ -349,7 +352,7 @@ export function Tasks() {
         />
         <div className="flex flex-wrap gap-2 xl:justify-end">
           <button type="button" onClick={() => setFiltersOpen(previous => !previous)} className={filtersOpen || activeFilterCount ? 'tf-button tf-button-primary' : 'tf-button'}><ListFilter size={15} />Фильтры{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}</button>
-          <button onClick={openCreate} className="tf-button tf-button-primary"><Plus size={16} />Новая задача</button>
+          <button disabled={!currentUser?.is_root && !currentUser?.permissions?.tasks_create} onClick={openCreate} className="tf-button tf-button-primary"><Plus size={16} />Новая задача</button>
         </div>
       </div>
 
@@ -415,7 +418,7 @@ export function Tasks() {
             <div className="text-sm font-bold">Массовые изменения</div>
             <div className="text-xs text-[var(--color-text-secondary)]">Сначала отметьте задачи галочками, затем выберите действие.</div>
           </div>
-          <button type="button" onClick={() => setBulkOpen(prev => !prev)} className={bulkOpen || selectedIds.length ? 'tf-button tf-button-primary' : 'tf-button'}>{bulkOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{bulkOpen ? 'Скрыть' : 'Изменить'}</button>
+          <button type="button" disabled={!(currentUser?.is_root || currentUser?.permissions?.tasks_edit)} onClick={() => setBulkOpen(prev => !prev)} className={bulkOpen || selectedIds.length ? 'tf-button tf-button-primary' : 'tf-button'}>{bulkOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{bulkOpen ? 'Скрыть' : 'Изменить'}</button>
           <button onClick={() => { setSelectedIds([]); setBulkError(''); }} className="tf-button" disabled={!selectedIds.length}>Снять выбор</button>
         </div>
         {bulkOpen && <>
@@ -423,6 +426,7 @@ export function Tasks() {
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">Новый статус</span>
             <SearchSelect
+              disabled={!taskField('status').editable}
               value={bulkStatus}
               options={statusOptions.map(status => ({ value: status, label: statusMeta[status as keyof typeof statusMeta]?.label || status }))}
               onChange={setBulkStatus}
@@ -434,6 +438,7 @@ export function Tasks() {
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('priority').label}</span>
             <SearchSelect
+              disabled={!taskField('priority').editable}
               value={bulkPriority}
               options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))}
               onChange={setBulkPriority}
@@ -445,6 +450,7 @@ export function Tasks() {
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('assignee').label}</span>
             <SearchSelect
+              disabled={!taskField('assignee').editable}
               value={bulkAssignee}
               options={[{ value: 'none', label: 'Не назначен' }, ...userOptions]}
               onChange={setBulkAssignee}
@@ -454,14 +460,14 @@ export function Tasks() {
           </label>
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('completionDate').label}</span>
-            <input className="tf-input" type="date" value={bulkCompletionDate} onChange={event => setBulkCompletionDate(event.target.value)} />
+            <input className="tf-input" type="date" disabled={!taskField('completionDate').editable} value={bulkCompletionDate} onChange={event => setBulkCompletionDate(event.target.value)} />
           </label>
           <label className="space-y-1">
             <span className="block text-[11px] font-bold uppercase text-[var(--color-muted)]">{taskField('deadline').label}</span>
-            <input className="tf-input" type="date" value={bulkDeadline} onChange={event => setBulkDeadline(event.target.value)} />
+            <input className="tf-input" type="date" disabled={!taskField('deadline').editable} value={bulkDeadline} onChange={event => setBulkDeadline(event.target.value)} />
           </label>
           <button onClick={() => applyBulk(false)} disabled={!selectedIds.length || bulkSaving} className="tf-button tf-button-primary self-end">Применить</button>
-          <button onClick={() => applyBulk(true)} disabled={!selectedIds.length || bulkSaving} className="tf-button self-end text-[var(--color-danger)]"><Trash2 size={15} />В корзину</button>
+          <button onClick={() => applyBulk(true)} disabled={!selectedIds.length || bulkSaving || !(currentUser?.is_root || currentUser?.permissions?.tasks_delete)} className="tf-button self-end text-[var(--color-danger)]"><Trash2 size={15} />В корзину</button>
         </div>
         {bulkError && <div className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{bulkError}</div>}
         </>}
@@ -520,13 +526,13 @@ export function Tasks() {
       <section className="tf-panel-flat overflow-hidden">
         <div className="hidden min-w-[1180px] grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)] md:grid">
           <span />
-          <span>{taskField('title').label}</span>
-          <span>{taskField('status').label}</span>
-          <span>{taskField('client').label}</span>
-          <span>{taskField('assignee').label}</span>
-          <span>{taskField('completionDate').label}</span>
-          <span>{taskField('deadline').label}</span>
-          <span>{taskField('priority').label}</span>
+          <span>{taskField('title').visible ? taskField('title').label : ''}</span>
+          <span>{taskField('status').visible ? taskField('status').label : ''}</span>
+          <span>{taskField('client').visible ? taskField('client').label : ''}</span>
+          <span>{taskField('assignee').visible ? taskField('assignee').label : ''}</span>
+          <span>{taskField('completionDate').visible ? taskField('completionDate').label : ''}</span>
+          <span>{taskField('deadline').visible ? taskField('deadline').label : ''}</span>
+          <span>{taskField('priority').visible ? taskField('priority').label : ''}</span>
         </div>
         {pagedTasks.map(task => {
           const priority = priorityMeta[task.priority as keyof typeof priorityMeta] || priorityMeta.medium;
@@ -550,16 +556,17 @@ export function Tasks() {
               <Select
                 size="sm"
                 stopPropagation
+                disabled={!taskField('status').editable || (!currentUser?.is_root && !currentUser?.permissions?.tasks_edit)}
                 value={task.status}
                 options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))}
                 onChange={value => changeStatus(task, value)}
                 className="md:w-full"
               />
-              {crmEnabled && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
-              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('assignee').label}: </span>{assignee?.username || 'Не назначен'}</span>
-              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{formatDate(task.completion_date)}</span>
-              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{formatDate(task.deadline)}</span>
-              <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="block h-6 w-6 rounded-full" style={{ backgroundColor: priority.color }} /><span className="md:hidden">{priority.label}</span></span>
+              {crmEnabled && taskField('client').visible && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
+              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('assignee').label}: </span>{taskField('assignee').visible ? assignee?.username || 'Не назначен' : '—'}</span>
+              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{taskField('completionDate').visible ? formatDate(task.completion_date) : '—'}</span>
+              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{taskField('deadline').visible ? formatDate(task.deadline) : '—'}</span>
+              <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="block h-6 w-6 rounded-full" style={{ backgroundColor: priority.color }} /><span className="md:hidden">{taskField('priority').visible ? priority.label : '—'}</span></span>
             </div>
           );
         })}
@@ -658,21 +665,22 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   }, []);
 
   // Видимость и подписи полей из конструктора интерфейса (настройки окружения)
+  const formField = (key: string) => ({ ...taskField(key), editable: (actor?.is_root || !!actor?.permissions?.[task ? 'tasks_edit' : 'tasks_create']) && currentFieldAccess().tasks?.[key] !== 'hidden' && currentFieldAccess().tasks?.[key] !== 'view' && (key !== 'sprint' || !!actor?.is_root || !!actor?.permissions?.sprints_plan) });
   const uiFields = useMemo(() => ({
-    title: taskField('title'),
-    status: taskField('status'),
-    priority: taskField('priority'),
-    taskType: taskField('taskType'),
-    sprint: taskField('sprint'),
-    client: { ...taskField('client'), visible: crmEnabled && taskField('client').visible },
-    assignee: taskField('assignee'),
-    coExecutors: taskField('coExecutors'),
-    completionDate: taskField('completionDate'),
-    deadline: taskField('deadline'),
-    visibility: taskField('visibility'),
-    noContract: { ...taskField('noContract'), visible: crmEnabled && taskField('noContract').visible },
-    notes: taskField('notes'),
-    comment: taskField('comment'),
+    title: formField('title'),
+    status: formField('status'),
+    priority: formField('priority'),
+    taskType: formField('taskType'),
+    sprint: formField('sprint'),
+    client: { ...formField('client'), visible: crmEnabled && formField('client').visible },
+    assignee: formField('assignee'),
+    coExecutors: formField('coExecutors'),
+    completionDate: formField('completionDate'),
+    deadline: formField('deadline'),
+    visibility: formField('visibility'),
+    noContract: { ...formField('noContract'), visible: crmEnabled && formField('noContract').visible },
+    notes: formField('notes'),
+    comment: formField('comment'),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [crmEnabled]);
   const showParams = uiFields.status.visible || uiFields.priority.visible || uiFields.taskType.visible || uiFields.sprint.visible;
@@ -956,26 +964,26 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
               <div className="min-w-0 space-y-4">
                 <label>
                   <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{uiFields.title.label}</span>
-                  <input className="tf-input text-base font-semibold" value={title} onChange={event => setTitle(event.target.value)} required autoFocus />
+                  <input className="tf-input text-base font-semibold" disabled={!uiFields.title.editable} value={title} onChange={event => setTitle(event.target.value)} required autoFocus />
                 </label>
 
                 {uiFields.notes.visible && (
                 <Panel
                   title={uiFields.notes.label}
-                  action={actor?.features?.ai !== false && (actor?.is_root || actor?.permissions?.ai) ?
+                  action={uiFields.notes.editable && actor?.features?.ai !== false && (actor?.is_root || actor?.permissions?.ai) ?
                     <button type="button" onClick={generateDescription} disabled={aiDescLoading} className="tf-button h-8 px-2 text-xs" title="Сгенерировать описание через AI">
                       <Wand2 size={14} />{aiDescLoading ? 'Думаю...' : 'AI-описание'}
                     </button> : undefined
                   }
                 >
-                  <RichTextEditor value={notes} onChange={setNotes} minHeightClassName="min-h-52" placeholder="Контекст, ссылки, требования, что считать готовым..." />
+                  <RichTextEditor readOnly={!uiFields.notes.editable} value={notes} onChange={setNotes} minHeightClassName="min-h-52" placeholder="Контекст, ссылки, требования, что считать готовым..." />
                   {aiDescError && <div className="mt-2 text-xs font-semibold text-[var(--color-danger)]">{aiDescError}</div>}
                 </Panel>
                 )}
 
                 {uiFields.comment.visible && (
                 <Panel title={uiFields.comment.label}>
-                  <RichTextEditor value={comment} onChange={setComment} minHeightClassName="min-h-44" placeholder="Что уже сделано по задаче: статьи, описания, правки, ссылки, результаты..." />
+                  <RichTextEditor readOnly={!uiFields.comment.editable} value={comment} onChange={setComment} minHeightClassName="min-h-44" placeholder="Что уже сделано по задаче: статьи, описания, правки, ссылки, результаты..." />
                 </Panel>
                 )}
               </div>
@@ -997,10 +1005,10 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                 {showParams && (
                 <CollapsiblePanel title="Параметры" collapsed={collapsedSections.params} onToggle={() => toggleSection('params')} summary={`${statusMeta[status as keyof typeof statusMeta]?.label || status} · ${priorityMeta[priority as keyof typeof priorityMeta]?.label || priority}`}>
                   <div className="grid gap-3">
-                    {uiFields.status.visible && <Field order={uiFields.status.order} label={uiFields.status.label}><Select value={status} options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))} onChange={setStatus} searchPlaceholder="Найти статус..." /></Field>}
-                    {uiFields.priority.visible && <Field order={uiFields.priority.order} label={uiFields.priority.label}><Select value={priority} options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))} onChange={setPriority} searchPlaceholder="Найти приоритет..." /></Field>}
-                    {uiFields.taskType.visible && <Field order={uiFields.taskType.order} label={uiFields.taskType.label}><Select value={taskType} options={Object.entries(taskTypeMeta).map(([key, label]) => ({ value: key, label }))} onChange={setTaskType} searchPlaceholder="Найти тип..." /></Field>}
-                    {uiFields.sprint.visible && <Field order={uiFields.sprint.order} label={uiFields.sprint.label}><Select value={sprintId} options={sprintOptions} onChange={setSprintId} emptyLabel="Без спринта" placeholder="Без спринта" searchPlaceholder="Найти спринт..." /></Field>}
+                    {uiFields.status.visible && <Field disabled={!uiFields.status.editable} order={uiFields.status.order} label={uiFields.status.label}><Select value={status} options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))} onChange={setStatus} searchPlaceholder="Найти статус..." /></Field>}
+                    {uiFields.priority.visible && <Field disabled={!uiFields.priority.editable} order={uiFields.priority.order} label={uiFields.priority.label}><Select value={priority} options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))} onChange={setPriority} searchPlaceholder="Найти приоритет..." /></Field>}
+                    {uiFields.taskType.visible && <Field disabled={!uiFields.taskType.editable} order={uiFields.taskType.order} label={uiFields.taskType.label}><Select value={taskType} options={Object.entries(taskTypeMeta).map(([key, label]) => ({ value: key, label }))} onChange={setTaskType} searchPlaceholder="Найти тип..." /></Field>}
+                    {uiFields.sprint.visible && <Field disabled={!uiFields.sprint.editable} order={uiFields.sprint.order} label={uiFields.sprint.label}><Select value={sprintId} options={sprintOptions} onChange={setSprintId} emptyLabel="Без спринта" placeholder="Без спринта" searchPlaceholder="Найти спринт..." /></Field>}
                   </div>
                 </CollapsiblePanel>
                 )}
@@ -1008,8 +1016,8 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                 {showPeople && (
                 <CollapsiblePanel title={crmEnabled ? 'Клиент и команда' : 'Команда'} collapsed={collapsedSections.people} onToggle={() => toggleSection('people')} summary={`${crmEnabled ? (clients.find(client => String(client.id) === clientId)?.org_name || 'Без клиента') + ' · ' : ''}${users.find(user => String(user.id) === assigneeId)?.username || 'Не назначен'}`}>
                   <div className="grid gap-3">
-                    {uiFields.client.visible && <Field order={uiFields.client.order} label={uiFields.client.label}><SearchSelect value={clientId} options={clientOptions} onChange={setClientId} emptyLabel="Без клиента" searchPlaceholder="Найти клиента или домен" /></Field>}
-                    {uiFields.assignee.visible && <Field order={uiFields.assignee.order} label={uiFields.assignee.label}><SearchSelect value={assigneeId} options={availableAssigneeOptions} onChange={value => { setAssigneeId(value); setCoExecutorIds(prev => prev.filter(id => String(id) !== value)); }} emptyLabel="Не назначен" searchPlaceholder="Найти сотрудника" /></Field>}
+                    {uiFields.client.visible && <Field disabled={!uiFields.client.editable} order={uiFields.client.order} label={uiFields.client.label}><SearchSelect value={clientId} options={clientOptions} onChange={setClientId} emptyLabel="Без клиента" searchPlaceholder="Найти клиента или домен" /></Field>}
+                    {uiFields.assignee.visible && <Field disabled={!uiFields.assignee.editable} order={uiFields.assignee.order} label={uiFields.assignee.label}><SearchSelect value={assigneeId} options={availableAssigneeOptions} onChange={value => { setAssigneeId(value); setCoExecutorIds(prev => prev.filter(id => String(id) !== value)); }} emptyLabel="Не назначен" searchPlaceholder="Найти сотрудника" /></Field>}
                     {uiFields.coExecutors.visible && (
                     <div>
                       <div className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">{uiFields.coExecutors.label}</div>
@@ -1020,7 +1028,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                       <div className="max-h-40 space-y-1 overflow-auto">
                         {visibleCoExecutors.map(user => (
                           <label key={user.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm">
-                            <input type="checkbox" checked={coExecutorIds.includes(user.id)} onChange={() => setCoExecutorIds(prev => prev.includes(user.id) ? prev.filter(id => id !== user.id) : [...prev, user.id])} className="accent-[var(--color-accent)]" />
+                            <input type="checkbox" disabled={!uiFields.coExecutors.editable} checked={coExecutorIds.includes(user.id)} onChange={() => setCoExecutorIds(prev => prev.includes(user.id) ? prev.filter(id => id !== user.id) : [...prev, user.id])} className="accent-[var(--color-accent)]" />
                             <span>{user.username}</span>
                           </label>
                         ))}
@@ -1035,10 +1043,10 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                 {showDates && (
                 <CollapsiblePanel title="Сроки" collapsed={collapsedSections.dates} onToggle={() => toggleSection('dates')} summary={`${uiFields.completionDate.label}: ${completionDate || '-'} · ${uiFields.deadline.label}: ${deadline || '-'}`}>
                   <div className="grid gap-3">
-                    {uiFields.completionDate.visible && <Field order={uiFields.completionDate.order} label={uiFields.completionDate.label}><input className="tf-input" type="date" value={completionDate} max={deadline || undefined} onChange={event => setCompletionDate(event.target.value)} /></Field>}
-                    {uiFields.deadline.visible && <Field order={uiFields.deadline.order} label={uiFields.deadline.label}><input className="tf-input" type="date" value={deadline} min={completionDate || undefined} onChange={event => setDeadline(event.target.value)} /></Field>}
-                    {uiFields.visibility.visible && <Field order={uiFields.visibility.order} label={uiFields.visibility.label}><Select value={visibility} options={[{ value: 'public', label: 'Публичная' }, { value: 'private', label: 'Приватная' }]} onChange={value => setVisibility(value as 'public' | 'private')} /></Field>}
-                    {uiFields.noContract.visible && <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"><input type="checkbox" checked={noContract} onChange={event => setNoContract(event.target.checked)} className="accent-[var(--color-accent)]" />{uiFields.noContract.label}</label>}
+                    {uiFields.completionDate.visible && <Field disabled={!uiFields.completionDate.editable} order={uiFields.completionDate.order} label={uiFields.completionDate.label}><input className="tf-input" type="date" disabled={!uiFields.completionDate.editable} value={completionDate} max={deadline || undefined} onChange={event => setCompletionDate(event.target.value)} /></Field>}
+                    {uiFields.deadline.visible && <Field disabled={!uiFields.deadline.editable} order={uiFields.deadline.order} label={uiFields.deadline.label}><input className="tf-input" type="date" disabled={!uiFields.deadline.editable} value={deadline} min={completionDate || undefined} onChange={event => setDeadline(event.target.value)} /></Field>}
+                    {uiFields.visibility.visible && <Field disabled={!uiFields.visibility.editable} order={uiFields.visibility.order} label={uiFields.visibility.label}><Select value={visibility} options={[{ value: 'public', label: 'Публичная' }, { value: 'private', label: 'Приватная' }]} onChange={value => setVisibility(value as 'public' | 'private')} /></Field>}
+                    {uiFields.noContract.visible && <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"><input type="checkbox" disabled={!uiFields.noContract.editable} checked={noContract} onChange={event => setNoContract(event.target.checked)} className="accent-[var(--color-accent)]" />{uiFields.noContract.label}</label>}
                   </div>
                 </CollapsiblePanel>
                 )}
@@ -1152,9 +1160,9 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
             </div>
           )}
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:items-center">
-            {task && onDelete && <button type="button" onClick={onDelete} className="tf-button col-span-2 justify-center text-[var(--color-danger)] sm:col-span-1 sm:mr-auto"><Trash2 size={15} />В корзину</button>}
+            {task && onDelete && (actor?.is_root || actor?.permissions?.tasks_delete) && <button type="button" onClick={onDelete} className="tf-button col-span-2 justify-center text-[var(--color-danger)] sm:col-span-1 sm:mr-auto"><Trash2 size={15} />В корзину</button>}
             <button type="button" onClick={requestClose} className="tf-button justify-center sm:ml-auto">Отмена</button>
-            <button type="submit" disabled={saving} className="tf-button tf-button-primary justify-center">{saving ? 'Сохраняю...' : 'Сохранить'}</button>
+            <button type="submit" disabled={saving || !(actor?.is_root || actor?.permissions?.[task ? 'tasks_edit' : 'tasks_create'])} className="tf-button tf-button-primary justify-center">{saving ? 'Сохраняю...' : 'Сохранить'}</button>
           </div>
         </div>
       </form>
@@ -1162,12 +1170,12 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   );
 }
 
-function Field({ label, children, order }: { label: string; children: ReactNode; order?: number }) {
+function Field({ label, children, order, disabled = false }: { label: string; children: ReactNode; order?: number; disabled?: boolean }) {
   return (
-    <label style={{ order }} className="relative block">
+    <fieldset disabled={disabled} style={{ order }} className="relative block min-w-0">
       <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{label}</span>
       {children}
-    </label>
+    </fieldset>
   );
 }
 

@@ -1,4 +1,6 @@
-﻿const API_BASE = '';
+import { prepareUpload } from '../lib/uploads';
+import { currentFieldAccess, writableFields, type FieldAccess } from '../lib/fieldAccess';
+const API_BASE = '';
 export { request };
 
 const WORKSPACE_KEY = 'taskflow:workspace';
@@ -37,6 +39,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export type User = {
+  field_access?: FieldAccess;
   account_key?: string;
   is_root?: boolean;
   is_active?: boolean;
@@ -160,6 +163,7 @@ export type PermissionGroup = {
 };
 
 export type PermissionCatalog = {
+  fields: Record<string, Record<string, { label: string; required: boolean }>>;
   groups: PermissionGroup[];
   presets: Record<string, string[]>;
   scopes: Record<string, 'app' | 'work'>;
@@ -377,6 +381,8 @@ export type Workspace = {
 };
 
 export type WorkspaceDetail = Workspace & {
+  permissions?: Record<string, boolean>;
+  field_access?: FieldAccess;
   ai_instructions: string;
   ui_config?: Record<string, any>;
 };
@@ -391,11 +397,20 @@ export type WorkspaceMember = {
 };
 
 export type WorkspaceRole = {
+  field_access?: FieldAccess;
   id: number;
   workspace_id: number;
   name: string;
   permissions: Record<string, boolean>;
   created_at: string | null;
+};
+
+export type WorkspaceAccessReport = {
+  groups: PermissionGroup[];
+  fields: Record<string, Record<string, { label: string; required: boolean }>>;
+  members: { user_id: number; username: string; is_root: boolean; level: string; profile: string;
+    profile_id: number | null; overrides: { permissions?: Record<string, boolean>; fields?: FieldAccess };
+    fields: FieldAccess; permissions: Record<string, { granted: boolean; available: boolean; allowed: boolean; source: string; reason: string }> }[];
 };
 
 export type WorkspaceRolesResponse = {
@@ -558,9 +573,9 @@ export const api = {
   getTask: (id: number) => request<Task>(`/api/tasks/${id}`),
   getTaskAccesses: (id: number) => request<any[]>(`/api/tasks/${id}/accesses`),
   createTask: (data: Partial<Task>) =>
-    request<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(data) }),
+    request<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(writableFields('tasks', data, currentFieldAccess())) }),
   updateTask: (id: number, data: Partial<Task>) =>
-    request<{ ok: boolean }>(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    request<{ ok: boolean }>(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(writableFields('tasks', data, currentFieldAccess())) }),
   deleteTask: (id: number) =>
     request<{ ok: boolean }>(`/api/tasks/${id}`, { method: 'DELETE' }),
   bulkUpdateTasks: (ids: number[], fields: Record<string, any>) =>
@@ -586,9 +601,9 @@ export const api = {
       body: JSON.stringify({ content, mentions: mentions || [] }),
     }),
   getTaskActivity: (taskId: number) => request<ActivityItem[]>(`/api/tasks/${taskId}/activity`),
-  uploadFile: (taskId: number, file: File) => {
+  uploadFile: async (taskId: number, file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', await prepareUpload(file));
     return fetch(`${API_BASE}/api/tasks/${taskId}/upload${activeWorkspaceId() ? `?workspace_id=${activeWorkspaceId()}` : ''}`, {
       method: 'POST',
       credentials: 'include',
@@ -618,9 +633,9 @@ export const api = {
     }),
   deleteClient: (id: number) =>
     request<{ ok: boolean }>(`/api/clients/${id}`, { method: 'DELETE' }),
-  uploadClientFile: (clientId: number, file: File) => {
+  uploadClientFile: async (clientId: number, file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', await prepareUpload(file));
     return fetch(`${API_BASE}/api/clients/${clientId}/upload${activeWorkspaceId() ? `?workspace_id=${activeWorkspaceId()}` : ''}`, { method: 'POST', credentials: 'include', body: formData }).then(async response => {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || body.detail || `API error: ${response.status}`);
@@ -630,9 +645,9 @@ export const api = {
   getClientFiles: (clientId: number) => request<ClientFile[]>(`/api/clients/${clientId}/files`),
   deleteClientFile: (clientId: number, fileId: number) => request<{ ok: boolean }>(`/api/clients/${clientId}/files/${fileId}`, { method: 'DELETE' }),
   getClientFileUrl: (clientId: number, fileId: number) => `${API_BASE}/api/clients/${clientId}/files/${fileId}/download`,
-  uploadContractFile: (clientId: number, contractId: number, file: File) => {
+  uploadContractFile: async (clientId: number, contractId: number, file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', await prepareUpload(file));
     return fetch(`${API_BASE}/api/clients/${clientId}/contracts/${contractId}/upload`, { method: 'POST', credentials: 'include', body: formData }).then(async response => {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || body.detail || `API error: ${response.status}`);
@@ -847,10 +862,13 @@ export const api = {
     request<{ ok: boolean }>(`/api/workspaces/${id}/knowledge/${factId}`, { method: 'DELETE' }),
 
   // Workspace roles (Ф7)
+  getWorkspaceAccess: (id: number) => request<WorkspaceAccessReport>(`/api/workspaces/${id}/access`),
+  setWorkspaceAccess: (id: number, userId: number, data: { permissions: Record<string, boolean>; fields: FieldAccess }) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}/access`, { method: 'PUT', body: JSON.stringify(data) }),
   getWsRoles: (id: number) => request<WorkspaceRolesResponse>(`/api/workspaces/${id}/roles`),
-  createWsRole: (id: number, data: { name: string; permissions: Record<string, boolean> }) =>
+  createWsRole: (id: number, data: { name: string; permissions: Record<string, boolean>; field_access?: FieldAccess }) =>
     request<WorkspaceRole>(`/api/workspaces/${id}/roles`, { method: 'POST', body: JSON.stringify(data) }),
-  updateWsRole: (id: number, roleId: number, data: { name?: string; permissions?: Record<string, boolean> }) =>
+  updateWsRole: (id: number, roleId: number, data: { name?: string; permissions?: Record<string, boolean>; field_access?: FieldAccess }) =>
     request<WorkspaceRole>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteWsRole: (id: number, roleId: number) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'DELETE' }),
@@ -863,10 +881,10 @@ export const api = {
   // Sprints
   getSprints: () => request<Sprint[]>('/api/sprints'),
   createSprint: (data: Record<string, any>) =>
-    request<Sprint>('/api/sprints', { method: 'POST', body: JSON.stringify(data) }),
+    request<Sprint>('/api/sprints', { method: 'POST', body: JSON.stringify(writableFields('sprints', data, currentFieldAccess())) }),
   getSprint: (id: number) => request<SprintDetail>(`/api/sprints/${id}`),
   updateSprint: (id: number, data: Record<string, any>) =>
-    request<Sprint>(`/api/sprints/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    request<Sprint>(`/api/sprints/${id}`, { method: 'PATCH', body: JSON.stringify(writableFields('sprints', data, currentFieldAccess())) }),
   deleteSprint: (id: number) =>
     request<{ ok: boolean }>(`/api/sprints/${id}`, { method: 'DELETE' }),
   addSprintTasks: (id: number, taskIds: number[]) =>

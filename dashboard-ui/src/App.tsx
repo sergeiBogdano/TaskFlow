@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './components/AuthProvider';
 import { AdminRoute, PermissionRoute, PrivateRoute } from './components/PrivateRoute';
 import { Layout } from './components/Layout';
+import { WorkHome } from './pages/WorkHome';
 import { Login } from './pages/Login';
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -36,7 +37,11 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route element={<PrivateRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<PermissionRoute permission="dashboard"><Dashboard /></PermissionRoute>} />
+                <Route path="/" element={<WorkHome />} />
+                <Route path="/work" element={<WorkHome />} />
+                <Route path="/manage" element={<WorkHome area="manage" />} />
+                <Route path="/admin" element={<WorkHome area="admin" />} />
+                <Route path="/overview" element={<PermissionRoute permission="dashboard"><Dashboard /></PermissionRoute>} />
                 <Route path="/wiki" element={<Wiki />} />
                 <Route path="/tasks" element={<PermissionRoute permission="tasks"><Tasks /></PermissionRoute>} />
                 <Route path="/kanban" element={<PermissionRoute permission="kanban"><Kanban /></PermissionRoute>} />

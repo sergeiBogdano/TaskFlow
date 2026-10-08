@@ -40,7 +40,7 @@ export function Login() {
             TF
           </div>
           <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-[var(--color-text)]">TaskFlow</h1>
-          <p className="mt-2 text-[15px] text-[var(--color-text-secondary)]">Задачи, проекты и CRM команды</p>
+          <p className="mt-2 text-[15px] text-[var(--color-text-secondary)]">Работа, обучение и знания</p>
         </div>
         <form
           onSubmit={handleSubmit}
@@ -79,7 +79,7 @@ export function Login() {
             {loading ? 'Вход...' : (<>Войти <ArrowRight size={17} /></>)}
           </button>
         </form>
-        <p className="mt-8 text-center text-[13px] text-[var(--color-muted)]">Внутренняя система команды</p>
+        <p className="mt-8 text-center text-[13px] text-[var(--color-muted)]">Личные и командные пространства</p>
       </div>
     </div>
   );

@@ -120,14 +120,14 @@ async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> d
         )).scalar_one_or_none()
         if member is None:
             return None
-        if not member.custom_role_id:
-            return dict(workspace_default_permissions(member.role))
-        role = await session.get(WorkspaceRole, member.custom_role_id)
-        if role is None or role.workspace_id != workspace_id:
-            return dict(workspace_default_permissions(member.role))
-        raw = json.loads(role.permissions) if isinstance(role.permissions, str) else (role.permissions or {})
+        from app.core.access_policy import parse_policy
+        role = await session.get(WorkspaceRole, member.custom_role_id) if member.custom_role_id else None
         allowed = set(work_scope_keys())
-        return {key: True for key, value in raw.items() if value and key in allowed}
+        raw = parse_policy(role.permissions) if role and role.workspace_id == workspace_id else workspace_default_permissions(member.role)
+        result = {key: True for key, value in raw.items() if value and key in allowed}
+        overrides = parse_policy(member.access_overrides).get('permissions', {})
+        result.update({key: value for key, value in overrides.items() if key in allowed and isinstance(value, bool)})
+        return result
 
 
 async def effective_permissions(user, workspace_id: int | None = None) -> dict:
@@ -377,7 +377,7 @@ async def get_effective_features(user, workspace_id: int | None = None,
                 state[key] = all(values)
     # Global disable and space module disable are hard limits; user overrides cannot reopen them.
     for row in rows:
-        if not is_root_user(user) and row.scope == 'global' and not row.enabled and row.key in state:
+        if not is_root_user(user) and row.scope in ('global', 'workspace') and not row.enabled and row.key in state:
             state[row.key] = False
     if workspace_id is not None:
         import json
@@ -389,6 +389,15 @@ async def get_effective_features(user, workspace_id: int | None = None,
             module = module_for_permission(key)
             if module and module not in enabled_modules:
                 state[key] = False
+    if workspace_id and not is_root_user(user):
+        from app.core.access_policy import field_access
+        fields = await field_access(user, workspace_id)
+        if any(mode == 'hidden' for values in fields.values() for mode in values.values()):
+            for derived in ('dashboard', 'reports', 'ai', 'modules'):
+                if derived in state:
+                    state[derived] = False
+        if any(fields['tasks'].get(key) == 'hidden' for key in ('deadline', 'completionDate', 'assignee', 'client')) and 'calendar' in state:
+            state['calendar'] = False
     return state
 
 
@@ -526,5 +535,16 @@ def require_workspace_role(*allowed: str):
             if role not in allowed and not user_is_superadmin(role_names):
                 raise HTTPException(status_code=403, detail="Недостаточно прав в воркспейсе")
             return {"user": user, "workspace": workspace, "role": role, "role_names": role_names}
+    check._tf_guard = 'ws_role'
+    return check
+
+
+def require_workspace_management(key):
+    async def check(request: Request, user=Depends(get_current_user)):
+        ctx = await require_workspace_role('owner', 'admin')(request, user)
+        permissions = await request_permissions(user, ctx['workspace'].id)
+        if not user.is_root and not (permissions.get(key) and await is_feature_available(user, key, ctx['workspace'].id)):
+            raise HTTPException(403, 'Нет разрешения: ' + key)
+        return ctx
     check._tf_guard = 'ws_role'
     return check

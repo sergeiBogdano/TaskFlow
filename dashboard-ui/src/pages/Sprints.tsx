@@ -1,11 +1,14 @@
+import { useAuth } from '../hooks/useAuth';
 import { useEffect, useState, type FormEvent } from 'react';
 import { CalendarDays, Flag, Plus, Target, Trash2, X } from 'lucide-react';
 import { api, type Sprint, type SprintDetail, type Task } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { formatDate, cn } from '../lib/taskflow';
-import { sectionLabel, sprintField } from '../lib/uiconfig';
+import { sectionLabel, sprintField, taskField } from '../lib/uiconfig';
 
 export function Sprints() {
+  const { user } = useAuth();
+  const canPlan = !!user?.is_root || !!user?.permissions?.sprints_plan;
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,9 +36,9 @@ export function Sprints() {
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h2 className="tf-page-title">{sectionLabel('/sprints')}</h2>
-          <p className="tf-page-subtitle">Временные отрезки с набором задач и прогрессом. Как в Практикуме.</p>
+          <p className="tf-page-subtitle">Цель на неделю, учебный модуль или этап проекта: выберите задачи и следите за результатом.</p>
         </div>
-        <button type="button" onClick={() => setCreateOpen(true)} className="tf-button tf-button-primary ml-auto">
+        <button type="button" disabled={!canPlan} onClick={() => setCreateOpen(true)} className="tf-button tf-button-primary ml-auto">
           <Plus size={16} />Новый спринт
         </button>
       </div>
@@ -51,7 +54,7 @@ export function Sprints() {
           </div>
           <p className="mt-4 text-lg font-semibold">Спринтов пока нет</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-[var(--color-text-secondary)]">Создайте первый — например «Неделя 1», добавьте задачи и следите за прогрессом.</p>
-          <button type="button" onClick={() => setCreateOpen(true)} className="tf-button tf-button-primary mt-5">
+          <button type="button" disabled={!canPlan} onClick={() => setCreateOpen(true)} className="tf-button tf-button-primary mt-5">
             <Plus size={15} />Создать спринт
           </button>
         </div>
@@ -152,22 +155,22 @@ function SprintCreateModal({ onClose, onCreated }: { onClose: () => void; onCrea
         <div className="space-y-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('name').label}</span>
-            <input className="tf-input" value={name} onChange={event => setName(event.target.value)} placeholder="Например: Неделя 1" maxLength={200} required autoFocus />
+            <input className="tf-input" disabled={!sprintField('name').editable} value={name} onChange={event => setName(event.target.value)} placeholder="Например: Неделя 1" maxLength={200} required autoFocus />
           </label>
           {sprintField('goal').visible && (
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('goal').label}</span>
-            <input className="tf-input" value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
+            <input className="tf-input" disabled={!sprintField('goal').editable} value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
           </label>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <label className="block">
+            <label hidden={!sprintField('start').visible} className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('start').label}</span>
-              <input className="tf-input" type="date" value={start} onChange={event => setStart(event.target.value)} />
+              <input className="tf-input" type="date" disabled={!sprintField('start').editable} value={start} onChange={event => setStart(event.target.value)} />
             </label>
-            <label className="block">
+            <label hidden={!sprintField('end').visible} className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('end').label}</span>
-              <input className="tf-input" type="date" value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
+              <input className="tf-input" type="date" disabled={!sprintField('end').editable} value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
             </label>
           </div>
           {error && <div className="text-sm font-semibold text-[var(--color-danger)]">{error}</div>}
@@ -182,6 +185,9 @@ function SprintCreateModal({ onClose, onCreated }: { onClose: () => void; onCrea
 }
 
 function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: () => void }) {
+  const { user } = useAuth();
+  const canPlan = !!user?.is_root || !!user?.permissions?.sprints_plan;
+  const canAssign = canPlan && taskField('sprint').editable;
   const [detail, setDetail] = useState<SprintDetail | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [error, setError] = useState('');
@@ -221,12 +227,14 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
     setSaving(true);
     setError('');
     try {
+      if (status === 'done' && detail?.status !== 'done' && (detail?.progress.total || 0) > (detail?.progress.done || 0) && !confirm('В спринте остались незавершённые задачи. Закрыть спринт и оставить их в нём? Задачи можно перенести в следующий активный спринт.')) return;
       await api.updateSprint(sprintId, {
         name: name.trim(),
         goal: goal.trim() || null,
         start_date: start || null,
         end_date: end || null,
         status,
+        unfinished_policy: status === 'done' ? 'keep' : undefined,
       });
       await load();
     } catch (err) {
@@ -278,6 +286,7 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
         <div className="flex shrink-0 items-center gap-3 px-5 pb-4 pt-5">
           <Target size={18} className="shrink-0 text-[var(--color-accent)]" />
           <input
+            disabled={!canPlan || !sprintField('name').editable}
             value={name}
             onChange={event => setName(event.target.value)}
             placeholder="Название спринта"
@@ -306,17 +315,17 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
               </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="block sm:col-span-2">
+            <label hidden={!sprintField('goal').visible} className="block sm:col-span-2">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('goal').label}</span>
-              <input className="tf-input" value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
+              <input className="tf-input" disabled={!sprintField('goal').editable} value={goal} onChange={event => setGoal(event.target.value)} placeholder="Что хотим закрыть" maxLength={2000} />
             </label>
-            <label className="block">
+            <label hidden={!sprintField('start').visible} className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('start').label}</span>
-              <input className="tf-input" type="date" value={start} onChange={event => setStart(event.target.value)} />
+              <input className="tf-input" type="date" disabled={!sprintField('start').editable} value={start} onChange={event => setStart(event.target.value)} />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">{sprintField('end').label}</span>
-              <input className="tf-input" type="date" value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
+              <input className="tf-input" type="date" disabled={!sprintField('end').editable} value={end} min={start || undefined} onChange={event => setEnd(event.target.value)} />
             </label>
           </div>
               <div className="text-xs text-[var(--color-text-secondary)]">
@@ -328,14 +337,14 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
               <div>
                 <div className="mb-2 text-sm font-bold">Задачи спринта · {(detail.tasks || []).length}</div>
                 <div className="mb-3">
-                  <SearchSelect value="" options={options} onChange={addTask} placeholder="Добавить задачу..." searchPlaceholder="Найти задачу..." />
+                  <SearchSelect disabled={!canAssign || detail.status !== 'active'} value="" options={options} onChange={addTask} placeholder="Добавить задачу..." searchPlaceholder="Найти задачу..." />
                 </div>
                 <div className="space-y-1.5">
                   {(detail.tasks || []).map(t => (
                     <div key={t.id} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: t.status === 'done' ? 'var(--color-success)' : 'var(--color-accent)' }} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.title}</span>
-                      <button type="button" onClick={() => removeTask(t.id)} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] transition hover:bg-[var(--color-surface-3)] hover:text-[var(--color-danger)]" aria-label={`Убрать ${t.title}`}>
+                      <button type="button" disabled={!canAssign} onClick={() => removeTask(t.id)} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--color-muted)] transition hover:bg-[var(--color-surface-3)] hover:text-[var(--color-danger)]" aria-label={`Убрать ${t.title}`}>
                         <X size={14} />
                       </button>
                     </div>
@@ -350,16 +359,17 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 py-4">
-          <button type="button" onClick={removeSprint} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
+          <button type="button" disabled={!canPlan} onClick={removeSprint} className="tf-button text-[var(--color-danger)]"><Trash2 size={15} />Удалить</button>
           <div className="ml-auto flex gap-2">
             <button
               type="button"
+              disabled={!canPlan}
               onClick={() => { setStatus(status === 'done' ? 'active' : 'done'); }}
               className="tf-button"
             >
               {status === 'done' ? 'Вернуть в работу' : 'Завершить'}
             </button>
-            <button type="button" onClick={save} disabled={saving} className="tf-button tf-button-primary">
+            <button type="button" onClick={save} disabled={saving || !canPlan} className="tf-button tf-button-primary">
               {saving ? 'Сохранение...' : 'Сохранить'}
             </button>
           </div>

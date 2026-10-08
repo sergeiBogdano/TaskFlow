@@ -223,7 +223,7 @@ async def generate_tasks(module_id: int, data: dict = None, user=Depends(require
                     deadline=deadline,
                     creator_id=user.id,
                     notes=getattr(m, 'task_notes_template', None),
-                    workspace_id=client_ws.get(client_id),
+                    workspace_id=client_ws.get(client_id) or m.workspace_id,
                 )
                 session.add(t)
                 if m.assignee_id and m.assignee_id != user.id:

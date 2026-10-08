@@ -9,7 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p data logs
+RUN groupadd --gid 10001 taskflow && useradd --uid 10001 --gid taskflow --no-create-home taskflow \
+    && mkdir -p data logs && chown -R taskflow:taskflow /app
+
+USER taskflow
 
 EXPOSE 8000
 

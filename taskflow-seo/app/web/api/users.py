@@ -1,3 +1,4 @@
+from app.core.config import settings
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -175,7 +176,7 @@ async def _can_reset_password(session, actor, actor_permissions: dict, target_id
 
 
 @router.put('/{user_id}/role')
-async def set_role(user_id: int, request: Request, user=Depends(require_root())):
+async def set_role(user_id: int, request: Request, user=Depends(require_permission('users_manage'))):
     data = await request.json()
     role_id = data.get('role_id')
     async with async_session() as session:
@@ -184,6 +185,10 @@ async def set_role(user_id: int, request: Request, user=Depends(require_root()))
             raise HTTPException(status_code=404, detail='User not found')
         if u.is_root:
             raise HTTPException(status_code=403, detail='Нельзя менять роль root-пользователя')
+        if not user.is_root:
+            target_permissions = await get_user_permissions(user_id)
+            if user_id == user.id or any(target_permissions.get(key) for key in ('users', 'users_manage', 'all')):
+                raise HTTPException(403, 'Нельзя изменять себя или администратора приложения')
         ur_check = await session.execute(
             select(UserRole).where(UserRole.user_id == user_id)
         )
@@ -204,6 +209,8 @@ async def set_role(user_id: int, request: Request, user=Depends(require_root()))
         role_permissions = (
             json.loads(r.permissions) if isinstance(r.permissions, str) else (r.permissions or {})
         )
+        if not user.is_root and any(role_permissions.get(key) for key in ('users', 'users_manage', 'settings')):
+            raise HTTPException(403, 'Профили администраторов приложения назначает только root')
         assert_within_ceiling(await get_user_permissions(user.id), role_permissions,
                               detail='Назначаемая роль даёт права выше ваших')
         await assert_features_grantable(role_permissions)

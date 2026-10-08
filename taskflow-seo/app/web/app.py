@@ -22,6 +22,7 @@ _base = Path(__file__).parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_runtime_secrets()
     if settings.DATABASE_URL.startswith("sqlite+aiosqlite:///"):
         db_path = Path(
             settings.DATABASE_URL.replace(
@@ -31,17 +32,18 @@ async def lifespan(app: FastAPI):
         )
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    Path(settings.LOG_FILE).parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    log_handler = RotatingFileHandler(
-        settings.LOG_FILE,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-        encoding="utf-8",
-    )
+    handlers = [logging.StreamHandler()]
+    file_logging_unavailable = False
+    try:
+        Path(settings.LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+        handlers.insert(0, RotatingFileHandler(
+            settings.LOG_FILE, maxBytes=10 * 1024 * 1024,
+            backupCount=5, encoding="utf-8",
+        ))
+    except PermissionError:
+        # Existing Docker volumes may contain root-owned logs from an older image.
+        # Container stdout stays available without restoring root privileges.
+        file_logging_unavailable = True
 
     logging.basicConfig(
         level=getattr(
@@ -50,12 +52,11 @@ async def lifespan(app: FastAPI):
             logging.INFO,
         ),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            log_handler,
-            logging.StreamHandler(),
-        ],
+        handlers=handlers,
         force=True,
     )
+    if file_logging_unavailable:
+        logging.warning('File logging is unavailable; using console. Check logs volume permissions for UID 10001.')
 
     await init_db()
     await start_scheduler()
@@ -76,6 +77,9 @@ app = FastAPI(
 from app.web.middleware import work_permission_middleware  # noqa: E402
 
 app.middleware("http")(work_permission_middleware)
+from app.web.security import security_headers, RequestSizeLimit
+app.middleware("http")(security_headers)
+app.add_middleware(RequestSizeLimit)
 
 
 @app.get("/health")
@@ -132,6 +136,7 @@ from app.web.api.permissions import router as permissions_router
 from app.web.api.groups import router as groups_router
 from app.web.api.features import router as features_router
 from app.web.api.workspace_roles import router as workspace_roles_router
+from app.web.api.workspace_access import router as workspace_access_router
 
 
 from app.web.api.crm import router as crm_router
@@ -143,7 +148,7 @@ _api_routers = (auth_router, users_router, roles_router, clients_router, tasks_r
     modules_router, dashboard_router, calendar_router, notifications_router, saved_views_router,
     quick_tasks_router, reports_router, ai_router, ai_analytics_router, workspaces_router,
     sprints_router, notes_router, permissions_router, groups_router, features_router,
-    workspace_roles_router, crm_router)
+    workspace_roles_router, workspace_access_router, crm_router)
 _signatures = {(method, route.path) for router in _api_routers for route in router.routes
                if hasattr(route, 'methods') for method in route.methods}
 helpers = APIRouter()
@@ -177,6 +182,7 @@ app.include_router(permissions_router)
 app.include_router(groups_router)
 app.include_router(features_router)
 app.include_router(workspace_roles_router)
+app.include_router(workspace_access_router)
 
 if os.getenv('TASKFLOW_LEGACY_UI') == '1':
     from app.web.user_routes import router as user_router
