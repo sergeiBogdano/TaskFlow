@@ -1,3 +1,4 @@
+import { TextEditor } from '../components/TextEditor';
 import { WorkspaceAccessPanel } from '../components/WorkspaceAccessPanel';
 import { SECTION_LABELS, resolveSectionLabel, resolveFieldLabels } from '../lib/uiLabels';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
@@ -315,7 +316,7 @@ export function WorkspaceSettings() {
           </div>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Инструкции для AI</span>
-            <textarea className="tf-input min-h-24 resize-y" value={aiInstructions} onChange={event => setAiInstructions(event.target.value)} placeholder="Например: ты наставник по Python..." disabled={!canEditSettings} />
+            <TextEditor minHeightClassName="min-h-24" value={aiInstructions} onChange={setAiInstructions} placeholder="Например: ты наставник по Python..." readOnly={!canEditSettings} />
           </label>
           {canEditSettings && (
             <div>

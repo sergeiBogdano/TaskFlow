@@ -1,3 +1,4 @@
+import { TextEditor } from '../components/TextEditor';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Building2, CalendarClock, Clock3, Edit3, FileText, Plus, Trash2, UsersRound, X } from 'lucide-react';
@@ -336,7 +337,7 @@ function ModuleModal({
                 <RichTextEditor value={taskNotesTemplate} onChange={setTaskNotesTemplate} minHeightClassName="min-h-24" placeholder="Что нужно сделать, какой результат получить, ссылки и критерии готовности..." />
               </Field>
               <Field label="Дополнительные шаблоны, каждый с новой строки" wide>
-                <textarea className="tf-input min-h-24" value={templates} onChange={event => setTemplates(event.target.value)} placeholder={'Собрать данные\nПроверить доступы\nОтправить отчёт клиенту'} />
+                <TextEditor minHeightClassName="min-h-24" value={templates} onChange={setTemplates} placeholder={'Собрать данные\nПроверить доступы\nОтправить отчёт клиенту'} />
               </Field>
               <Field label="Описание правила" wide><RichTextEditor value={description} onChange={setDescription} minHeightClassName="min-h-24" /></Field>
             </div>

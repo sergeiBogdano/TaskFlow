@@ -1,3 +1,4 @@
+import { TextEditor } from '../components/TextEditor';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, BarChart3, Bot, CalendarClock, Send, Sparkles, Trash2, UsersRound, Wand2 } from 'lucide-react';
@@ -179,15 +180,15 @@ export function AiAnalytics() {
           <div className="grid gap-3 lg:grid-cols-3">
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Трафик</span>
-              <textarea className="tf-input min-h-24 resize-y" value={traffic} onChange={event => setTraffic(event.target.value)} placeholder="Например: органический трафик +10% за месяц..." />
+              <TextEditor minHeightClassName="min-h-24" value={traffic} onChange={setTraffic} placeholder="Например: органический трафик +10% за месяц..." />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Страницы</span>
-              <textarea className="tf-input min-h-24 resize-y" value={pages} onChange={event => setPages(event.target.value)} placeholder="Какие страницы смотрели..." />
+              <TextEditor minHeightClassName="min-h-24" value={pages} onChange={setPages} placeholder="Какие страницы смотрели..." />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Заметки</span>
-              <textarea className="tf-input min-h-24 resize-y" value={seoNotes} onChange={event => setSeoNotes(event.target.value)} placeholder="Изменения на сайте, контекст..." />
+              <TextEditor minHeightClassName="min-h-24" value={seoNotes} onChange={setSeoNotes} placeholder="Изменения на сайте, контекст..." />
             </label>
           </div>
           <div className="mt-3 space-y-2">

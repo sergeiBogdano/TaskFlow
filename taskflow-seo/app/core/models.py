@@ -689,8 +689,11 @@ def _sanitize_model(_mapper, _connection, target):
         target.content = clean('content')
     elif isinstance(target, Client):
         target.client_notes = clean('client_notes')
+    elif isinstance(target, Module):
+        target.description = clean('description')
+        target.task_notes_template = clean('task_notes_template')
 
 
-for _model in (Task, TaskComment, Note, Client):
+for _model in (Task, TaskComment, Note, Client, Module):
     _event.listen(_model, 'before_insert', _sanitize_model)
     _event.listen(_model, 'before_update', _sanitize_model)

@@ -1,3 +1,4 @@
+import { TextEditor } from './TextEditor';
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -500,10 +501,10 @@ function VoiceTaskAssistant({ onClose }: { onClose: () => void }) {
           <button type="button" onClick={requestClose} className="tf-button w-9 px-0"><X size={15} /></button>
         </div>
         <div className="space-y-3 p-4">
-          <textarea
-            className="tf-input min-h-28 resize-y"
+          <TextEditor
+            minHeightClassName="min-h-28"
             value={text}
-            onChange={event => setText(event.target.value)}
+            onChange={setText}
             onKeyDown={handleEnter}
             placeholder="Например: поставь админу задачу проверить title клиенту Альфа Климат завтра"
             autoFocus

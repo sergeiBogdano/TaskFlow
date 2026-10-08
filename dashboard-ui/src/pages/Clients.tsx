@@ -1,3 +1,4 @@
+import { TextEditor } from '../components/TextEditor';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { sectionLabel } from '../lib/uiconfig';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from 'react';
@@ -745,10 +746,10 @@ function ClientModal({
                   </section>
                 </Panel>
                 <Panel title="Памятка для задач" icon={<AlertTriangle size={16} />}>
-                  <textarea
-                    className="tf-input min-h-28 resize-y"
+                  <TextEditor
+                    minHeightClassName="min-h-28"
                     value={clientWarning}
-                    onChange={event => setClientWarning(event.target.value)}
+                    onChange={setClientWarning}
                     placeholder="Например: нельзя обновлять плагин без согласования; не трогать тему; доступ только через VPN..."
                   />
                   <span className="mt-2 block text-xs text-[var(--color-text-secondary)]">Эта памятка автоматически показывается в задачах клиента, чтобы важное не потерялось.</span>
@@ -779,10 +780,10 @@ function ClientModal({
           {activeTab === 'notes' && canSeeTab('notes') && (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
               <Panel title="Конкуренты" icon={<Target size={16} />}>
-                <textarea
-                  className="tf-input min-h-56 resize-y text-sm leading-6"
+                <TextEditor
+                  minHeightClassName="min-h-56"
                   value={competitors}
-                  onChange={event => setCompetitors(event.target.value)}
+                  onChange={setCompetitors}
                   placeholder={'Например:\nsite-a.ru — сильные статьи и структура услуг\nsite-b.ru — хорошие коммерческие страницы\nsite-c.ru — следить за ценами и офферами'}
                 />
                 <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Это поле хранится только в клиенте и не показывается в задачах.</p>

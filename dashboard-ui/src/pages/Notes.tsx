@@ -6,6 +6,8 @@ import { api, type Note, type NoteFolder } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
 import { RichTextEditor } from '../components/RichTextEditor';
+import { TextEditor } from '../components/TextEditor';
+import { convertNoteFormat } from '../lib/editorHtml';
 import { formatFullDate, cn } from '../lib/taskflow';
 import {
   createLocalFolder,
@@ -30,7 +32,7 @@ const NOTE_FORMATS: Record<string, string> = {
   markdown: 'Markdown',
   text: 'Текст',
   code: 'Код',
-  html: 'HTML',
+  html: 'Документ',
 };
 
 type Tab = 'mine' | 'shared' | 'trash';
@@ -263,6 +265,7 @@ export function Notes() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить заметку.');
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -693,7 +696,8 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
   const readOnly = Boolean(note && !note.is_owner);
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
-  const [format, setFormat] = useState(note?.format || 'markdown');
+  const [format, setFormat] = useState(note?.format || 'html');
+  const [pendingFormat, setPendingFormat] = useState<string | null>(null);
   const [tags, setTags] = useState((note?.tags || []).join(', '));
   const [isPublic, setIsPublic] = useState(note ? note.is_public : false);
   const [folderId, setFolderId] = useState(note?.folderId || '');
@@ -716,7 +720,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
   const initialSnapshot = useMemo(() => ({
     title: note?.title || '',
     content: note?.content || '',
-    format: note?.format || 'markdown',
+    format: note?.format || 'html',
     tags: (note?.tags || []).join(', '),
     isPublic: note ? note.is_public : false,
     folderId: note?.folderId || '',
@@ -732,13 +736,14 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
     folderId !== initialSnapshot.folderId;
 
   const requestClose = () => {
+    if (saving) return;
     if (!isDirty || confirm('Есть несохранённые изменения. Закрыть без сохранения?')) onClose();
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
-    if (readOnly) return;
+    if (readOnly || saving) return;
     if (content.length > 100000) { setError('Максимальный размер заметки — 100 000 символов.'); return; }
     if (!title.trim()) {
       setError('Заголовок не может быть пустым.');
@@ -753,12 +758,19 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
         is_public: isPublic,
         folder_id: folderId,
       });
-    } catch {
-      setError('Не удалось сохранить заметку.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить заметку.');
     }
   };
 
   const links = linkedNotes({ uid: note?.uid || '', title, content }, inventory);
+  const applyFormat = (next: string) => {
+    if (next === format) return;
+    const converted = convertNoteFormat(content, format, next);
+    if (converted.length > 100000) { setError('После преобразования текст превышает 100 000 символов.'); return; }
+    setContent(converted); setFormat(next); setPendingFormat(null); setError('');
+  };
+  const changeFormat = (next: string) => { if (next === format) return; if (content) setPendingFormat(next); else applyFormat(next); };
   const navigateNote = (target: ViewNote) => {
     if (!isDirty || confirm('Есть несохранённые изменения. Перейти без сохранения?')) onNavigate(target);
   };
@@ -767,6 +779,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
     <div className="anim-modal fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/45 p-3 backdrop-blur-sm sm:p-6" onClick={requestClose} style={{ fontFamily: APPLE_FONT }}>
       <form
         onSubmit={submit}
+        onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!readOnly && !saving) event.currentTarget.requestSubmit(); } }}
         className="tf-modal-shell flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden"
         onClick={event => event.stopPropagation()}
       >
@@ -806,7 +819,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
               <button
                 key={key}
                 type="button"
-                onClick={() => setFormat(key)}
+                onClick={() => changeFormat(key)}
                 className={cn(
                   'rounded-full px-4 py-1.5 text-[13.5px] font-medium transition active:scale-[.97]',
                   format === key ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
@@ -838,6 +851,10 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
                 ? 'Серверная заметка. Кнопка «Скачать на ПК» в списке перенесёт её только на этот компьютер.'
                 : 'Личная заметка хранится только на этом ПК и никуда не отправляется.'}
           </p>
+          {pendingFormat && <div role="alert" className="rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] p-4 text-sm">
+            <p>Преобразовать в «{NOTE_FORMATS[pendingFormat]}»? Сложное оформление, таблицы и чек-листы могут измениться. Сделайте копию заметки, если важно сохранить исходник.</p>
+            <div className="mt-3 flex gap-2"><button type="button" className="tf-button tf-button-primary" onClick={() => applyFormat(pendingFormat)}>Преобразовать</button><button type="button" className="tf-button" onClick={() => setPendingFormat(null)}>Оставить формат</button></div>
+          </div>}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
@@ -864,10 +881,10 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
             </label>
           </div>
 
-          <div className="overflow-hidden rounded-[20px] border border-[var(--color-border)] bg-[var(--color-input-bg)] p-1">
-            {format === 'html' ? <RichTextEditor readOnly={readOnly} value={content} onChange={setContent} minHeightClassName="min-h-64" placeholder="Начните писать..." /> : <textarea value={content} onChange={event => setContent(event.target.value)} readOnly={readOnly} maxLength={100000} className="tf-input min-h-64 resize-y font-mono text-sm" placeholder="Начните писать. Ссылка на заметку: [[Название]]" />}
-          </div>
           </fieldset>
+          <div>
+            {format === 'html' ? <RichTextEditor readOnly={readOnly || saving} value={content} onChange={setContent} minHeightClassName="min-h-64" label="Текст заметки" placeholder="Начните писать. Ссылка на заметку: [[Название]]" /> : <TextEditor value={content} onChange={setContent} readOnly={readOnly || saving} format={format as 'text' | 'markdown' | 'code'} label="Текст заметки" minHeightClassName="min-h-64" placeholder="Начните писать. Ссылка на заметку: [[Название]]" />}
+          </div>
           <section className="rounded-xl border border-[var(--color-border)] p-4 text-sm">
             <h3 className="font-semibold">Связи между заметками</h3>
             <p className="mt-1 text-xs text-[var(--color-text-secondary)]">Добавьте [[Название заметки]] в текст. Здесь показаны связи с доступными вам заметками.</p>
@@ -895,6 +912,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
           >
             {saving ? 'Сохранение...' : note ? 'Готово' : 'Создать'}
           </button>
+          {!readOnly && <span className="hidden text-xs text-[var(--color-muted)] sm:inline">Ctrl+S — сохранить</span>}
         </div>
       </form>
     </div>

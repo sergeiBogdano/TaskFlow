@@ -29,6 +29,29 @@ def test_login_throttling_can_be_cleared_after_success():
     assert name not in _failed_logins
 
 
+def test_tables_and_checklists_survive_cleaning_without_active_attributes():
+    html = '<ul data-type="taskList"><li data-type="taskItem" data-checked="true"><label><input type="checkbox" checked></label><div><p>Done</p></div></li></ul><table><tbody><tr><td colspan="2" onclick="evil()"><p>Cell</p></td></tr></tbody></table>'
+    cleaned = clean_html(html)
+    assert 'data-type="taskList"' in cleaned and 'data-checked="true"' in cleaned
+    assert '<table>' in cleaned and 'colspan="2"' in cleaned
+    assert '<input' not in cleaned and 'onclick' not in cleaned
+    assert 'colspan=' not in clean_html('<table><tr><td colspan="' + '9' * 5000 + '">x</td></tr></table>')
+
+
+def test_html_note_formatting_persists_after_create_edit_and_reload(sync_request, admin_cookies):
+    html = '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Todo</p></li></ul><table><tr><th>Header</th></tr><tr><td>Value</td></tr></table>'
+    created = sync_request('POST', '/api/notes', cookies=admin_cookies,
+                           json={'title': 'Editor persistence', 'content': html, 'format': 'html', 'is_public': False, 'tags': []})
+    assert created.status_code == 201, created.text
+    note_id = created.json()['id']
+    updated = sync_request('PUT', f'/api/notes/{note_id}', cookies=admin_cookies,
+                           json={'content': html.replace('data-checked="false"', 'data-checked="true"')})
+    assert updated.status_code == 200, updated.text
+    notes = sync_request('GET', '/api/notes?scope=mine', cookies=admin_cookies).json()['notes']
+    saved = next(note for note in notes if note['id'] == note_id)
+    assert 'data-checked="true"' in saved['content'] and '<table>' in saved['content']
+
+
 @pytest.mark.asyncio
 async def test_nonroot_startup_uses_console_for_old_root_owned_logs(monkeypatch):
     from unittest.mock import AsyncMock

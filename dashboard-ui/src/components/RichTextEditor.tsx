@@ -1,196 +1,139 @@
 import { useEditor, EditorContent } from '@tiptap/react';
+import { Extension } from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
+import { DOMSerializer } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Underline, Link2, Unlink, Code2, Eraser, Eye, Heading1, Heading2, Italic, List, ListOrdered, Loader2, Mic, Pilcrow, Quote, Redo2, Strikethrough, Undo2, Wand2 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { TaskList, TaskItem } from '@tiptap/extension-list';
+import { TableKit } from '@tiptap/extension-table';
+import { Bold, CheckSquare, Code2, Eraser, Eye, Heading2, Italic, Link2, List, ListOrdered, Loader2, Mic, Minus, Pilcrow, Quote, Redo2, SquareCode, Strikethrough, Table2, Underline, Undo2, Unlink, Wand2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
+import { EditorButton, EditorFrame } from './EditorFrame';
+import { MAX_EDITOR_HTML, safeEditorLink } from '../lib/editorText';
+import { richInputHtml } from '../lib/editorHtml';
 
-type Props = {
-  readOnly?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  minHeightClassName?: string;
-  placeholder?: string;
-};
+type Props = { readOnly?: boolean; value: string; onChange: (value: string) => void; minHeightClassName?: string; placeholder?: string; label?: string };
 
-export function RichTextEditor({ readOnly = false, value, onChange, minHeightClassName = 'min-h-28', placeholder }: Props) {
+export function RichTextEditor({ readOnly = false, value, onChange, minHeightClassName = 'min-h-28', placeholder = 'Начните писать…', label = 'Редактор текста' }: Props) {
   const { user } = useAuth();
   const aiEnabled = user?.features?.ai !== false && Boolean(user?.is_root || user?.permissions?.ai);
+  const [preview, setPreview] = useState(false);
   const [listening, setListening] = useState(false);
   const [polishing, setPolishing] = useState(false);
-  const [sourceMode, setSourceMode] = useState(false);
-  const [sourceValue, setSourceValue] = useState(value || '');
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
-  const [count, setCount] = useState(0);
   const [error, setError] = useState('');
+  const lastEmitted = useRef(value);
+  const change = useRef(onChange);
+  const current = useRef({ value, readOnly, preview });
+  useEffect(() => { change.current = onChange; current.current = { value, readOnly, preview }; }, [onChange, value, readOnly, preview]);
+  const mounted = useRef(true);
+  const recognitionRef = useRef<any>(null);
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false, protocols: ['http', 'https', 'mailto'] } }),
-      Placeholder.configure({ placeholder: placeholder || '' }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false, protocols: ['http', 'https', 'mailto'] } }),
+      Placeholder.configure({ placeholder }), TaskList,
+      TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' }, a11y: { checkboxLabel: node => `Выполнено: ${node.textContent || 'пункт списка'}` } }),
+      TableKit.configure({ table: { resizable: false } }),
+      Extension.create({ name: 'textLimits', addProseMirrorPlugins() {
+        return [new Plugin({ filterTransaction: (transaction, state) => {
+          if (!transaction.docChanged) return true;
+          const container = document.createElement('div');
+          container.append(DOMSerializer.fromSchema(state.schema).serializeFragment(transaction.doc.content));
+          const previous = document.createElement('div');
+          previous.append(DOMSerializer.fromSchema(state.schema).serializeFragment(state.doc.content));
+          if (container.innerHTML.length > MAX_EDITOR_HTML && container.innerHTML.length > previous.innerHTML.length) {
+            setError('Максимум 100 000 символов вместе с форматированием.'); return false;
+          }
+          setError(''); return true;
+        } })];
+      } }),
     ],
-    content: value || '',
-    editable: !readOnly,
-    shouldRerenderOnTransaction: true,
-    onUpdate: ({ editor }) => { setCount(editor.getText().length); onChange(editor.getHTML()); },
-    editorProps: { handlePaste: (_view, event) => {
-      if ((event.clipboardData?.getData('text/plain').length || 0) + _view.state.doc.textContent.length > 20_000) { setError('Максимум 20 000 символов.'); return true; }
-      return false;
-    }, handleTextInput: (view, _from, _to, text) => {
-      if (view.state.doc.textContent.length + text.length > 20_000) { setError('Максимум 20 000 символов.'); return true; }
-      return false;
-    } },
+    content: richInputHtml(value || ''), editable: !readOnly, shouldRerenderOnTransaction: true,
+    onUpdate: ({ editor }) => { const html = editor.isEmpty ? '' : editor.getHTML(); lastEmitted.current = html; change.current(html); },
+    editorProps: {
+      attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', class: minHeightClassName },
+      transformPastedHTML: richInputHtml,
+      handlePaste: (_view, event) => {
+        if (event.clipboardData?.files.length) { setError('Добавьте файл через раздел вложений.'); return true; }
+        if ((event.clipboardData?.getData('text/plain').length || 0) > MAX_EDITOR_HTML || (event.clipboardData?.getData('text/html').length || 0) > MAX_EDITOR_HTML * 5) { setError('Вставляемый фрагмент слишком большой. Максимум 100 000 символов.'); return true; }
+        return false;
+      },
+    },
   });
-
   useEffect(() => {
-    if (!editor || !editor.schema) return;
-    if (editor.getHTML() !== (value || '')) {
-      editor.commands.setContent(value || '', { emitUpdate: false });
-    }
-    setSourceValue(value || '');
-    setCount(editor.getText().length);
+    if (!editor || value === lastEmitted.current) return;
+    lastEmitted.current = value; editor.commands.setContent(richInputHtml(value || ''), { emitUpdate: false });
   }, [editor, value]);
-
-  useEffect(() => { editor?.setEditable(!readOnly); }, [editor, readOnly]);
-  if (!editor || !editor.schema) return null;
-  if (readOnly) return <div className="rounded-lg bg-[var(--color-surface-2)] p-3"><p className="mb-2 text-xs text-[var(--color-muted)]">Только просмотр</p><EditorContent editor={editor} /></div>;
-
-  const toggleSource = () => {
-    if (!sourceMode) setSourceValue(editor.getHTML());
-    setSourceMode(previous => !previous);
+  useEffect(() => { editor?.setEditable(!readOnly && !preview && !polishing); }, [editor, readOnly, preview, polishing]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; recognitionRef.current?.abort(); }; }, []);
+  useEffect(() => { if (readOnly || preview) { recognitionRef.current?.abort(); setLinkOpen(false); } }, [readOnly, preview]);
+  if (!editor) return null;
+  const disabled = readOnly || preview || polishing;
+  const setLink = () => {
+    const href = safeEditorLink(linkUrl);
+    if (!href) { setError('Введите полный адрес: https://…, http://… или mailto:…'); return; }
+    editor.chain().focus().extendMarkRange('link').setLink({ href }).run(); setLinkOpen(false); setError('');
   };
-
-  const applySource = () => {
-    if (sourceValue.length > 100_000) { setError('HTML: максимум 100 000 символов.'); return; }
-    editor.commands.setContent(sourceValue || '', { emitUpdate: true });
-    onChange(editor.getHTML());
-    setSourceMode(false);
-  };
-
-  const startListening = () => {
+  const voice = () => {
+    if (listening) { recognitionRef.current?.stop(); return; }
     const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!Recognition) {
-      setError('Браузер не поддерживает голосовой ввод.');
-      return;
-    }
-    setError('');
-    const recognition = new Recognition();
-    recognition.lang = 'ru-RU';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setListening(true);
-    recognition.onerror = () => {
-      setListening(false);
-      setError('Не удалось распознать голос.');
-    };
-    recognition.onend = () => setListening(false);
-    recognition.onresult = (event: any) => {
-      const spoken = event.results?.[0]?.[0]?.transcript || '';
-      if (spoken.trim()) {
-        if (editor.getText().length + spoken.trim().length > 20000) { setError('Максимум 20 000 символов.'); return; }
-        editor.chain().focus().insertContent({ type: 'paragraph', content: [{ type: 'text', text: spoken.trim() }] }).run();
-      }
-    };
-    recognition.start();
+    if (!Recognition) { setError('Голосовой ввод недоступен в этом браузере.'); return; }
+    const recognition = new Recognition(); recognitionRef.current = recognition;
+    recognition.lang = 'ru-RU'; recognition.interimResults = false;
+    recognition.onstart = () => mounted.current && setListening(true);
+    recognition.onend = () => mounted.current && setListening(false);
+    recognition.onerror = () => mounted.current && setError('Проверьте разрешение микрофона и защищённое соединение.');
+    recognition.onresult = (event: any) => { if (!mounted.current || current.current.readOnly || current.current.preview) return; const text = event.results?.[0]?.[0]?.transcript?.trim(); if (text) editor.chain().focus().insertContent({ type: 'text', text }).run(); };
+    try { recognition.start(); } catch { setError('Не удалось включить микрофон.'); }
   };
-
   const polish = async () => {
-    const current = sourceMode ? sourceValue : editor.getHTML();
-    if (!(sourceMode ? sourceValue : editor.getText()).trim()) return;
-    setPolishing(true);
-    setError('');
+    if (editor.isEmpty || polishing) return;
+    const snapshot = current.current.value; setPolishing(true); setError('');
     try {
-      const result = await api.polishText(current);
-      editor.commands.setContent(result.html || current);
-      setSourceValue(result.html || current);
-      onChange(result.html || current);
-      setSourceMode(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось улучшить текст.');
-    } finally {
-      setPolishing(false);
-    }
+      const result = await api.polishText(editor.getHTML());
+      if (!mounted.current || current.current.readOnly || current.current.value !== snapshot) return;
+      editor.commands.setContent(richInputHtml(result.html || snapshot), { emitUpdate: true });
+    } catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'Не удалось улучшить текст.'); }
+    finally { if (mounted.current) setPolishing(false); }
   };
-
-  return (
-    <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-      <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-        <ToolbarButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Жирный"><Bold size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Курсив"><Italic size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Подчеркнутый"><Underline size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => { setLinkUrl(editor.getAttributes('link').href || ''); setLinkOpen(!linkOpen); }} active={editor.isActive('link')} title="Ссылка"><Link2 size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().unsetLink().run()} disabled={!editor.isActive('link')} title="Убрать ссылку"><Unlink size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Зачеркнутый"><Strikethrough size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Очистить форматирование"><Eraser size={15} /></ToolbarButton>
-        <Separator />
-        <ToolbarButton onClick={() => editor.chain().focus().setParagraph().run()} active={editor.isActive('paragraph')} title="Обычный текст"><Pilcrow size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="Заголовок 1"><Heading1 size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Заголовок 2"><Heading2 size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Маркированный список"><List size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Нумерованный список"><ListOrdered size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Цитата"><Quote size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} title="Блок кода"><Code2 size={15} /></ToolbarButton>
-        <Separator />
-        <ToolbarButton onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Отменить"><Undo2 size={15} /></ToolbarButton>
-        <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Повторить"><Redo2 size={15} /></ToolbarButton>
-        <Separator />
-        <ToolbarButton onClick={toggleSource} active={sourceMode} title={sourceMode ? 'Визуальный режим' : 'HTML-код'}>{sourceMode ? <Eye size={15} /> : <Code2 size={15} />}</ToolbarButton>
-        <ToolbarButton onClick={startListening} active={listening} title={listening ? 'Слушаю...' : 'Надиктовать текст'}><Mic size={15} /></ToolbarButton>
-        {aiEnabled && <ToolbarButton onClick={polish} active={polishing} title="Улучшить текст ИИ">{polishing ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}</ToolbarButton>}
-      </div>
-      {linkOpen && <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-2"><input aria-label="Адрес ссылки" type="url" className="tf-input flex-1" value={linkUrl} placeholder="https://example.com" maxLength={2048} onChange={e => setLinkUrl(e.target.value)} /><button type="button" className="tf-button" onClick={() => { if (!/^(https?:\/\/|mailto:)/i.test(linkUrl)) { setError('Разрешены ссылки http, https и mailto.'); return; } editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run(); setLinkOpen(false); setError(''); }}>Применить ссылку</button></div>}
-      {sourceMode ? (
-        <div>
-          <textarea
-            maxLength={100000}
-            rows={14}
-            className={`w-full resize-y bg-[var(--color-overlay)] px-4 py-3 font-mono text-[13px] leading-[1.75] tracking-[.01em] text-[var(--color-text)] outline-none [tab-size:2] ${minHeightClassName}`}
-            value={sourceValue}
-            onChange={event => {
-              setSourceValue(event.target.value);
-              onChange(event.target.value);
-            }}
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-            placeholder="<p>HTML-код заметки...</p>"
-          />
-          <div className="flex justify-end border-t border-[var(--color-border)] px-3 py-2">
-            <button type="button" onClick={applySource} className="tf-button tf-button-primary">Применить HTML</button>
-          </div>
-        </div>
-      ) : (
-        <EditorContent
-          editor={editor}
-          className={`w-full px-3 py-2 text-sm leading-6 [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--color-accent)] [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_code]:rounded [&_.ProseMirror_code]:bg-black/20 [&_.ProseMirror_code]:px-1 [&_.ProseMirror_h1]:text-xl [&_.ProseMirror_h1]:font-black [&_.ProseMirror_h2]:text-lg [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_li]:ml-5 [&_.ProseMirror_pre]:overflow-auto [&_.ProseMirror_pre]:rounded-lg [&_.ProseMirror_pre]:bg-black/25 [&_.ProseMirror_pre]:p-3 ${minHeightClassName}`}
-        />
-      )}
-      <div className="border-t border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-muted)]">{count.toLocaleString()} / 20 000 символов · файлы прикрепляются отдельно, изображения сжимаются перед загрузкой</div>
-      {error && <div className="border-t border-[var(--color-border)] px-3 py-2 text-xs font-semibold text-[var(--color-danger)]">{error}</div>}
-    </div>
-  );
-}
-
-function Separator() {
-  return <div className="mx-1 h-8 w-px bg-[var(--color-border)]" />;
-}
-
-function ToolbarButton({ children, onClick, active, title, disabled = false }: { children: ReactNode; onClick: () => void; active?: boolean; title: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={title}
-      className={`grid h-8 w-8 place-items-center rounded-md border transition-colors ${
-        active
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
-          : 'border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-3)]'
-      }`}
-    >
-      {children}
-    </button>
-  );
+  const button = (title: string, icon: ReactNode, action: () => unknown, active = false, extraDisabled = false) => <EditorButton key={title} title={title} active={active} disabled={disabled || extraDisabled} onClick={() => { if (!disabled) action(); }}>{icon}</EditorButton>;
+  return <EditorFrame label={label} readOnly={readOnly} error={error} footer={<span>{editor.getText().length.toLocaleString('ru-RU')} символов · Ctrl+Z — отменить · Shift+Enter — новая строка</span>} toolbar={<>
+    {!readOnly && <>
+      {button('Жирный (Ctrl+B)', <Bold size={16} />, () => editor.chain().focus().toggleBold().run(), editor.isActive('bold'))}
+      {button('Курсив (Ctrl+I)', <Italic size={16} />, () => editor.chain().focus().toggleItalic().run(), editor.isActive('italic'))}
+      {button('Подчёркнутый (Ctrl+U)', <Underline size={16} />, () => editor.chain().focus().toggleUnderline().run(), editor.isActive('underline'))}
+      {button('Зачёркнутый', <Strikethrough size={16} />, () => editor.chain().focus().toggleStrike().run(), editor.isActive('strike'))}
+      {button('Обычный текст', <Pilcrow size={16} />, () => editor.chain().focus().setParagraph().run(), editor.isActive('paragraph'))}
+      {button('Заголовок', <Heading2 size={16} />, () => editor.chain().focus().toggleHeading({ level: 2 }).run(), editor.isActive('heading'))}
+      {button('Маркированный список', <List size={16} />, () => editor.chain().focus().toggleBulletList().run(), editor.isActive('bulletList'))}
+      {button('Нумерованный список', <ListOrdered size={16} />, () => editor.chain().focus().toggleOrderedList().run(), editor.isActive('orderedList'))}
+      {button('Чек-лист', <CheckSquare size={16} />, () => editor.chain().focus().toggleTaskList().run(), editor.isActive('taskList'))}
+      {button('Цитата', <Quote size={16} />, () => editor.chain().focus().toggleBlockquote().run(), editor.isActive('blockquote'))}
+      {button('Код в строке', <Code2 size={16} />, () => editor.chain().focus().toggleCode().run(), editor.isActive('code'))}
+      {button('Блок кода', <SquareCode size={16} />, () => editor.chain().focus().toggleCodeBlock().run(), editor.isActive('codeBlock'))}
+      {button('Разделитель', <Minus size={16} />, () => editor.chain().focus().setHorizontalRule().run())}
+      {button('Ссылка', <Link2 size={16} />, () => { setLinkUrl(editor.getAttributes('link').href || ''); setLinkOpen(!linkOpen); }, editor.isActive('link'))}
+      {button('Убрать ссылку', <Unlink size={16} />, () => editor.chain().focus().unsetLink().run(), false, !editor.isActive('link'))}
+      {button('Вставить таблицу', <Table2 size={16} />, () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), false, editor.isActive('table'))}
+      {button('Очистить форматирование', <Eraser size={16} />, () => editor.chain().focus().clearNodes().unsetAllMarks().run())}
+      {button('Отменить (Ctrl+Z)', <Undo2 size={16} />, () => editor.chain().focus().undo().run(), false, !editor.can().undo())}
+      {button('Повторить (Ctrl+Shift+Z)', <Redo2 size={16} />, () => editor.chain().focus().redo().run(), false, !editor.can().redo())}
+      {button(listening ? 'Остановить диктовку' : 'Надиктовать текст', <Mic size={16} />, voice, listening)}
+      {aiEnabled && button('Улучшить текст ИИ', polishing ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />, polish, polishing)}
+      <EditorButton title={preview ? 'Вернуться к редактированию' : 'Предпросмотр'} active={preview} disabled={polishing} onClick={() => setPreview(!preview)}><Eye size={16} /></EditorButton>
+    </>}
+  </>}>
+    {linkOpen && !disabled && <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-3">
+      <input autoFocus aria-label="Адрес ссылки" className="tf-input flex-1" value={linkUrl} placeholder="https://example.com" maxLength={2048} onChange={event => setLinkUrl(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setLink(); } if (event.key === 'Escape') { event.stopPropagation(); setLinkOpen(false); } }} />
+      <button type="button" className="tf-button tf-button-primary" onClick={setLink}>Применить</button><button type="button" className="tf-button" onClick={() => setLinkOpen(false)}>Отмена</button>
+    </div>}
+    {editor.isActive('table') && !disabled && <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-2 text-xs">
+      <button type="button" className="tf-button" onClick={() => editor.chain().focus().addRowAfter().run()}>+ Строка</button><button type="button" className="tf-button" onClick={() => editor.chain().focus().addColumnAfter().run()}>+ Столбец</button>
+      <button type="button" className="tf-button" onClick={() => editor.chain().focus().deleteRow().run()}>Удалить строку</button><button type="button" className="tf-button" onClick={() => editor.chain().focus().deleteColumn().run()}>Удалить столбец</button><button type="button" className="tf-button" onClick={() => editor.chain().focus().deleteTable().run()}>Удалить таблицу</button>
+    </div>}
+    <EditorContent editor={editor} className={`tf-editor-document ${minHeightClassName}`} onClick={event => { const anchor = (event.target as HTMLElement).closest('a'); if (anchor) { event.preventDefault(); if (disabled) { const href = safeEditorLink(anchor.href); if (href) window.open(href, '_blank', 'noopener,noreferrer'); } } }} />
+  </EditorFrame>;
 }

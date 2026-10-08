@@ -164,6 +164,48 @@ a:hover {
   background: var(--color-selection);
 }
 
+.tf-editor { min-width: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface); }
+.tf-editor:focus-within { border-color: var(--color-focus-border); box-shadow: 0 0 0 3px var(--color-ring); }
+.tf-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-2); }
+.tf-editor-button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: var(--color-text-secondary); }
+.tf-editor-button:hover:not(:disabled) { background: var(--color-overlay-strong); color: var(--color-text); }
+.tf-editor-button.is-active { background: var(--color-accent); color: var(--color-on-accent); }
+.tf-editor-button:disabled { opacity: .35; }
+.tf-editor-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.tf-editor-body { min-height: 0; overflow: auto; }
+.tf-editor-footer { padding: 7px 12px; border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: 11px; background: var(--color-surface-2); }
+.tf-editor-expanded { position: fixed; inset: 16px; z-index: 90; display: flex; flex-direction: column; box-shadow: 0 0 0 100vmax rgba(0,0,0,.55); }
+.tf-editor-expanded .tf-editor-body { flex: 1; }
+.tf-editor-expanded .tf-editor-plain, .tf-editor-expanded .ProseMirror { min-height: 60vh; }
+.tf-editor-document, .tf-editor-plain { padding: 16px; font-size: 14px; line-height: 1.75; color: var(--color-text); overflow-wrap: anywhere; }
+.tf-editor-plain { border: 0; outline: none; background: transparent; tab-size: 2; }
+.tf-editor-document .ProseMirror { outline: none; }
+.tf-editor-document p { margin: 0 0 .65em; }
+.tf-editor-document h1, .tf-editor-document h2, .tf-editor-document h3 { margin: 1em 0 .5em; font-weight: 700; line-height: 1.3; }
+.tf-editor-document h1 { font-size: 1.65em; } .tf-editor-document h2 { font-size: 1.4em; } .tf-editor-document h3 { font-size: 1.2em; }
+.tf-editor-document ul, .tf-editor-document ol { padding-left: 1.5em; margin: .65em 0; }
+.tf-editor-document ul { list-style: disc; } .tf-editor-document ol { list-style: decimal; }
+.tf-editor-document li p { margin: 0; }
+.tf-editor-document ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.tf-editor-document li[data-type="taskItem"] { display: flex; gap: .65em; align-items: baseline; }
+.tf-editor-document li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+.tf-editor-document li[data-type="taskItem"]:not(:has(> label))::before { content: '☐'; color: var(--color-muted); }
+.tf-editor-document li[data-type="taskItem"][data-checked="true"]:not(:has(> label))::before { content: '☑'; color: var(--color-accent); }
+.tf-editor-document li[data-checked="true"] > div { color: var(--color-muted); text-decoration: line-through; }
+.tf-editor-document input[type="checkbox"] { accent-color: var(--color-accent); }
+.tf-editor-document blockquote { border-left: 3px solid var(--color-accent); padding: .5em 1em; margin: .75em 0; background: var(--color-surface-2); }
+.tf-editor-document a { color: var(--color-accent); text-decoration: underline; cursor: pointer; }
+.tf-editor-document code { border-radius: 4px; padding: 2px 4px; background: var(--color-surface-2); font-family: monospace; }
+.tf-editor-document pre { overflow: auto; border-radius: 8px; padding: 12px; margin: .75em 0; background: var(--color-surface-2); white-space: pre; }
+.tf-editor-document pre code { padding: 0; background: none; }
+.tf-editor-document hr { margin: 1.25em 0; border-top: 1px solid var(--color-border-strong); }
+.tf-editor-document table { border-collapse: collapse; width: 100%; margin: .75em 0; table-layout: fixed; }
+.tf-editor-document th, .tf-editor-document td { position: relative; border: 1px solid var(--color-border-strong); padding: 7px 10px; vertical-align: top; }
+.tf-editor-document th { background: var(--color-surface-2); font-weight: 600; }
+.tf-editor-document .selectedCell { background: var(--color-selection); }
+.tf-editor-document .is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; color: var(--color-muted); pointer-events: none; height: 0; }
+@media (max-width: 640px) { .tf-editor-expanded { inset: 6px; } .tf-editor-document, .tf-editor-plain { padding: 12px; } }
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
