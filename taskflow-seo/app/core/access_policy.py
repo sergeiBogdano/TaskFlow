@@ -65,6 +65,8 @@ async def field_access(user, workspace_id):
         if not member:
             return {entity: {key: 'hidden' for key in values} for entity, values in fields.items()}
         role = await session.get(WorkspaceRole, member.custom_role_id) if member.custom_role_id else None
+        if member.custom_role_id and (not role or role.deleted_at or role.workspace_id != workspace_id):
+            return {entity: {key: 'hidden' for key in values} for entity, values in fields.items()}
         profile = parse_policy(role.field_access) if role and role.workspace_id == workspace_id else {}
         personal = parse_policy(member.access_overrides).get('fields', {})
         for policy in (profile, personal):

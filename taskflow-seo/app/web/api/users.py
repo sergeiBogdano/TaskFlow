@@ -199,7 +199,7 @@ async def set_role(user_id: int, request: Request, user=Depends(require_permissi
             if r and r.name == 'superadmin':
                 target_is_superadmin = True
         r = await session.get(Role, role_id)
-        if not r:
+        if not r or r.deleted_at:
             raise HTTPException(status_code=404, detail='Role not found')
         if r.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Superadmin cannot be assigned here')

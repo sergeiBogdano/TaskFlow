@@ -40,7 +40,7 @@ async def get_user_role_names(user_id: int) -> set[str]:
         names: set[str] = set()
         for user_role in result.scalars().all():
             role = await session.get(Role, user_role.role_id)
-            if role:
+            if role and not role.deleted_at:
                 names.add(role.name)
         from app.core.models import User
         account = await session.get(User, user_id)
@@ -61,7 +61,7 @@ async def get_user_permissions(user_id: int) -> dict:
         permissions: dict = {}
         for user_role in result.scalars().all():
             role = await session.get(Role, user_role.role_id)
-            if not role:
+            if not role or role.deleted_at:
                 continue
             role_permissions = json.loads(role.permissions or '{}') if isinstance(role.permissions, str) else (role.permissions or {})
             for k, v in role_permissions.items():
@@ -72,7 +72,7 @@ async def get_user_permissions(user_id: int) -> dict:
         )).scalars().all()
         for link in group_rows:
             group = await session.get(Group, link.group_id)
-            if not group:
+            if not group or group.deleted_at:
                 continue
             group_permissions = (
                 json.loads(group.permissions or '{}')
@@ -122,6 +122,8 @@ async def get_workspace_permissions(user_id: int, workspace_id: int | None) -> d
             return None
         from app.core.access_policy import parse_policy
         role = await session.get(WorkspaceRole, member.custom_role_id) if member.custom_role_id else None
+        if member.custom_role_id and (not role or role.deleted_at or role.workspace_id != workspace_id):
+            return {}
         allowed = set(work_scope_keys())
         raw = parse_policy(role.permissions) if role and role.workspace_id == workspace_id else workspace_default_permissions(member.role)
         result = {key: True for key, value in raw.items() if value and key in allowed}
@@ -346,7 +348,7 @@ async def get_effective_features(user, workspace_id: int | None = None,
     """
     from sqlalchemy import or_, select
     from app.core.database import async_session
-    from app.core.models import FeatureOverride, UserGroup
+    from app.core.models import FeatureOverride, Group, UserGroup
 
     if keys is None:
         keys = sorted(_catalog_feature_keys())
@@ -354,7 +356,7 @@ async def get_effective_features(user, workspace_id: int | None = None,
         return {}
     async with async_session() as session:
         group_ids = list((await session.execute(
-            select(UserGroup.group_id).where(UserGroup.user_id == user.id)
+            select(UserGroup.group_id).join(Group, Group.id == UserGroup.group_id).where(UserGroup.user_id == user.id, Group.deleted_at.is_(None))
         )).scalars())
         conds = [FeatureOverride.scope == 'global']
         if workspace_id is not None:

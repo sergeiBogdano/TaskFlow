@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -30,13 +31,16 @@ def _role_permissions(role) -> dict:
 
 
 @router.get('')
-async def list_roles(user=Depends(require_any_permission('users', 'users_manage'))):
+async def list_roles(deleted: bool = False, user=Depends(require_any_permission('users', 'users_manage'))):
+    if deleted and not user.is_root:
+        raise HTTPException(403, 'Корзина профилей приложения доступна только суперадмину')
     async with async_session() as session:
-        r = await session.execute(select(Role).order_by(Role.id))
+        r = await session.execute(select(Role).where(Role.deleted_at.is_not(None) if deleted else Role.deleted_at.is_(None)).order_by(Role.id))
         roles = r.scalars().all()
     return JSONResponse([{
         'id': role.id,
         'name': role.name,
+        'deleted_at': role.deleted_at.isoformat() if role.deleted_at else None,
         'permissions': json.loads(role.permissions) if isinstance(role.permissions, str) else role.permissions,
     } for role in roles])
 
@@ -54,7 +58,7 @@ async def create_role(request: Request, user=Depends(require_root())):
     async with async_session() as session:
         existing = await session.execute(select(Role).where(Role.name == name))
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail='Role already exists')
+            raise HTTPException(status_code=400, detail='Название уже занято. Удалённый профиль можно восстановить.')
         role = Role(name=name, permissions=json.dumps(permissions, ensure_ascii=False))
         session.add(role)
         await session.commit()
@@ -68,7 +72,7 @@ async def update_role(role_id: int, request: Request, user=Depends(require_root(
     granter = await get_user_permissions(user.id)
     async with async_session() as session:
         role = await session.get(Role, role_id)
-        if not role:
+        if not role or role.deleted_at:
             raise HTTPException(status_code=404, detail='Role not found')
         if role.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Cannot modify superadmin role')
@@ -94,7 +98,7 @@ async def update_role(role_id: int, request: Request, user=Depends(require_root(
 async def delete_role(role_id: int, user=Depends(require_root())):
     async with async_session() as session:
         role = await session.get(Role, role_id)
-        if not role:
+        if not role or role.deleted_at:
             raise HTTPException(status_code=404, detail='Role not found')
         if role.name == 'superadmin':
             raise HTTPException(status_code=403, detail='Cannot delete superadmin role')
@@ -102,6 +106,21 @@ async def delete_role(role_id: int, user=Depends(require_root())):
         assert_within_ceiling(await get_user_permissions(user.id), _role_permissions(role),
                               detail='Нельзя удалить роль с правами выше ваших')
         await session.execute(UserRole.__table__.delete().where(UserRole.role_id == role_id))
-        await session.delete(role)
+        role.deleted_at = datetime.now(timezone.utc)
         await session.commit()
     return JSONResponse({'ok': True})
+
+
+@router.post('/{role_id}/restore')
+async def restore_role(role_id: int, user=Depends(require_root())):
+    async with async_session() as session:
+        role = await session.get(Role, role_id)
+        if not role or not role.deleted_at:
+            raise HTTPException(404, 'Удалённая роль не найдена')
+        if role.name == 'superadmin':
+            raise HTTPException(403, 'Системная роль защищена')
+        # Restoration recovers the profile, never its former assignments.
+        await session.execute(UserRole.__table__.delete().where(UserRole.role_id == role_id))
+        role.deleted_at = None
+        await session.commit()
+    return {'ok': True}

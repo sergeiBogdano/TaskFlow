@@ -54,6 +54,7 @@ export type User = {
 };
 
 export type Group = {
+  deleted_at?: string | null;
   id: number;
   name: string;
   permissions: Record<string, boolean>;
@@ -141,6 +142,7 @@ export type TaskFile = {
 export type ClientFile = TaskFile;
 
 export type Role = {
+  deleted_at?: string | null;
   id: number;
   name: string;
   permissions: Record<string, boolean>;
@@ -397,6 +399,7 @@ export type WorkspaceMember = {
 };
 
 export type WorkspaceRole = {
+  deleted_at?: string | null;
   field_access?: FieldAccess;
   id: number;
   workspace_id: number;
@@ -539,7 +542,7 @@ export const api = {
   joinSpace: (id: number) => request(`/api/workspaces/${id}/join`, { method: 'POST' }),
 
   // Roles
-  getRoles: () => request<Role[]>('/api/roles'),
+  getRoles: (deleted = false) => request<Role[]>(`/api/roles${deleted ? '?deleted=true' : ''}`),
   getPermissionCatalog: () => request<PermissionCatalog>('/api/permissions/catalog'),
 
   // Features (кран доступности, Ф6)
@@ -556,13 +559,16 @@ export const api = {
     request<{ ok: boolean }>(`/api/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRole: (id: number) => request<{ ok: boolean }>(`/api/roles/${id}`, { method: 'DELETE' }),
 
+  restoreRole: (id: number) => request<{ ok: boolean }>(`/api/roles/${id}/restore`, { method: 'POST' }),
+
   // Groups (глобальные, только суперадмин)
-  getGroups: () => request<Group[]>('/api/groups'),
+  getGroups: (deleted = false) => request<Group[]>(`/api/groups${deleted ? '?deleted=true' : ''}`),
   createGroup: (data: { name: string; permissions?: Record<string, boolean> }) =>
     request<Group>('/api/groups', { method: 'POST', body: JSON.stringify(data) }),
   updateGroup: (id: number, data: Record<string, any>) =>
     request<{ ok: boolean }>(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteGroup: (id: number) => request<{ ok: boolean }>(`/api/groups/${id}`, { method: 'DELETE' }),
+  restoreGroup: (id: number) => request<{ ok: boolean }>(`/api/groups/${id}/restore`, { method: 'POST' }),
   setGroupMembers: (id: number, userIds: number[]) =>
     request<{ ok: boolean }>(`/api/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ user_ids: userIds }) }),
 
@@ -865,13 +871,14 @@ export const api = {
   getWorkspaceAccess: (id: number) => request<WorkspaceAccessReport>(`/api/workspaces/${id}/access`),
   setWorkspaceAccess: (id: number, userId: number, data: { permissions: Record<string, boolean>; fields: FieldAccess }) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}/access`, { method: 'PUT', body: JSON.stringify(data) }),
-  getWsRoles: (id: number) => request<WorkspaceRolesResponse>(`/api/workspaces/${id}/roles`),
+  getWsRoles: (id: number, deleted = false) => request<WorkspaceRolesResponse>(`/api/workspaces/${id}/roles${deleted ? '?deleted=true' : ''}`),
   createWsRole: (id: number, data: { name: string; permissions: Record<string, boolean>; field_access?: FieldAccess }) =>
     request<WorkspaceRole>(`/api/workspaces/${id}/roles`, { method: 'POST', body: JSON.stringify(data) }),
   updateWsRole: (id: number, roleId: number, data: { name?: string; permissions?: Record<string, boolean>; field_access?: FieldAccess }) =>
     request<WorkspaceRole>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteWsRole: (id: number, roleId: number) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/roles/${roleId}`, { method: 'DELETE' }),
+  restoreWsRole: (id: number, roleId: number) => request<{ ok: boolean }>(`/api/workspaces/${id}/roles/${roleId}/restore`, { method: 'POST' }),
   setWsMemberRole: (id: number, userId: number, roleId: number | null) =>
     request<WorkspaceMember>(`/api/workspaces/${id}/members/${userId}/custom-role`, {
       method: 'PUT',

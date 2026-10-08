@@ -68,6 +68,7 @@ task_tags = Table(
 
 class Role(Base):
     __tablename__ = "roles"
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     id = Column(Integer, primary_key=True)
     name = Column(String(50), unique=True, nullable=False)
     permissions = Column(Text, default="{}")
@@ -519,6 +520,7 @@ class WorkspaceRole(Base):
     """Кастомная роль окружения (Ф7): только scope=work-ключи, чекбоксы."""
     __tablename__ = 'workspace_roles'
 
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     workspace_id = Column(Integer, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
     name = Column(String(100), nullable=False)
@@ -614,6 +616,7 @@ class Group(Base):
     """Глобальная группа пользователей: additive-набор прав (правило «Группы»)."""
     __tablename__ = 'groups'
 
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     id = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False)
     permissions = Column(Text, default="{}")

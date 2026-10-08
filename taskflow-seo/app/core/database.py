@@ -38,6 +38,9 @@ async def _migrate():
         return
     async with engine.begin() as conn:
         for col in [
+            'ALTER TABLE roles ADD COLUMN deleted_at DATETIME',
+            'ALTER TABLE groups ADD COLUMN deleted_at DATETIME',
+            'ALTER TABLE workspace_roles ADD COLUMN deleted_at DATETIME',
             'ALTER TABLE tasks ADD COLUMN contract_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL',
             'ALTER TABLE tasks ADD COLUMN crm_deal_id INTEGER REFERENCES crm_deals(id) ON DELETE SET NULL',
             'ALTER TABLE tasks ADD COLUMN comment TEXT',
@@ -163,6 +166,9 @@ async def _ensure_indexes():
     # Списки разъезжались (custom_role_id падал прод) — при добавлении колонки
     # дописывать в оба места.
     pg_statements = [
+        'ALTER TABLE roles ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
+        'ALTER TABLE groups ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
+        'ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
         "ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS access_version INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS field_access TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS access_overrides TEXT NOT NULL DEFAULT '{}'",

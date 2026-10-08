@@ -1,7 +1,7 @@
 import { FieldAccessEditor } from './FieldAccessEditor';
 import type { FieldAccess } from '../lib/fieldAccess';
 import { useCallback, useEffect, useState } from 'react';
-import { Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, ShieldCheck, Trash2, RotateCcw, X } from 'lucide-react';
 import {
   api,
   type PermissionCatalog,
@@ -30,6 +30,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
 
   const [formOpen, setFormOpen] = useState(false);
   const [roles, setRoles] = useState<WorkspaceRole[]>([]);
+  const [deletedRoles, setDeletedRoles] = useState<WorkspaceRole[]>([]);
   const [features, setFeatures] = useState<Record<string, boolean>>({});
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -41,15 +42,19 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
 
   const load = useCallback(async () => {
     try {
-      const [data, cat] = await Promise.all([
+      const [data, cat, archived] = await Promise.all([
         api.getWsRoles(workspaceId),
         api.getPermissionCatalog().catch(() => null),
+        api.getWsRoles(workspaceId, true),
       ]);
       setRoles(data.roles);
+      setDeletedRoles(archived.roles);
       setFeatures(data.features || {});
       setCatalog(cat);
-    } catch {
+    } catch (err) {
       setRoles([]);
+      setDeletedRoles([]);
+      setMsg(err instanceof Error ? err.message : 'Не удалось загрузить профили');
     }
   }, [workspaceId]);
 
@@ -261,6 +266,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
                   <button
                     type="button"
                     onClick={() => remove(role)}
+                    disabled={busy}
                     className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]"
                     title="Удалить"
                     aria-label={`Удалить роль ${role.name}`}
@@ -276,6 +282,7 @@ export function WsRolesPanel({ workspaceId, canManage }: WsRolesPanelProps) {
           <div className="text-sm text-[var(--color-text-secondary)]">Профилей пока нет. Создайте профиль, затем назначьте его участнику выше.</div>
         )}
       </div>
+      {canManage && <details className="mt-4 rounded-xl border border-[var(--color-border)] p-3"><summary className="cursor-pointer text-sm font-semibold">Удалённые профили · {deletedRoles.length}</summary><p className="my-3 text-xs text-[var(--color-muted)]">Назначенный участникам профиль нельзя удалить. Сначала явно выберите для них другие профили. Восстановленный профиль нужно назначать вручную.</p>{deletedRoles.map(item => <div key={item.id} className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] py-2"><span className="flex-1 text-sm">{item.name}</span><button disabled={busy} className="tf-button" onClick={async () => { setBusy(true); setMsg(''); try { await api.restoreWsRole(workspaceId, item.id); await load(); } catch (err) { setMsg(err instanceof Error ? err.message : 'Не удалось восстановить профиль'); } finally { setBusy(false); } }}><RotateCcw size={14} />Восстановить</button></div>)}{!deletedRoles.length && <p className="text-xs text-[var(--color-muted)]">Удалённых профилей нет.</p>}</details>}
       {msg && <p className="mt-3 text-sm text-[var(--color-text-secondary)]">{msg}</p>}
     </section>
   );

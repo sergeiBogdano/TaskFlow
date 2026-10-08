@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -47,6 +48,7 @@ def _role_to_dict(role: WorkspaceRole) -> dict:
         "id": role.id,
         "workspace_id": role.workspace_id,
         "name": role.name,
+        "deleted_at": role.deleted_at.isoformat() if role.deleted_at else None,
         "permissions": _role_permissions(role),
         "field_access": parse_policy(role.field_access),
         "created_at": role.created_at.isoformat() if role.created_at else None,
@@ -107,12 +109,12 @@ async def _assert_role_editable(session, ctx, role_id: int) -> None:
 
 
 @router.get("/{workspace_id}/roles")
-async def list_ws_roles(workspace_id: int, ctx=Depends(require_workspace_management("workspace_profiles"))):
+async def list_ws_roles(workspace_id: int, deleted: bool = False, ctx=Depends(require_workspace_management("workspace_profiles"))):
     """Роли окружения + эффективные фичи (чекбоксы, отключённые краном, скрыты)."""
     async with async_session() as session:
         rows = (await session.execute(
             select(WorkspaceRole)
-            .where(WorkspaceRole.workspace_id == ctx["workspace"].id)
+            .where(WorkspaceRole.workspace_id == ctx["workspace"].id, WorkspaceRole.deleted_at.is_not(None) if deleted else WorkspaceRole.deleted_at.is_(None))
             .order_by(WorkspaceRole.id)
         )).scalars().all()
         features = await grantable_features(ctx["user"], ctx["workspace"].id)
@@ -138,7 +140,7 @@ async def create_ws_role(workspace_id: int, request: Request,
             )
         )).scalar_one_or_none()
         if existing:
-            raise HTTPException(status_code=400, detail="Роль с таким названием уже есть")
+            raise HTTPException(status_code=400, detail="Название уже занято. Если профиль удалён, восстановите его в списке удалённых.")
         role = WorkspaceRole(
             workspace_id=ctx["workspace"].id,
             name=name,
@@ -157,7 +159,7 @@ async def update_ws_role(workspace_id: int, role_id: int, request: Request,
     data = await read_object(request)
     async with async_session() as session:
         role = await session.get(WorkspaceRole, role_id)
-        if role is None or role.workspace_id != ctx["workspace"].id:
+        if role is None or role.deleted_at or role.workspace_id != ctx["workspace"].id:
             raise HTTPException(status_code=404, detail="Роль не найдена")
         await _assert_role_editable(session, ctx, role_id)
         if "field_access" in data:
@@ -185,7 +187,7 @@ async def update_ws_role(workspace_id: int, role_id: int, request: Request,
                     )
                 )).scalar_one_or_none()
                 if clash:
-                    raise HTTPException(status_code=400, detail="Роль с таким названием уже есть")
+                    raise HTTPException(status_code=400, detail="Название уже занято. Если профиль удалён, восстановите его в списке удалённых.")
                 role.name = name
             role.permissions = json.dumps(permissions, ensure_ascii=False)
             await session.commit()
@@ -199,14 +201,15 @@ async def delete_ws_role(workspace_id: int, role_id: int,
                          ctx=Depends(require_workspace_management("workspace_profiles"))):
     async with async_session() as session:
         role = await session.get(WorkspaceRole, role_id)
-        if role is None or role.workspace_id != ctx["workspace"].id:
+        if role is None or role.deleted_at or role.workspace_id != ctx["workspace"].id:
             raise HTTPException(status_code=404, detail="Роль не найдена")
         assigned = (await session.execute(select(WorkspaceMember.user_id).where(
             WorkspaceMember.custom_role_id == role_id,
         ))).first()
         if assigned:
             raise HTTPException(status_code=409, detail='Роль назначена участникам. Сначала явно смените их профили доступа, затем удалите роль.')
-        await session.delete(role)
+        await _assert_role_editable(session, ctx, role_id)
+        role.deleted_at = datetime.now(timezone.utc)
         await session.commit()
     return JSONResponse({"ok": True})
 
@@ -240,7 +243,7 @@ async def assign_ws_role(workspace_id: int, user_id: int, request: Request,
         role_name = None
         if role_id is not None:
             role = await session.get(WorkspaceRole, int(role_id))
-            if role is None or role.workspace_id != ctx["workspace"].id:
+            if role is None or role.deleted_at or role.workspace_id != ctx["workspace"].id:
                 raise HTTPException(status_code=404, detail="Роль не найдена")
             # выдавать можно только то, что вправе выдавать сам:
             # иначе админ раздаёт чужие привилегированные профили
@@ -282,3 +285,22 @@ async def grantable_features(user, workspace_id, keys=None):
         if not row.enabled and row.key in state:
             state[row.key] = False
     return state
+
+
+@router.post('/{workspace_id}/roles/{role_id}/restore')
+async def restore_ws_role(workspace_id: int, role_id: int,
+                          ctx=Depends(require_workspace_management('workspace_profiles'))):
+    async with async_session() as session:
+        role = await session.get(WorkspaceRole, role_id)
+        if not role or not role.deleted_at or role.workspace_id != ctx['workspace'].id:
+            raise HTTPException(404, 'Удалённый профиль не найден')
+        await _assert_role_editable(session, ctx, role_id)
+        if await session.scalar(select(WorkspaceMember.id).where(WorkspaceMember.custom_role_id == role_id).limit(1)):
+            raise HTTPException(409, 'Сначала явно смените профили связанных участников. Восстановление не должно возвращать права автоматически.')
+        from app.core.permissions import get_workspace_permissions
+        ceiling = {'all': True} if is_root_user(ctx['user']) else await get_workspace_permissions(ctx['user'].id, workspace_id) or {}
+        assert_within_ceiling(ceiling, _role_permissions(role))
+        await assert_field_ceiling(ctx['user'], workspace_id, parse_policy(role.field_access))
+        role.deleted_at = None
+        await session.commit()
+    return {'ok': True}
