@@ -45,15 +45,16 @@ class TestWorkspaces:
         resp = sync_request("POST", "/api/workspaces", json={"name": "  "}, cookies=admin_cookies)
         assert resp.status_code == 400
 
-    def test_update_settings_owner(self, sync_request, admin_cookies):
+    @pytest.mark.parametrize("theme", ["cream", "graphite", "glass"])
+    def test_update_settings_owner(self, sync_request, admin_cookies, theme):
         ws = _make_workspace(sync_request, admin_cookies, "Настройки ТС")
         resp = sync_request(
             "PATCH", f"/api/workspaces/{ws['id']}",
-            json={"theme": "graphite", "dictionary": {"clients": "Проекты"}},
+            json={"theme": theme, "dictionary": {"clients": "Проекты"}},
             cookies=admin_cookies,
         )
         assert resp.status_code == 200
-        assert resp.json()["theme"] == "graphite"
+        assert resp.json()["theme"] == theme
 
     def test_update_settings_member_forbidden(self, sync_request, admin_cookies, executor_cookies):
         ws = _make_workspace(sync_request, admin_cookies, "Чужие настройки ТС")

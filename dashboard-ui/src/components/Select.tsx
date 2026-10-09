@@ -149,7 +149,7 @@ export function Select({
         onClick={() => open ? setOpen(false) : show()}
         title={selected?.label || placeholder}
         className={cn(
-          'flex min-w-0 w-full items-center border border-[var(--color-border)] bg-[var(--color-input-bg)] text-[var(--color-text)] text-left transition',
+          'tf-select-trigger flex min-w-0 w-full items-center border border-[var(--color-border)] bg-[var(--color-input-bg)] text-[var(--color-text)] text-left transition',
           'hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-4 focus:ring-[var(--color-ring)]',
           'disabled:cursor-not-allowed disabled:opacity-60',
           triggerSize,
@@ -222,7 +222,7 @@ export function Select({
 
   if (!label) return control;
   return (
-    <div className="flex min-w-0 items-center gap-2 text-[var(--color-text-secondary)]">
+    <div className="tf-select-labeled flex min-w-0 items-center gap-2 text-[var(--color-text-secondary)]">
       <label htmlFor={`${id}-trigger`} className="shrink-0 text-[14px]">{label}</label>
       {control}
     </div>

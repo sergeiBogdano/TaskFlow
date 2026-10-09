@@ -449,7 +449,7 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
                 return JSONResponse({"error": "Название не может быть пустым"}, status_code=400)
             ws.name = name[:200]
         if payload.theme is not None:
-            if payload.theme not in (None, "", "cream", "graphite"):
+            if payload.theme not in (None, "", "cream", "graphite", "glass"):
                 return JSONResponse({"error": "Неизвестная тема"}, status_code=400)
             ws.theme = payload.theme or None
         if payload.dictionary is not None:

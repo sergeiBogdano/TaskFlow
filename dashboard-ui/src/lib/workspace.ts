@@ -72,7 +72,7 @@ export async function switchWorkspace(id: string): Promise<void> {
     } catch {
       /* ignore */
     }
-    if (detail.theme === 'cream' || detail.theme === 'graphite') {
+    if (detail.theme === 'cream' || detail.theme === 'graphite' || detail.theme === 'glass') {
       applyTheme(detail.theme);
     }
   } catch {

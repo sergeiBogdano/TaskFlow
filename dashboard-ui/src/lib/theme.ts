@@ -1,18 +1,19 @@
-export type ThemeName = 'cream' | 'graphite';
+export type ThemeName = 'cream' | 'graphite' | 'glass';
 
 const KEY = 'taskflow:theme';
 
 export function getTheme(): ThemeName {
   try {
-    return localStorage.getItem(KEY) === 'graphite' ? 'graphite' : 'cream';
+    const stored = localStorage.getItem(KEY);
+    return stored === 'graphite' || stored === 'glass' ? stored : 'cream';
   } catch {
     return 'cream';
   }
 }
 
 export function applyTheme(name: ThemeName): void {
-  if (name === 'graphite') {
-    document.documentElement.dataset.theme = 'graphite';
+  if (name !== 'cream') {
+    document.documentElement.dataset.theme = name;
   } else {
     delete document.documentElement.dataset.theme;
   }

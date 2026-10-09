@@ -97,7 +97,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
         transition,
         opacity: isDragging ? 0.35 : 1,
         ...(isActive
-          ? { background: 'var(--color-accent)', color: 'var(--color-on-accent)', boxShadow: '0 8px 20px rgba(43,38,32,.3)' }
+          ? { background: 'var(--nav-active-bg, var(--color-accent))', color: 'var(--nav-active-text, var(--color-on-accent))', boxShadow: 'var(--nav-active-shadow, 0 8px 20px rgba(43,38,32,.3))' }
           : undefined),
       })}
     >
@@ -108,7 +108,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
             <span className="block truncate font-medium">{item.label}</span>
             <span
               className="hidden truncate text-[11px] lg:block"
-              style={{ color: active ? 'rgba(245,241,234,.68)' : 'var(--color-muted)' }}
+              style={{ color: active ? 'var(--nav-active-hint, rgba(245,241,234,.68))' : 'var(--color-muted)' }}
             >
               {item.hint}
             </span>
@@ -120,7 +120,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
             {...listeners}
             onClick={event => { event.preventDefault(); event.stopPropagation(); }}
             className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md opacity-70 lg:opacity-0 lg:group-hover:opacity-100', compact && 'lg:hidden', !active && 'text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]')}
-            style={active ? { color: 'rgba(245,241,234,.65)' } : undefined}
+            style={active ? { color: 'var(--nav-active-hint, rgba(245,241,234,.65))' } : undefined}
             aria-label={`Перетащить ${item.label}`}
             title={`Перетащить ${item.label}`}
           >
@@ -242,7 +242,7 @@ export function Layout() {
 
   return (
     <div className="min-h-screen">
-      <aside className={cn('z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
+      <aside className={cn('tf-app-sidebar z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
         <div className="mb-2 flex shrink-0 items-center gap-3 px-2 py-2 lg:mb-4">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
@@ -319,7 +319,7 @@ export function Layout() {
       </aside>
 
       <div className={cn(sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[264px]')}>
-        <header className="sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
+        <header className="tf-app-header sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
           <div className="min-w-0">
             <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
             <p className="text-xs text-[var(--color-text-secondary)]">{WORK_AREAS[area].hint}</p>

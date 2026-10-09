@@ -101,14 +101,16 @@ export function Settings() {
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Palette size={16} />Оформление</h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {([
             ['cream', 'Крем', 'Светлая, тёплая'],
             ['graphite', 'Графит', 'Тёмная'],
+            ['glass', 'Стекло', 'Белый, синий, мягкое стекло'],
           ] as [ThemeName, string, string][]).map(([name, label, hint]) => (
             <button
               key={name}
               type="button"
+              aria-pressed={theme === name}
               onClick={() => switchTheme(name)}
               className={theme === name ? 'tf-button tf-button-primary h-auto flex-col gap-0.5 py-3' : 'tf-button h-auto flex-col gap-0.5 py-3'}
             >
