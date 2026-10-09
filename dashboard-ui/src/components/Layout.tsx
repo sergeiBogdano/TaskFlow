@@ -242,12 +242,12 @@ export function Layout() {
 
   return (
     <div className="min-h-screen">
-      <aside className={cn('tf-app-sidebar z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'lg:w-[76px]' : 'lg:w-[264px]')}>
+      <aside className={cn('tf-app-sidebar z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'tf-sidebar-compact lg:w-[76px]' : 'lg:w-[264px]')}>
         <div className="mb-2 flex shrink-0 items-center gap-3 px-2 py-2 lg:mb-4">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
-            <div className="text-xs text-[var(--color-text-secondary)]">Рабочие пространства</div>
+            <div className="tf-brand-subtitle text-xs text-[var(--color-text-secondary)]">Рабочие пространства</div>
           </div>
           <button type="button" onClick={toggleSidebar} className={cn('tf-button ml-auto hidden w-9 px-0 lg:inline-flex', sidebarCollapsed && 'lg:ml-0')} title={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'} aria-label={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -258,8 +258,8 @@ export function Layout() {
         <div className={cn(sidebarCollapsed && 'lg:hidden')}>
           <WorkspaceSwitcher compact={sidebarCollapsed} />
         </div>
-        <div className="my-3 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-[var(--color-surface-2)] p-1 lg:flex-col" aria-label="Режим приложения">{areas.map(key => <NavLink key={key} to={WORK_AREAS[key].route} title={WORK_AREAS[key].hint} className={cn('rounded-md px-3 py-2 text-xs font-semibold transition', area === key ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]')}>{sidebarCollapsed ? WORK_AREAS[key].title.slice(0, 1) : WORK_AREAS[key].title}</NavLink>)}</div>
-        <NavLink to={WORK_AREAS[area].route} className="tf-button mb-3 w-full shrink-0">{sidebarCollapsed ? '⌂' : area === 'work' ? 'Мой рабочий стол' : 'Обзор режима'}</NavLink>
+        <div className="tf-app-modes my-3 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-[var(--color-surface-2)] p-1 lg:flex-col" aria-label="Режим приложения">{areas.map(key => <NavLink key={key} to={WORK_AREAS[key].route} title={WORK_AREAS[key].hint} className={cn('rounded-md px-3 py-2 text-xs font-semibold transition', area === key ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]')}>{sidebarCollapsed ? WORK_AREAS[key].title.slice(0, 1) : WORK_AREAS[key].title}</NavLink>)}</div>
+        <NavLink to={WORK_AREAS[area].route} className="tf-sidebar-home tf-button mb-3 w-full shrink-0">{sidebarCollapsed ? '⌂' : area === 'work' ? 'Мой рабочий стол' : 'Обзор режима'}</NavLink>
         <nav className={cn('flex shrink-0 gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
             const visibleItems = group.items.filter(item => (item.to === '/access' ? area === 'manage' || area === 'admin' : workAreaForRoute(item.to) === area) && item.to !== '/settings' && canSee(item.permission));

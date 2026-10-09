@@ -7,8 +7,9 @@
     <title>dashboard-ui</title>
     <script>
       try {
-        if (localStorage.getItem('taskflow:theme') === 'graphite') {
-          document.documentElement.dataset.theme = 'graphite';
+        const theme = localStorage.getItem('taskflow:theme');
+        if (theme === 'graphite' || theme === 'glass') {
+          document.documentElement.dataset.theme = theme;
         }
       } catch (e) {}
     </script>

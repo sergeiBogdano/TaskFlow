@@ -105,7 +105,7 @@ export function Settings() {
           {([
             ['cream', 'Крем', 'Светлая, тёплая'],
             ['graphite', 'Графит', 'Тёмная'],
-            ['glass', 'Стекло', 'Белый, синий, мягкое стекло'],
+            ['glass', 'Стекло', 'Перламутр, графит, прозрачность'],
           ] as [ThemeName, string, string][]).map(([name, label, hint]) => (
             <button
               key={name}
