@@ -29,7 +29,7 @@ type SelectProps = {
 
 /**
  * Глобальный дропдаун проекта — единый стиль везде:
- * кастомный триггер + стеклянный список вместо нативного select.
+ * кастомный триггер и читаемый список поверх панелей.
  */
 export function Select({
   value,
@@ -53,7 +53,7 @@ export function Select({
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const menuStyle = useFloatingMenu(open, rootRef, 180);
+  const menuStyle = useFloatingMenu(open, rootRef, 240);
   const selected = options.find(option => option.value === value);
 
   const filtered = useMemo(() => {
@@ -205,8 +205,8 @@ export function Select({
                 >
                   {option.color && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: option.color }} />}
                   <span className="min-w-0 flex-1">
-                    <span className={cn('block break-words', selectedOption ? 'font-semibold' : 'font-medium')}>{option.label}</span>
-                    {option.hint && <span className="block break-words text-xs text-[var(--color-muted)]">{option.hint}</span>}
+                    <span className={cn('tf-option-label block break-words', selectedOption ? 'font-semibold' : 'font-medium')}>{option.label}</span>
+                    {option.hint && <span className="tf-option-hint block break-words text-xs text-[var(--color-muted)]">{option.hint}</span>}
                   </span>
                   {selectedOption && <Check size={14} className="shrink-0 text-[var(--color-text)]" />}
                 </button>

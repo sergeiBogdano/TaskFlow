@@ -45,7 +45,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
       <div className="flex flex-wrap items-center gap-1.5">
         {task.client && <span className="tf-chip max-w-full truncate">{task.client}</span>}
         {task.client_warning && <span className="tf-chip border-[var(--color-warning)]/45 text-[var(--color-warning)]"><AlertCircle size={12} />Важно</span>}
-        <span className="tf-chip" style={{ color: priority.color }}>{priority.label}</span>
+        <span className="tf-chip" style={{ color: priority.color, background: `color-mix(in srgb, ${priority.color} 12%, transparent)`, borderColor: `color-mix(in srgb, ${priority.color} 25%, transparent)` }}>{priority.symbol} {priority.label}</span>
         {task.no_contract && <span className="tf-chip border-[var(--color-danger)]/40 text-[var(--color-danger)]">нет договора</span>}
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--color-text-secondary)]">
@@ -280,7 +280,7 @@ export function Kanban() {
             />
             <SearchSelect
               value={priority}
-              options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))]}
+              options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))]}
               onChange={value => setPriority(value || 'all')}
               searchPlaceholder="Найти приоритет..."
             />

@@ -88,7 +88,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
       to={item.to}
       end={item.to === '/'}
       className={({ isActive }) => cn(
-        'group flex min-w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center text-xs lg:min-w-0 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:py-2.5 lg:text-left lg:text-sm',
+        'tf-nav-item group flex min-w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center text-xs lg:min-w-0 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:py-2.5 lg:text-left lg:text-sm',
         compact && 'lg:justify-center lg:px-2',
         !isActive && 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]',
       )}
@@ -107,7 +107,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
           <span className={cn('min-w-0 lg:flex-1', compact && 'lg:hidden')}>
             <span className="block truncate font-medium">{item.label}</span>
             <span
-              className="hidden truncate text-[11px] lg:block"
+              className="tf-nav-hint hidden truncate text-[11px] lg:block"
               style={{ color: active ? 'var(--nav-active-hint, rgba(245,241,234,.68))' : 'var(--color-muted)' }}
             >
               {item.hint}
@@ -119,7 +119,7 @@ function SortableNavItem({ item, unreadCount, compact }: { item: NavItem; unread
             {...attributes}
             {...listeners}
             onClick={event => { event.preventDefault(); event.stopPropagation(); }}
-            className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-md opacity-70 lg:opacity-0 lg:group-hover:opacity-100', compact && 'lg:hidden', !active && 'text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]')}
+            className={cn('tf-nav-drag grid h-7 w-7 shrink-0 place-items-center rounded-md opacity-70 lg:opacity-0 lg:group-hover:opacity-100', compact && 'lg:hidden', !active && 'text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]')}
             style={active ? { color: 'var(--nav-active-hint, rgba(245,241,234,.65))' } : undefined}
             aria-label={`Перетащить ${item.label}`}
             title={`Перетащить ${item.label}`}
@@ -137,11 +137,33 @@ export function Layout() {
   const location = useLocation();
   const { user, logout, hasRole } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem('taskflow:intro-closed') !== '1');
   const [navOrder, setNavOrder] = useState<Record<string, string[]>>({});
   const [activeNavRoute, setActiveNavRoute] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('taskflow:sidebar-collapsed') === '1');
   const [, setUiTick] = useState(0);
+  useEffect(() => { setMobileNavOpen(false); }, [location.pathname, location.search]);
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const resize = () => { if (media.matches) setMobileNavOpen(false); };
+    media.addEventListener('change', resize);
+    return () => media.removeEventListener('change', resize);
+  }, []);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) setMobileNavOpen(false); };
+    document.addEventListener('keydown', close);
+    return () => { document.body.style.overflow = previous; document.removeEventListener('keydown', close); };
+  }, [mobileNavOpen]);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const update = () => document.documentElement.style.setProperty('--tf-viewport-height', `${viewport?.height || window.innerHeight}px`);
+    update(); viewport?.addEventListener('resize', update); window.addEventListener('resize', update);
+    return () => { viewport?.removeEventListener('resize', update); window.removeEventListener('resize', update); document.documentElement.style.removeProperty('--tf-viewport-height'); };
+  }, []);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const notificationsAvailable = Boolean(user?.is_root || (user?.features?.notifications !== false && (user?.permissions?.all || user?.permissions?.notifications)));
   const voiceAvailable = ['ai'].every(key => user?.features?.[key] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[key]));
@@ -242,13 +264,15 @@ export function Layout() {
 
   return (
     <div className="min-h-screen">
-      <aside className={cn('tf-app-sidebar z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'tf-sidebar-compact lg:w-[76px]' : 'lg:w-[264px]')}>
+      {mobileNavOpen && <button type="button" aria-label="Закрыть меню" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/35 lg:hidden" />}
+      <aside data-mobile-open={mobileNavOpen} aria-label="Меню приложения" className={cn('tf-app-sidebar z-30 w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-sidebar)] px-3 py-2 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col lg:overflow-auto lg:border-b-0 lg:border-r lg:py-3', sidebarCollapsed ? 'tf-sidebar-compact lg:w-[76px]' : 'lg:w-[264px]')}>
         <div className="mb-2 flex shrink-0 items-center gap-3 px-2 py-2 lg:mb-4">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-sm font-black text-[var(--color-on-accent)]">TF</div>
           <div className={cn('min-w-0', sidebarCollapsed && 'lg:hidden')}>
             <div className="text-sm font-bold tracking-wide">TaskFlow</div>
             <div className="tf-brand-subtitle text-xs text-[var(--color-text-secondary)]">Рабочие пространства</div>
           </div>
+          <button type="button" className="tf-button ml-auto w-9 px-0 lg:hidden" aria-label="Закрыть меню" onClick={() => setMobileNavOpen(false)}><X size={16} /></button>
           <button type="button" onClick={toggleSidebar} className={cn('tf-button ml-auto hidden w-9 px-0 lg:inline-flex', sidebarCollapsed && 'lg:ml-0')} title={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'} aria-label={sidebarCollapsed ? 'Показать меню' : 'Скрыть меню'}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -260,7 +284,7 @@ export function Layout() {
         </div>
         <div className="tf-app-modes my-3 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-[var(--color-surface-2)] p-1 lg:flex-col" aria-label="Режим приложения">{areas.map(key => <NavLink key={key} to={WORK_AREAS[key].route} title={WORK_AREAS[key].hint} className={cn('rounded-md px-3 py-2 text-xs font-semibold transition', area === key ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]')}>{sidebarCollapsed ? WORK_AREAS[key].title.slice(0, 1) : WORK_AREAS[key].title}</NavLink>)}</div>
         <NavLink to={WORK_AREAS[area].route} className="tf-sidebar-home tf-button mb-3 w-full shrink-0">{sidebarCollapsed ? '⌂' : area === 'work' ? 'Мой рабочий стол' : 'Обзор режима'}</NavLink>
-        <nav className={cn('flex shrink-0 gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
+        <nav className={cn('tf-app-nav flex shrink-0 gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
             const visibleItems = group.items.filter(item => (item.to === '/access' ? area === 'manage' || area === 'admin' : workAreaForRoute(item.to) === area) && item.to !== '/settings' && canSee(item.permission));
             if (!visibleItems.length) return null;
@@ -295,7 +319,7 @@ export function Layout() {
         <DragOverlay>{activeNavRoute ? <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-3)] px-3 py-2 text-sm font-semibold text-[var(--color-text)] shadow-xl">{sectionLabel(activeNavRoute)}</div> : null}</DragOverlay>
         </DndContext>
 
-        <div className={cn('mt-auto hidden shrink-0 space-y-3 lg:block', sidebarCollapsed && 'lg:hidden')}>
+        <div className={cn('tf-sidebar-account mt-auto shrink-0 space-y-3', sidebarCollapsed && 'lg:hidden')}>
           {user && (
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]/86 p-3 shadow-[0_1px_0_rgba(255,255,255,.05)_inset]">
               <div className="flex items-center gap-2">
@@ -318,11 +342,12 @@ export function Layout() {
         </div>
       </aside>
 
-      <div className={cn(sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[264px]')}>
+      <div inert={mobileNavOpen} className={cn('tf-app-content', sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[264px]')}>
         <header className="tf-app-header sticky top-0 z-20 flex min-h-16 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-header)] px-4 py-3 sm:px-8">
-          <div className="min-w-0">
+          <button type="button" className="tf-button w-10 shrink-0 px-0 lg:hidden" onClick={() => setMobileNavOpen(true)} aria-label="Открыть меню" aria-expanded={mobileNavOpen}><PanelLeftOpen size={18} /></button>
+          <div className="tf-header-title min-w-0">
             <h1 className="text-[17px] font-semibold tracking-tight">{pageTitle}</h1>
-            <p className="text-xs text-[var(--color-text-secondary)]">{WORK_AREAS[area].hint}</p>
+            <p className="hidden text-xs text-[var(--color-text-secondary)] lg:block">{WORK_AREAS[area].hint}</p><p className="truncate text-xs text-[var(--color-muted)] lg:hidden" title={getActiveWorkspaceDetail()?.name}>{getActiveWorkspaceDetail()?.name || WORK_AREAS[area].hint}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
           {area === 'work' && voiceAvailable && <button onClick={() => navigate('/ai')} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Помощник">
@@ -330,7 +355,7 @@ export function Layout() {
           </button>}
           {notificationsAvailable && <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
             <Bell size={16} />
-            {unreadCount > 0 && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[var(--color-danger)]" />}
+            {unreadCount > 0 && <span aria-label={`${unreadCount} непрочитанных`} className="absolute -right-2 -top-2 min-w-4 rounded-full bg-[var(--color-danger)] px-1 text-[10px] font-semibold leading-4 text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
           </button>}
           <button onClick={handleLogout} className="tf-button w-10 px-0 lg:hidden" aria-label="Выйти">
             <LogOut size={16} />

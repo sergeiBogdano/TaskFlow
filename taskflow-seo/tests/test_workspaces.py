@@ -45,7 +45,7 @@ class TestWorkspaces:
         resp = sync_request("POST", "/api/workspaces", json={"name": "  "}, cookies=admin_cookies)
         assert resp.status_code == 400
 
-    @pytest.mark.parametrize("theme", ["cream", "graphite", "glass"])
+    @pytest.mark.parametrize("theme", ["cream", "graphite"])
     def test_update_settings_owner(self, sync_request, admin_cookies, theme):
         ws = _make_workspace(sync_request, admin_cookies, "Настройки ТС")
         resp = sync_request(
@@ -392,3 +392,17 @@ class TestUiConfig:
         assert resp["dictionary"].get("clients") == "Проекты"
         sprints = sync_request("GET", f"/api/sprints?workspace_id={ws['id']}", cookies=admin_cookies).json()
         assert any(s["name"] == "Спринт 1: MVP" for s in sprints)
+
+
+def test_removed_glass_theme_is_read_as_cream():
+    from app.core.models import Workspace
+    from app.web.api.workspaces import _ws_to_dict
+    workspace = Workspace(id=991, name='Legacy theme', preset='empty', theme='glass', enabled_modules='[]', dictionary='{}')
+    assert _ws_to_dict(workspace, 'owner')['theme'] == 'cream'
+
+
+def test_removed_glass_theme_cannot_be_selected(sync_request, admin_cookies):
+    workspace = _make_workspace(sync_request, admin_cookies, 'Theme fallback')
+    response = sync_request('PATCH', f"/api/workspaces/{workspace['id']}", json={'theme': 'glass'}, cookies=admin_cookies)
+    assert response.status_code == 400
+    assert sync_request('GET', f"/api/workspaces/{workspace['id']}", cookies=admin_cookies).json()['theme'] != 'glass'

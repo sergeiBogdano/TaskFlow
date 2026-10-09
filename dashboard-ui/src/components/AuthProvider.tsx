@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { AuthContext } from '../hooks/useAuth';
 import { api, type User } from '../api/client';
 import { referenceCache } from '../api/cache';
@@ -15,6 +15,8 @@ function storeAccount(user: User | null) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const lastRefresh = useRef(0);
 
 
   useEffect(() => {
@@ -49,28 +51,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      await ensureWorkspace();
-      const current = (await api.getMe()).user;
-      referenceCache.invalidate();
-      storeAccount(current);
-      setUser(current);
-    } catch (error) {
-      if ((error as { status?: number }).status === 401) {
-        clearWorkspace(); storeAccount(null); setUser(null);
-      }
-    }
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const request = (async () => {
+      try {
+        await ensureWorkspace();
+        const current = (await api.getMe()).user;
+        storeAccount(current);
+        setUser(previous => {
+          // The same account response must not restart every page's data effects.
+          if (JSON.stringify(previous) === JSON.stringify(current)) return previous;
+          referenceCache.invalidate();
+          return current;
+        });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401) {
+          clearWorkspace(); storeAccount(null); setUser(null);
+        }
+      } finally { lastRefresh.current = Date.now(); }
+    })();
+    refreshInFlight.current = request;
+    void request.finally(() => { refreshInFlight.current = null; });
+    return request;
   }, []);
   const authenticated = Boolean(user);
   useEffect(() => {
     if (!authenticated) return;
     const update = () => { void refresh(); };
+    const onFocus = () => { if (Date.now() - lastRefresh.current >= 60000) update(); };
     window.addEventListener('taskflow:access-updated', update);
-    window.addEventListener('focus', update);
+    window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('taskflow:access-updated', update);
-      window.removeEventListener('focus', update);
+      window.removeEventListener('focus', onFocus);
     };
   }, [authenticated, refresh]);
 

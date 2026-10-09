@@ -101,11 +101,10 @@ export function Settings() {
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Palette size={16} />Оформление</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {([
             ['cream', 'Крем', 'Светлая, тёплая'],
             ['graphite', 'Графит', 'Тёмная'],
-            ['glass', 'Стекло', 'Перламутр, графит, прозрачность'],
           ] as [ThemeName, string, string][]).map(([name, label, hint]) => (
             <button
               key={name}

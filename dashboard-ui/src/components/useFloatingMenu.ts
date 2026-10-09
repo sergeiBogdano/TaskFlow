@@ -1,3 +1,4 @@
+import { floatingMenuPlacement } from '../lib/floatingMenu';
 import { useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react';
 
 /** Position above/below the anchor without clipping in dialogs or small viewports. */
@@ -14,17 +15,7 @@ export function useFloatingMenu(open: boolean, anchorRef: RefObject<HTMLElement 
       const y = viewport?.offsetTop || 0;
       const width = viewport?.width || window.innerWidth;
       const height = viewport?.height || window.innerHeight;
-      const padding = 10, gap = 6;
-      const menuWidth = Math.min(Math.max(rect.width, minWidth), width - padding * 2);
-      const below = Math.max(0, y + height - rect.bottom - gap - padding);
-      const above = Math.max(0, rect.top - y - gap - padding);
-      const opensUp = below < 280 && above > below;
-      setStyle({
-        position: 'fixed', visibility: 'visible',
-        left: Math.max(x + padding, Math.min(rect.left, x + width - menuWidth - padding)),
-        width: menuWidth, maxHeight: Math.min(360, opensUp ? above : below),
-        ...(opensUp ? { bottom: window.innerHeight - rect.top + gap } : { top: rect.bottom + gap }),
-      });
+      setStyle(floatingMenuPlacement(rect, { x, y, width, height, layoutHeight: window.innerHeight }, minWidth));
     };
     update();
     const observer = new ResizeObserver(update);

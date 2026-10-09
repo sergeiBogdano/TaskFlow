@@ -409,7 +409,7 @@ export function Tasks() {
           </div>
           <Field label={taskField('priority').label}><SearchSelect
             value={filters.priority}
-            options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))]}
+            options={[{ value: 'all', label: 'Все приоритеты' }, ...Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))]}
             onChange={value => setFilters(prev => ({ ...prev, priority: value || 'all' }))}
             searchPlaceholder="Найти приоритет..."
           /></Field>
@@ -452,7 +452,7 @@ export function Tasks() {
             <SearchSelect
               disabled={!taskField('priority').editable}
               value={bulkPriority}
-              options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label }))}
+              options={Object.entries(priorityMeta).map(([key, meta]) => ({ value: key, label: meta.label, color: meta.color }))}
               onChange={setBulkPriority}
               emptyLabel="Не менять"
               placeholder={taskField('priority').label}
@@ -498,8 +498,8 @@ export function Tasks() {
           onChange={value => setPageSize(Number(value))}
           className="w-auto min-w-[150px]"
         />
-        <form onSubmit={event => { event.preventDefault(); applyTaskSearch(); }} className="flex min-w-[280px] flex-1 items-center gap-2">
-          <label className="relative min-w-[220px] flex-1">
+        <form onSubmit={event => { event.preventDefault(); applyTaskSearch(); }} className="flex min-w-0 basis-full flex-1 items-center gap-2 sm:min-w-[280px] sm:basis-auto">
+          <label className="relative min-w-0 flex-1">
             <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
             <input className="tf-input tf-input-icon py-1.5 text-xs" value={searchDraft} onChange={event => setSearchDraft(event.target.value)} placeholder="Поиск по задачам" />
           </label>
@@ -535,8 +535,8 @@ export function Tasks() {
         </section>
       )}
 
-      <section className="tf-panel-flat overflow-hidden">
-        <div className="hidden min-w-[1180px] grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)] md:grid">
+      <section className="tf-panel-flat overflow-x-auto">
+        <div className="hidden min-w-[1180px] grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] gap-3 border-b border-[var(--color-border)] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[var(--color-muted)] 2xl:grid">
           <span />
           <span>{taskField('title').visible ? taskField('title').label : ''}</span>
           <span>{taskField('status').visible ? taskField('status').label : ''}</span>
@@ -551,7 +551,7 @@ export function Tasks() {
           const assignee = users.find(user => user.id === task.assignee_id);
           const pinned = pins.includes(task.id);
           return (
-            <div key={task.id} className="grid gap-3 border-b border-[var(--color-border)]/60 px-4 py-4 last:border-b-0 hover:bg-[var(--color-surface-2)] md:min-w-[1180px] md:grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] md:items-center md:py-3">
+            <div key={task.id} className="tf-task-row grid gap-3 border-b border-[var(--color-border)]/60 px-4 py-4 last:border-b-0 hover:bg-[var(--color-surface-2)] 2xl:min-w-[1180px] 2xl:grid-cols-[36px_minmax(260px,1fr)_130px_150px_120px_120px_120px_110px] 2xl:items-center 2xl:py-3">
               <input type="checkbox" checked={selectedIds.includes(task.id)} onChange={() => toggleSelected(task.id)} />
               <div className="flex min-w-0 items-start gap-1.5">
               <button type="button" onClick={event => { event.stopPropagation(); togglePin(task.id); }} title={pinned ? 'Открепить' : 'Закрепить'} aria-label={pinned ? `Открепить ${task.title}` : `Закрепить ${task.title}`} className={cn('mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md transition', pinned ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-muted)] opacity-40 hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] hover:opacity-100')}>
@@ -572,13 +572,13 @@ export function Tasks() {
                 value={task.status}
                 options={statusOptions.map(item => ({ value: item, label: statusMeta[item as keyof typeof statusMeta]?.label || item, color: statusMeta[item as keyof typeof statusMeta]?.color }))}
                 onChange={value => changeStatus(task, value)}
-                className="md:w-full"
+                className="2xl:w-full"
               />
-              {crmEnabled && taskField('client').visible && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
-              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="md:hidden">{taskField('assignee').label}: </span>{taskField('assignee').visible ? assignee?.username || 'Не назначен' : '—'}</span>
-              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{taskField('completionDate').visible ? formatDate(task.completion_date) : '—'}</span>
-              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} />{taskField('deadline').visible ? formatDate(task.deadline) : '—'}</span>
-              <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="block h-6 w-6 rounded-full" style={{ backgroundColor: priority.color }} /><span className="md:hidden">{taskField('priority').visible ? priority.label : '—'}</span></span>
+              {crmEnabled && taskField('client').visible && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="2xl:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
+              <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="2xl:hidden">{taskField('assignee').label}: </span>{taskField('assignee').visible ? assignee?.username || 'Не назначен' : '—'}</span>
+              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} /><span className="2xl:hidden">{taskField('completionDate').label}:</span>{taskField('completionDate').visible ? formatDate(task.completion_date) : '—'}</span>
+              <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} /><span className="2xl:hidden">{taskField('deadline').label}:</span>{taskField('deadline').visible ? formatDate(task.deadline) : '—'}</span>
+              <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"><span className="tf-priority-marker" style={{ color: taskField('priority').visible ? priority.color : 'var(--color-muted)' }} title={taskField('priority').visible ? `Приоритет: ${priority.label}` : 'Приоритет скрыт'} aria-label={taskField('priority').visible ? `Приоритет: ${priority.label}` : 'Приоритет скрыт'}>{taskField('priority').visible ? priority.symbol : '—'}</span><span className="2xl:hidden">{taskField('priority').visible ? priority.label : '—'}</span></span>
             </div>
           );
         })}

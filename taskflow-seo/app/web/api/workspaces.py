@@ -162,7 +162,7 @@ def _ws_to_dict(ws: Workspace, role: str) -> dict:
         "preset": ws.preset,
         "visibility": ws.visibility,
         "enabled_modules": json.loads(ws.enabled_modules or "[]"),
-        "theme": ws.theme,
+        "theme": "cream" if ws.theme == "glass" else ws.theme,
         "dictionary": dictionary,
         "has_ai_instructions": bool(ws.ai_instructions),
         "ui_config": _parse_ui_config(ws.ui_config),
@@ -449,7 +449,7 @@ async def update_workspace(workspace_id: int, payload: WorkspaceUpdate, ctx=Depe
                 return JSONResponse({"error": "Название не может быть пустым"}, status_code=400)
             ws.name = name[:200]
         if payload.theme is not None:
-            if payload.theme not in (None, "", "cream", "graphite", "glass"):
+            if payload.theme not in (None, "", "cream", "graphite"):
                 return JSONResponse({"error": "Неизвестная тема"}, status_code=400)
             ws.theme = payload.theme or None
         if payload.dictionary is not None:

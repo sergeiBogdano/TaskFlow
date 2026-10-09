@@ -29,7 +29,7 @@ export function TaskScopeFilter({ users, scope, userId, onScopeChange, onUserCha
 
   return (
     <div className={`rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 ${className}`} style={{ boxShadow: 'var(--shadow-soft)' }}>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(180px,1.25fr)]">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <div style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }} className="grid gap-1.5 rounded-full bg-[var(--color-overlay)] p-1.5">
           {options.map(option => (
             <button
@@ -44,9 +44,7 @@ export function TaskScopeFilter({ users, scope, userId, onScopeChange, onUserCha
         </div>
       {normalizedScope === 'user' ? (
         <UserMultiSelect users={users} selected={selectedUserIds} onChange={ids => onUserChange(ids.join(','))} />
-      ) : (
-        <div className="hidden sm:block rounded-md bg-black/[.06]" />
-      )}
+      ) : null}
       </div>
     </div>
   );

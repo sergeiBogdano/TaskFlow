@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, X } from 'lucide-react';
 import { api, type Workspace } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { Select } from './Select';
@@ -12,7 +13,7 @@ const PRESETS = [
   { value: 'empty', label: 'Пустой', hint: 'Стандартные названия, с нуля' },
 ];
 
-export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
+export function WorkspaceSwitcher(_props: { compact: boolean }) {
   const { user } = useAuth();
   const canCreate = Boolean(user?.is_root || user?.permissions?.workspaces_create);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -21,6 +22,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
   const [name, setName] = useState('');
   const [preset, setPreset] = useState('seo');
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLFormElement>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -31,6 +33,24 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const keys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setModalOpen(false); }
+      if (event.key === 'Tab') {
+        const elements = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]') || []);
+        const first = elements[0], last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    document.addEventListener('keydown', keys, true);
+    return () => { document.removeEventListener('keydown', keys, true); document.body.style.overflow = previousOverflow; previous?.focus(); };
+  }, [modalOpen]);
 
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -53,10 +73,10 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
     }
   };
 
-  const renderModal = () => modalOpen && (
-    <div className="anim-modal fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setModalOpen(false)}>
-      <form onSubmit={create} className="tf-modal-shell w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
-        <div className="mb-4 text-base font-bold">Новое окружение</div>
+  const renderModal = () => modalOpen && createPortal((
+    <div className="tf-modal-backdrop anim-modal" onClick={() => setModalOpen(false)}>
+      <form ref={dialogRef} role="dialog" aria-modal="true" aria-label="Новое окружение" onSubmit={create} className="tf-modal-shell w-full max-w-sm p-5" onClick={event => event.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-base font-bold">Новое окружение</h2><button type="button" className="tf-button h-8 w-8 shrink-0 px-0" aria-label="Закрыть создание окружения" onClick={() => setModalOpen(false)}><X size={16} /></button></div>
         <div className="space-y-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-[var(--color-text-secondary)]">Название</span>
@@ -91,11 +111,11 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
         </div>
       </form>
     </div>
-  );
+  ), document.body);
 
   if (!workspaces.length) {
     return (
-      <div className={compact ? "hidden px-2 pb-2 lg:block" : "px-2 pb-2"}>
+      <div className="px-2 pb-2">
         <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)]">
           Окружение
         </div>
@@ -117,7 +137,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
   }
 
   return (
-    <div className={compact ? "hidden" : "px-2 pb-2 lg:block"}>
+    <div className="min-w-0 px-2 pb-2">
       <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)]">
         Окружение
       </div>
@@ -146,6 +166,7 @@ export function WorkspaceSwitcher({ compact }: { compact: boolean }) {
           <Plus size={16} />
         </button>}
       </div>
+      {(workspaces.find(w => String(w.id) === activeId)?.name.length || 0) > 28 && <details className="mt-2 text-xs text-[var(--color-muted)]"><summary className="cursor-pointer">Полное название окружения</summary><p className="mt-1" style={{ overflowWrap: 'anywhere' }}>{workspaces.find(w => String(w.id) === activeId)?.name}</p></details>}
       {renderModal()}
     </div>
   );

@@ -119,7 +119,7 @@ export function WorkspaceSettings({ accessTeam = false }: { accessTeam?: boolean
         theme: theme || null,
         ai_instructions: aiInstructions.trim() || null,
       });
-      if (updated.theme === 'cream' || updated.theme === 'graphite' || updated.theme === 'glass') applyTheme(updated.theme);
+      if (updated.theme === 'cream' || updated.theme === 'graphite') applyTheme(updated.theme);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить.');
@@ -252,7 +252,6 @@ export function WorkspaceSettings({ accessTeam = false }: { accessTeam?: boolean
                 <option value="">Как в браузере</option>
                 <option value="cream">Крем</option>
                 <option value="graphite">Графит</option>
-                <option value="glass">Стекло</option>
               </select>
             </label>
             <button type="button" onClick={() => setTab('appearance')} className="self-end text-left text-sm text-[var(--color-accent)] underline">Названия разделов и полей — в конструкторе интерфейса</button>

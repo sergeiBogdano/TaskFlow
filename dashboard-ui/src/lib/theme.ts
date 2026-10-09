@@ -1,11 +1,11 @@
-export type ThemeName = 'cream' | 'graphite' | 'glass';
+export type ThemeName = 'cream' | 'graphite';
 
 const KEY = 'taskflow:theme';
 
 export function getTheme(): ThemeName {
   try {
     const stored = localStorage.getItem(KEY);
-    return stored === 'graphite' || stored === 'glass' ? stored : 'cream';
+    return stored === 'graphite' ? stored : 'cream';
   } catch {
     return 'cream';
   }

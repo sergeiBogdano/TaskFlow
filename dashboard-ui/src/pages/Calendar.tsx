@@ -27,8 +27,9 @@ function DraggableEvent({ event, onClick, opening }: { event: any; onClick: (eve
       {...listeners}
       {...attributes}
       onClick={onClick}
+      title={event.title}
       style={{ borderColor: meta.color }}
-      className={cn('truncate rounded-md border-l-[14px] bg-[var(--color-surface-2)] px-3 py-2.5 text-xs font-semibold text-[var(--color-text)] shadow-sm', (isDragging || opening) && 'opacity-40')}
+      className={cn('min-w-0 truncate rounded-md border-l-[3px] bg-[var(--color-surface-2)] px-3 py-2.5 text-xs font-semibold text-[var(--color-text)] shadow-sm', (isDragging || opening) && 'opacity-40')}
     >
       {opening ? 'Открываем задачу...' : event.title}
     </div>
@@ -38,12 +39,13 @@ function DraggableEvent({ event, onClick, opening }: { event: any; onClick: (eve
 function DayCell({ date, day, events, onEventClick, onCreate, onMore, openingTaskId }: { date: string; day: number; events: any[]; onEventClick: (event: any) => void; onCreate: () => void; onMore: () => void; openingTaskId: number | null }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${date}`, data: { date } });
   return (
-    <div ref={setNodeRef} onDoubleClick={onCreate} className={cn('min-h-[118px] border-r border-b border-[var(--color-border)]/55 p-2 transition-colors', isOver && 'bg-[var(--color-accent)]/10')}>
+    <div ref={setNodeRef} onDoubleClick={onCreate} className={cn('tf-calendar-cell min-w-0 min-h-[118px] border-r border-b border-[var(--color-border)]/55 p-2 transition-colors', isOver && 'bg-[var(--color-accent)]/10')}>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-bold text-[var(--color-text-secondary)]">{day}</span>
-        <button onClick={onCreate} className="text-[var(--color-muted)] hover:text-[var(--color-accent)]" title="Создать задачу"><Plus size={13} /></button>
+        <button type="button" onClick={onMore} aria-label={`Открыть ${date}, задач: ${events.length}`} className={cn('tf-calendar-date text-xs font-bold text-[var(--color-text-secondary)]', date === dateInputValue(new Date()) && 'tf-calendar-today')}>{day}</button>
+        <button onClick={onCreate} className="hidden sm:block text-[var(--color-muted)] hover:text-[var(--color-accent)]" title="Создать задачу"><Plus size={13} /></button>
       </div>
-      <div className="space-y-1">
+      <button type="button" onClick={onMore} className="tf-calendar-count sm:hidden" aria-label={`Задачи за ${date}: ${events.length}`}>{events.length ? `${events.length} зад.` : <span aria-hidden="true">—</span>}</button>
+      <div className="hidden space-y-1 sm:block">
         {events.slice(0, 4).map(event => <DraggableEvent key={event.id} event={event} opening={openingTaskId === Number(event.id)} onClick={e => { e.stopPropagation(); onEventClick(event); }} />)}
         {events.length > 4 && <button type="button" onClick={(event) => { event.stopPropagation(); onMore(); }} className="text-[11px] font-semibold text-[var(--color-accent)] hover:text-[var(--color-accent-strong)]">+{events.length - 4} ещё</button>}
       </div>
@@ -206,15 +208,16 @@ export function Calendar() {
     const padding = Array.from({ length: (new Date(year, month, 1).getDay() + 6) % 7 }, (_, i) => i);
     return (
       <div className="tf-panel-flat overflow-x-auto">
-        <div className="grid min-w-[760px] grid-cols-7 border-b border-[var(--color-border)]">
+        <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
           {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => <div key={day} className="px-3 py-2 text-center text-xs font-bold text-[var(--color-muted)]">{day}</div>)}
         </div>
-        <div className="grid min-w-[760px] grid-cols-7">
-          {padding.map(i => <div key={`pad-${i}`} className="min-h-[118px] border-r border-b border-[var(--color-border)]/55" />)}
+        <div className="grid grid-cols-7">
+          {padding.map(i => <div key={`pad-${i}`} className="tf-calendar-cell min-h-[118px] border-r border-b border-[var(--color-border)]/55" />)}
           {days.map(day => {
             const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             return <DayCell key={date} date={date} day={day} events={events.filter(event => (event.date || String(event.start).slice(0, 10)) === date)} onEventClick={openTask} onCreate={() => createTaskForDate(date)} onMore={() => { setCurrentDate(new Date(`${date}T12:00:00`)); setView('day'); }} openingTaskId={openingTaskId} />;
           })}
+          {Array.from({ length: (7 - (padding.length + days.length) % 7) % 7 }, (_, i) => <div key={`end-${i}`} className="tf-calendar-cell min-h-[118px] border-r border-b border-[var(--color-border)]/55" />)}
         </div>
       </div>
     );
@@ -224,12 +227,12 @@ export function Calendar() {
     const { start } = getRange();
     return (
       <div className="tf-panel-flat min-h-[420px] p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-bold">{new Date(start).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' })}</h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-bold">{new Date(`${start}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' })}</h3>
           <button onClick={() => createTaskForDate(start)} className="tf-button"><Plus size={15} />Быстрая задача</button>
         </div>
         <div className="space-y-2">
-          {events.map(event => <button key={event.id} onClick={() => openTask(event)} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-left text-sm hover:border-[var(--color-border-strong)]">{event.title}</button>)}
+          {events.map(event => <button key={event.id} onClick={() => openTask(event)} className="w-full break-words rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-left text-sm hover:border-[var(--color-border-strong)]">{event.title}</button>)}
           {events.length === 0 && <div className="text-sm text-[var(--color-text-secondary)]">На эту дату задач нет.</div>}
         </div>
       </div>
@@ -237,7 +240,7 @@ export function Calendar() {
   };
 
   const renderQuickTasks = () => (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="tf-panel-flat p-4">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -252,8 +255,8 @@ export function Calendar() {
         {quickNotice && <div className="mb-3 rounded-lg border border-[var(--color-success)]/45 bg-[var(--color-success)]/10 px-3 py-2 text-sm text-[var(--color-success)]">{quickNotice}</div>}
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
           {quickTemplates.map(template => (
-            <div key={template.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
-              <div className="min-w-0 flex-1 truncate text-sm font-semibold">{template.title}</div>
+            <div key={template.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
+              <div className="min-w-20 flex-1 truncate text-sm font-semibold" title={template.title}>{template.title}</div>
               <button onClick={() => createQuickTask(template)} disabled={creatingQuickId === template.id} className="tf-button tf-button-primary">
                 <Plus size={14} />
                 {creatingQuickId === template.id ? '...' : 'В календарь'}
@@ -277,20 +280,20 @@ export function Calendar() {
 
   return (
     <DndContext sensors={sensors} onDragStart={event => setDraggedEvent(events.find(item => `event-${item.id}` === String(event.active.id)) || null)} onDragCancel={() => setDraggedEvent(null)} onDragEnd={handleDragEnd}>
-      <div className="mx-auto max-w-[1500px] space-y-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+      <div className="tf-calendar mx-auto min-w-0 max-w-[1500px] space-y-4">
+        <div className="space-y-3">
           <div>
             <h2 className="text-xl font-black">{sectionLabel('/calendar')}</h2>
             <p className="text-sm text-[var(--color-text-secondary)]">Задачи показываются по дате выполнения. Перетаскивание меняет дату выполнения, не крайний срок.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5 xl:justify-end">
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
             <TaskScopeFilter
               users={users}
               scope={scope}
               userId={scopeUserId}
               onScopeChange={value => { setScope(value); if (value !== 'user') setScopeUserId(''); }}
               onUserChange={setScopeUserId}
-              className="w-full sm:min-w-[320px] sm:flex-1 xl:max-w-[440px]"
+              className="w-full sm:w-[360px] sm:max-w-full"
             />
             <div className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-1" style={{ boxShadow: 'var(--shadow-soft)' }}>
               {(['day', 'month', 'quick'] as ViewMode[]).map(item => (
@@ -299,9 +302,9 @@ export function Calendar() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <button onClick={() => navigateDate(-1)} className="tf-button w-9 shrink-0 px-0" aria-label="Назад"><ChevronLeft size={18} /></button>
-              <span className="min-w-36 shrink-0 whitespace-nowrap text-center text-sm font-bold capitalize">{view === 'month' ? monthName : currentDate.toLocaleDateString('ru-RU')}</span>
+              <span className="min-w-0 flex-1 whitespace-nowrap text-center text-sm font-bold capitalize">{view === 'month' ? monthName : currentDate.toLocaleDateString('ru-RU')}</span>
               <button onClick={() => navigateDate(1)} className="tf-button w-9 shrink-0 px-0" aria-label="Вперёд"><ChevronRight size={18} /></button>
             </div>
           </div>
@@ -309,7 +312,7 @@ export function Calendar() {
         {calendarError && <div className="rounded-lg border border-[var(--color-danger)]/45 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{calendarError}</div>}
         {view === 'month' ? renderMonth() : view === 'quick' ? renderQuickTasks() : renderDayList()}
       </div>
-      <DragOverlay>{draggedEvent ? <div className="max-w-64 truncate rounded-md border-l-[14px] border-[var(--color-accent)] bg-[var(--color-surface-2)] px-3 py-2.5 text-xs font-semibold text-[var(--color-text)] shadow-xl">{draggedEvent.title}</div> : null}</DragOverlay>
+      <DragOverlay>{draggedEvent ? <div className="max-w-64 truncate rounded-md border-l-[3px] border-[var(--color-accent)] bg-[var(--color-surface-2)] px-3 py-2.5 text-xs font-semibold text-[var(--color-text)] shadow-xl">{draggedEvent.title}</div> : null}</DragOverlay>
       {(selectedTask || createDate) && <Suspense fallback={null}><TaskModal task={selectedTask} initialTask={!selectedTask && createDate ? { completion_date: new Date(`${createDate}T12:00:00`).toISOString() } : undefined} clients={clients} users={users} onClose={() => { setSelectedTask(null); setCreateDate(null); }} onSave={(data) => saveTask(selectedTask ? data : { ...data, completion_date: new Date(`${createDate || ''}T12:00:00`).toISOString() })} onDelete={selectedTask ? deleteSelectedTask : undefined} onAfterChange={load} /></Suspense>}
     </DndContext>
   );
