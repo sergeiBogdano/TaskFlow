@@ -46,10 +46,10 @@
   --color-st-done-soft: rgba(95, 143, 106, .14);
   --color-st-overdue: #bc5a48;
   --color-st-overdue-soft: rgba(188, 90, 72, .13);
-  --color-pr-low: #66816e;
-  --color-pr-medium: #8b763f;
-  --color-pr-high: #b5682e;
-  --color-pr-critical: #a13e3e;
+  --color-pr-low: #8ba4b5;
+  --color-pr-medium: #c5ab65;
+  --color-pr-high: #c58e66;
+  --color-pr-critical: #be7e83;
   --shadow-panel: 0 24px 60px rgba(62, 52, 36, .12), 0 1px 0 rgba(255, 255, 255, .7) inset;
   --shadow-soft: 0 14px 36px rgba(62, 52, 36, .1);
   --shadow-lift: 0 10px 28px rgba(62, 52, 36, .14);
@@ -585,7 +585,7 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
 .tf-select-labeled > .relative { flex: 1; min-width: 120px; }
 select.tf-input { max-width: 100%; text-overflow: ellipsis; }
 .tf-app-content, .tf-app-content main { min-width: 0; }
-.tf-priority-marker { display: inline-grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, currentColor 13%, transparent); border: 1px solid color-mix(in srgb, currentColor 32%, transparent); font-weight: 700; font-size: 14px; }
+.tf-priority-marker { display: inline-block; flex-shrink: 0; width: 13px; height: 13px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent); }
 .tf-notification-unread { border-left: 3px solid var(--color-warning); background: var(--color-surface-2); }
 .tf-notification-read { background: var(--color-surface); border-color: var(--color-border); }
 @media (max-width: 1023px) {

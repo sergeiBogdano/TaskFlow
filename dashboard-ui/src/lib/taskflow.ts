@@ -21,10 +21,10 @@ export const statusMeta = {
 export const workflowStatuses = ['todo', 'in_progress', 'waiting', 'client_check', 'overdue', 'done'] as const;
 
 export const priorityMeta = {
-  low: { label: 'Низкий', color: 'var(--color-pr-low)', symbol: '↓' },
-  medium: { label: 'Средний', color: 'var(--color-pr-medium)', symbol: '=' },
-  high: { label: 'Высокий', color: 'var(--color-pr-high)', symbol: '↑' },
-  critical: { label: 'Критический', color: 'var(--color-pr-critical)', symbol: '!' },
+  low: { label: 'Низкий', color: 'var(--color-pr-low)' },
+  medium: { label: 'Средний', color: 'var(--color-pr-medium)' },
+  high: { label: 'Высокий', color: 'var(--color-pr-high)' },
+  critical: { label: 'Критический', color: 'var(--color-pr-critical)' },
 } as const;
 
 export const taskTypeMeta: Record<string, string> = {
