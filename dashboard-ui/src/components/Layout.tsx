@@ -30,8 +30,9 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { accessSections } from '../lib/accessCenter';
 import { availableWorkAreas, workAreaForRoute, WORK_AREAS } from '../lib/workAreas';
-import { WORKSPACE_EVENT } from '../lib/workspace';
+import { WORKSPACE_EVENT, getActiveWorkspaceDetail } from '../lib/workspace';
 import { isNavVisible, navOverride, sectionLabel } from '../lib/uiconfig';
 import { useAuth } from '../hooks/useAuth';
 import { cn, roleMeta } from '../lib/taskflow';
@@ -68,7 +69,7 @@ const nav = [
   {
     section: 'Система',
     items: [
-      { to: '/users', icon: CircleUser, label: 'Пользователи', hint: 'Роли и доступ', permission: 'users' },
+      { to: '/access', icon: CircleUser, label: 'Права и доступ', hint: 'Пользователи, роли и функции', permission: 'access_center' },
       { to: '/workspace', icon: Layers, label: 'Окружение', hint: 'Настройки и команда', permission: 'workspace' },
       { to: '/settings', icon: Settings, label: 'Настройки', hint: 'Профиль', permission: 'settings' },
     ],
@@ -181,6 +182,7 @@ export function Layout() {
   const role = roleMeta[primaryRole] || roleMeta.executor;
   const isSuperadmin = hasRole('superadmin');
   const canSee = (permission: string) => {
+    if (permission === 'access_center') { const sections = accessSections(user, getActiveWorkspaceDetail()?.role); return !!(sections.space.length || sections.app.length); }
     if (permission === 'wiki') return true;
     if (permission === 'settings') return true;
     if (permission === 'workspace') return true;
@@ -191,8 +193,8 @@ export function Layout() {
     if (isSuperadmin) return true;
     return Boolean(user?.permissions?.all || user?.permissions?.[permission]);
   };
-  const area = workAreaForRoute(location.pathname);
   const areas = availableWorkAreas(user);
+  const area = location.pathname === '/access' && (new URLSearchParams(location.search).get('scope') === 'app' || !areas.includes('manage')) ? 'admin' : workAreaForRoute(location.pathname);
   const pageTitle = sectionLabel(location.pathname === '/' ? '/work' : location.pathname);
 
   const handleLogout = async () => {
@@ -260,7 +262,7 @@ export function Layout() {
         <NavLink to={WORK_AREAS[area].route} className="tf-button mb-3 w-full shrink-0">{sidebarCollapsed ? '⌂' : area === 'work' ? 'Мой рабочий стол' : 'Обзор режима'}</NavLink>
         <nav className={cn('flex shrink-0 gap-2 overflow-x-auto pb-1 lg:block lg:overflow-visible lg:pb-0', sidebarCollapsed ? 'lg:space-y-2' : 'lg:space-y-4')}>
           {nav.map(group => {
-            const visibleItems = group.items.filter(item => workAreaForRoute(item.to) === area && item.to !== '/settings' && canSee(item.permission));
+            const visibleItems = group.items.filter(item => (item.to === '/access' ? area === 'manage' || area === 'admin' : workAreaForRoute(item.to) === area) && item.to !== '/settings' && canSee(item.permission));
             if (!visibleItems.length) return null;
             const shownItems = orderedItems(group.section, visibleItems)
               .filter(item => item.to === '/wiki' || isNavVisible(item.to))

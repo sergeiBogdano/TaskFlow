@@ -1,26 +1,22 @@
 import { TextEditor } from '../components/TextEditor';
-import { WorkspaceAccessPanel } from '../components/WorkspaceAccessPanel';
+import { Link } from 'react-router-dom';
 import { SECTION_LABELS, resolveSectionLabel, resolveFieldLabels } from '../lib/uiLabels';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { BookOpen, Eye, EyeOff, KeyRound, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
-import { api, type WorkspaceDetail, type WorkspaceMember, type WorkspaceRole } from '../api/client';
+import { BookOpen, Eye, EyeOff, Plus, RotateCcw, Settings2, SlidersHorizontal, Trash2, UsersRound, X } from 'lucide-react';
+import { api, type WorkspaceDetail, type WorkspaceMember } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { referenceCache } from '../api/cache';
 import { useAuth } from '../hooks/useAuth';
 import { applyTheme } from '../lib/theme';
 import { sectionLabel, refreshUiConfig, SPRINT_FIELD_DEFAULTS, TASK_FIELD_DEFAULTS, type UiConfig } from '../lib/uiconfig';
-import { FeaturesPanel } from '../components/FeaturesPanel';
-import { SpaceModulesPanel } from '../components/SpaceModulesPanel';
 import { FieldOrderEditor } from '../components/FieldOrderEditor';
-import { WsRolesPanel } from '../components/WsRolesPanel';
 
-export function WorkspaceSettings() {
+export function WorkspaceSettings({ accessTeam = false }: { accessTeam?: boolean }) {
   const { user, hasRole } = useAuth();
   const isSuperadmin = hasRole('superadmin');
-  const [tab, setTab] = useState('basic');
+  const [tab, setTab] = useState(accessTeam ? 'team' : 'basic');
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [wsRoles, setWsRoles] = useState<WorkspaceRole[]>([]);
   const [users, setUsers] = useState<{ id: number; username: string; is_root?: boolean }[]>([]);
   const [knowledge, setKnowledge] = useState<{ id: number; fact: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,11 +31,7 @@ export function WorkspaceSettings() {
   const [addUserId, setAddUserId] = useState('');
   const [inviteUsername, setInviteUsername] = useState('');
   const [addRole, setAddRole] = useState('member');
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [newFact, setNewFact] = useState('');
-  const [pwdUserId, setPwdUserId] = useState<number | null>(null);
-  const [pwdValue, setPwdValue] = useState('');
   const [trash, setTrash] = useState<{ id: number; name: string; deleted_at: string | null }[]>([]);
 
   const load = useCallback(async () => {
@@ -59,18 +51,16 @@ export function WorkspaceSettings() {
         setError('Нет доступных окружений.');
         return;
       }
-      const [full, memberList, userList, facts, roleData] = await Promise.all([
+      const [full, memberList, userList, facts] = await Promise.all([
         api.getWorkspace(active.id),
         api.getWsMembers(active.id),
         (user?.is_root || user?.permissions?.users_manage ? api.getUsers('platform') : referenceCache.users()).catch(() => []),
         api.getWsKnowledge(active.id).catch(() => []),
-        api.getWsRoles(active.id).catch(() => null),
       ]);
       setDetail(full);
       setMembers(memberList);
       setUsers(userList.map(u => ({ id: u.id, username: u.username, is_root: u.is_root })));
       setKnowledge(facts);
-      setWsRoles(roleData?.roles || []);
       setName(full.name);
       setTheme(full.theme || '');
       setVisibility(full.visibility || 'hidden');
@@ -96,8 +86,8 @@ export function WorkspaceSettings() {
   };
 
   useEffect(() => {
-    void loadTrash();
-  }, []);
+    if (!accessTeam) void loadTrash();
+  }, [accessTeam]);
 
   if (loading || !detail) {
     return (
@@ -112,7 +102,6 @@ export function WorkspaceSettings() {
   const isOwner = detail.role === 'owner';
   const administrativeLevel = isOwner || detail.role === 'admin';
   const canManage = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_members && user?.features?.workspace_members !== false);
-  const canManageProfiles = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_profiles && user?.features?.workspace_profiles !== false);
   const canEditSettings = isSuperadmin || (administrativeLevel && !!user?.permissions?.workspace_settings && user?.features?.workspace_settings !== false);
 
   const saveInfo = async (event: FormEvent) => {
@@ -153,23 +142,6 @@ export function WorkspaceSettings() {
     }
   };
 
-  const createAndAdd = async () => {
-    if (newUsername.trim().length < 2 || newPassword.length < 8) {
-      setError('Логин от 2 символов, пароль от 8.');
-      return;
-    }
-    setError('');
-    try {
-      const created = await api.createUser(newUsername.trim(), newPassword, { workspace_id: detail.id, role: 'member' });
-      setNewUsername('');
-      setNewPassword('');
-      await load();
-      setError(`Создан: ${created.username}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось создать.');
-    }
-  };
-
   const changeRole = async (userId: number, role: string) => {
     setError('');
     try {
@@ -177,16 +149,6 @@ export function WorkspaceSettings() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Нельзя изменить роль.');
-    }
-  };
-
-  const changeCustomRole = async (userId: number, roleId: number | null) => {
-    setError('');
-    try {
-      await api.setWsMemberRole(detail.id, userId, roleId);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Нельзя назначить роль.');
     }
   };
 
@@ -198,21 +160,6 @@ export function WorkspaceSettings() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Нельзя убрать.');
-    }
-  };
-
-  const savePassword = async (userId: number) => {
-    if (pwdValue.length < 8) {
-      setError('Пароль минимум 8 символов.');
-      return;
-    }
-    setError('');
-    try {
-      await api.setUserPassword(userId, pwdValue);
-      setPwdUserId(null);
-      setPwdValue('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сменить пароль.');
     }
   };
 
@@ -274,27 +221,22 @@ export function WorkspaceSettings() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      {tab === 'access' && <section className="tf-panel-flat space-y-2 p-5 text-sm">
-        <h3 className="font-bold">Как настроить доступ</h3>
-        <ol className="list-decimal space-y-1 pl-5"><li>В «Пользователях» создайте аккаунт и назначьте профиль приложения: он отвечает за общие настройки и учётные записи.</li><li>Пригласите человека в это окружение и выберите уровень управления. Изменять можно только участников ниже своего уровня.</li><li>Создайте профиль доступа ниже: отметьте действия и режимы доступа к полям. Назначьте профиль участнику в списке команды.</li><li>В «Кому что доступно» проверьте результат и при необходимости задайте личные исключения.</li></ol>
-        <p className="text-[var(--color-muted)]">Скрытие в конструкторе интерфейса меняет оформление для всех. Защита данных и запрет редактирования настраиваются в профилях и личных исключениях.</p>
-      </section>}
-      <div className="flex flex-wrap items-center gap-3">
+      {!accessTeam && <div className="flex flex-wrap items-center gap-3">
         <div>
           <h2 className="tf-page-title">{sectionLabel('/workspace')}</h2>
           <p className="tf-page-subtitle">Настройки, команда и база знаний активного окружения.</p>
         </div>
         <span className="tf-chip ml-auto">роль в окружении: {detail.role === 'owner' ? 'владелец' : detail.role === 'admin' ? 'администратор' : 'участник'}</span>
-      </div>
+      </div>}
 
-      <nav className="flex flex-wrap gap-2" aria-label="Настройки пространства">{[
-        ['basic', 'Основное'], ['team', 'Команда'], ['access', 'Доступ'], ['appearance', 'Оформление'], ['service', 'Обслуживание'],
-      ].map(([key, label]) => <button key={key} type="button" aria-pressed={tab === key} className={tab === key ? 'tf-button tf-button-primary' : 'tf-button'} onClick={() => setTab(key)}>{label}</button>)}</nav>
+      {!accessTeam && <nav className="flex flex-wrap gap-2" aria-label="Настройки пространства">{[
+        ['basic', 'Основное'], ['appearance', 'Оформление'], ['service', 'Обслуживание'],
+      ].map(([key, label]) => <button key={key} type="button" aria-pressed={tab === key} className={tab === key ? 'tf-button tf-button-primary' : 'tf-button'} onClick={() => setTab(key)}>{label}</button>)}<Link className="tf-button" to="/access?scope=space">Команда, права и функции →</Link></nav>}
 
       {error && <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>}
 
       {tab === 'basic' && <>
-      <SpaceModulesPanel id={detail.id} onSaved={() => window.location.reload()} onAccess={canManageProfiles ? () => setTab('access') : undefined} />
+      <Link className="tf-button" to="/access?scope=space&tab=tools">Настроить модули и доступ в едином разделе →</Link>
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><Settings2 size={16} />Основное</h3>
         <form onSubmit={saveInfo} className="grid gap-3">
@@ -327,16 +269,16 @@ export function WorkspaceSettings() {
       </section>
 
       </>}
-      {tab === 'team' && <>
+      {accessTeam && tab === 'team' && <>
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><UsersRound size={16} />Участники окружения · {members.length}</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-          Ранг (владелец/админ/участник) — это управление окружением. Что человек видит и может делать —
-          задаёт кастомная роль: отмеченное в ней и действует, остальное закрыто даже админу.
-          Без кастомной роли работают права ранга.
+          Уровень (владелец, администратор, участник) ограничивает управление командой.
+          Рабочий профиль, личные права и доступ к полям настраиваются на вкладке «Доступ участников».
+          Если профиль не назначен, действуют стандартные права уровня.
         </p>
         {canManage && (
-          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px_auto]">
+          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_auto]">
             <input className="tf-input" aria-label="Логин приглашённого" placeholder="Логин пользователя" value={inviteUsername} onChange={e => setInviteUsername(e.target.value)} /><SearchSelect value={addUserId} options={memberOptions} onChange={setAddUserId} placeholder="Добавить участника..." searchPlaceholder="Найти пользователя..." />
             <select className="tf-input" value={addRole} onChange={event => setAddRole(event.target.value)}>
               <option value="member">Участник окружения</option>
@@ -345,13 +287,7 @@ export function WorkspaceSettings() {
             <button type="button" onClick={addMember} disabled={!addUserId && !inviteUsername.trim()} className="tf-button tf-button-primary"><Plus size={15} />Добавить</button>
           </div>
         )}
-        {(user?.is_root || user?.permissions?.users_manage) && (
-          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <input className="tf-input" value={newUsername} onChange={event => setNewUsername(event.target.value)} placeholder="Новый логин" />
-            <input className="tf-input" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Пароль от 8 символов" />
-            <button type="button" onClick={createAndAdd} className="tf-button"><Plus size={15} />Создать</button>
-          </div>
-        )}
+        {(user?.is_root || user?.permissions?.users_manage) && <Link className="tf-button mb-4" to="/access?scope=app&tab=users">Создание аккаунтов и смена паролей →</Link>}
         <div className="space-y-2">
           {members.map(member => {
             const protectedOwner = member.role === 'owner';
@@ -376,11 +312,7 @@ export function WorkspaceSettings() {
                   ) : (
                     <span className="tf-chip">{member.role === 'owner' ? 'владелец' : member.role === 'admin' ? 'админ' : 'участник'}</span>
                   )}
-                  {canTouch && !users.find(account => account.id === member.user_id)?.is_root && !(user?.is_root && user.id === member.user_id) && (isSuperadmin || (user?.permissions?.users_manage === true && user?.permissions?.users_password_reset === true)) && (
-                    <button type="button" onClick={() => setPwdUserId(pwdUserId === member.user_id ? null : member.user_id)} className="tf-button h-9 px-2 text-xs" title="Сменить пароль">
-                      <KeyRound size={14} />Пароль
-                    </button>
-                  )}                  {canTouch && !protectedOwner && user?.id !== member.user_id && (
+                  {canTouch && !protectedOwner && user?.id !== member.user_id && (
                     <button type="button" onClick={() => removeMember(member)} className="tf-button h-9 w-9 px-0 text-[var(--color-danger)]" title="Убрать" aria-label={`Убрать ${member.username}`}>
                       <X size={15} />
                     </button>
@@ -389,39 +321,8 @@ export function WorkspaceSettings() {
                     <span className="text-xs text-[var(--color-muted)]">владельца меняет только суперадмин</span>
                   )}
                 </div>
-                {pwdUserId === member.user_id && (
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      className="tf-input h-9 text-sm"
-                      type="password"
-                      value={pwdValue}
-                      onChange={event => setPwdValue(event.target.value)}
-                      placeholder="Новый пароль от 8 символов"
-                    />
-                    <button type="button" onClick={() => savePassword(member.user_id)} className="tf-button h-9 shrink-0 text-xs">OK</button>
-                  </div>
-                )}
-                {(wsRoles.length > 0 || member.custom_role) && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-secondary)]">Профиль доступа (заменяет Стандартный профиль уровня):</span>
-                    {canManageProfiles && user?.id !== member.user_id && (isSuperadmin || (isOwner && !protectedOwner) || (detail.role === 'admin' && member.role === 'member')) && wsRoles.length > 0 ? (
-                      <select
-                        className="tf-input h-8 w-auto py-0 text-xs"
-                        value={member.custom_role_id == null ? '' : String(member.custom_role_id)}
-                        onChange={event =>
-                          changeCustomRole(member.user_id, event.target.value ? Number(event.target.value) : null)
-                        }
-                      >
-                        <option value="">Стандартный профиль уровня</option>
-                        {wsRoles.map(role => (
-                          <option key={role.id} value={role.id}>{role.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="tf-chip">{member.custom_role || 'Стандартный профиль уровня'}</span>
-                    )}
-                  </div>
-                )}
+
+
               </div>
             );
           })}
@@ -429,13 +330,6 @@ export function WorkspaceSettings() {
       </section>
 
       </>}
-      {tab === 'access' && canManageProfiles && <>
-        {isSuperadmin && <FeaturesPanel scope="workspace" targetId={detail.id} title="Доступность рабочих функций пространства" description="Включённый модуль разрешает использовать инструмент, но не выдаёт его участникам. Ниже выберите пользователя: проверьте рабочее право и причину недоступности. Если модуль раньше отключали, включите нужную функцию здесь явно." />}
-        <WsRolesPanel workspaceId={detail.id} canManage={canManageProfiles} />
-        <WorkspaceAccessPanel workspaceId={detail.id} level={detail.role} />
-      </>}
-
-      {tab === 'access' && !canManageProfiles && <p className="tf-panel-flat p-5">Для настройки доступа нужно право «Профили доступа» и уровень владельца или администратора пространства.</p>}
       {tab === 'appearance' && <section className="tf-panel-flat p-5">
         <h3 id="interface-settings" className="mb-1 flex scroll-mt-24 items-center gap-2 text-sm font-bold"><SlidersHorizontal size={16} />Конструктор интерфейса</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Единые названия разделов для меню и страниц. Подписи полей используются в формах, фильтрах и таблице задач. {(isOwner || isSuperadmin) ? 'Изменения действуют после нажатия «Применить».' : 'Для изменения нужно разрешение «Настройки и оформление окружения».'}</p>
@@ -443,15 +337,6 @@ export function WorkspaceSettings() {
       </section>}
 
       {tab === 'service' && <>
-      {isSuperadmin && (
-        <FeaturesPanel
-          scope="workspace"
-          targetId={detail.id}
-          title="Функции окружения"
-          description="Доступность рабочих функций этого пространства. Она не выдаёт права: назначьте профиль доступа участнику отдельно. Глобальный запрет и отключённый модуль нельзя обойти персональным переключателем."
-        />
-      )}
-
       <section className="tf-panel-flat p-5">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-bold"><BookOpen size={16} />База знаний AI</h3>
         <p className="mb-3 text-xs text-[var(--color-text-secondary)]">Факты подмешиваются в ответы AI и аналитику. Добавлять можно и из чата командой «запомни ...».</p>
@@ -506,7 +391,7 @@ export function WorkspaceSettings() {
   );
 }
 
-const KNOWN_ROUTES = Object.entries(SECTION_LABELS).filter(([route]) => !['/work', '/manage', '/admin'].includes(route)).map(([to, label]) => ({ to, label }));
+const KNOWN_ROUTES = Object.entries(SECTION_LABELS).filter(([route]) => !['/work', '/manage', '/admin', '/users'].includes(route)).map(([to, label]) => ({ to, label }));
 
 function UiEditor({ detail, canManage, onSaved }: {
   detail: WorkspaceDetail;

@@ -48,7 +48,7 @@ async def authorize(user, workspace_id):
         workspace, _ = await resolve_workspace(session, user, await get_user_role_names(user.id), workspace_id)
     permissions = await effective_permissions(user, workspace.id)
     if not (permissions.get('all') or permissions.get('ai')):
-        raise HTTPException(403, 'Нет рабочего права на ИИ. Управляющий может выдать его в Окружение → Доступ.')
+        raise HTTPException(403, 'Нет рабочего права на ИИ. Управляющий может выдать его в Права и доступ → Пространство → Доступ участников.')
     if not await is_feature_available(user, 'ai', workspace.id):
         from app.core.permissions import get_feature_access
         reason = (await get_feature_access(user, workspace.id)).get('ai', {}).get('reason')

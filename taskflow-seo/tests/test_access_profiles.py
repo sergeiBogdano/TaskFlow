@@ -84,3 +84,68 @@ def test_field_policy_validation(sync_request, admin_cookies):
         response = sync_request('POST', f'/api/workspaces/{ws}/roles', cookies=admin_cookies,
                                 json={'name': uuid.uuid4().hex, 'permissions': {}, 'field_access': fields})
         assert response.status_code == 400, response.text
+
+
+def test_combined_access_save_and_feature_inheritance(sync_request, admin_cookies):
+    ws, uid, _ = setup_member(sync_request, admin_cookies)
+    enabled = sync_request('PUT', f'/api/workspaces/{ws}/modules', cookies=admin_cookies, json={'enabled': ['tasks', 'crm', 'notes', 'reports', 'automation', 'ai']})
+    assert enabled.status_code == 200, enabled.text
+    restored = sync_request('PUT', '/api/features', cookies=admin_cookies, json={'scope': 'workspace', 'target_id': ws, 'key': 'ai', 'enabled': True})
+    assert restored.status_code == 200, restored.text
+    path = f'/api/workspaces/{ws}/members/{uid}/access'
+    response = sync_request('PUT', path, cookies=admin_cookies, json={'permissions': {'ai': True}, 'fields': {'tasks': {'notes': 'view'}}, 'function_availability': {'ai': False}})
+    assert response.status_code == 200, response.text
+    def actual():
+        report = sync_request('GET', f'/api/workspaces/{ws}/access', cookies=admin_cookies).json()
+        return next(row for row in report['members'] if row['user_id'] == uid)
+    row = actual()
+    assert row['permissions']['ai']['granted'] is True
+    assert row['permissions']['ai']['available'] is False
+    assert row['permissions']['ai']['availability_override'] is False
+    assert row['fields']['tasks']['notes'] == 'view'
+    response = sync_request('PUT', path, cookies=admin_cookies, json={'permissions': {'ai': True}, 'fields': {}, 'function_availability': {'ai': None}})
+    assert response.status_code == 200, response.text
+    row = actual()
+    assert row['permissions']['ai']['allowed'] is True
+    assert row['permissions']['ai']['availability_override'] is None
+
+
+def test_combined_access_invalid_patch_does_not_partially_save(sync_request, admin_cookies):
+    ws, uid, _ = setup_member(sync_request, admin_cookies)
+    path = f'/api/workspaces/{ws}/members/{uid}/access'
+    before = sync_request('GET', f'/api/workspaces/{ws}/access', cookies=admin_cookies).json()
+    for function_changes in ({'ai': 'true'}, {'users_manage': True}, []):
+        response = sync_request('PUT', path, cookies=admin_cookies, json={'permissions': {'tasks': False}, 'fields': {}, 'function_availability': function_changes})
+        assert response.status_code == 400, response.text
+        after = sync_request('GET', f'/api/workspaces/{ws}/access', cookies=admin_cookies).json()
+        assert before == after
+
+
+def test_combined_access_function_changes_require_actual_root(sync_request, admin_cookies):
+    ws, uid, cookies = setup_member(sync_request, admin_cookies, level='admin')
+    response = sync_request('PUT', f'/api/workspaces/{ws}/members/{uid}/access', cookies=cookies, json={'permissions': {'tasks': False}, 'function_availability': {'ai': True}})
+    assert response.status_code == 403
+    report = sync_request('GET', f'/api/workspaces/{ws}/access', cookies=admin_cookies).json()
+    row = next(row for row in report['members'] if row['user_id'] == uid)
+    assert row['permissions']['tasks']['allowed'] is True
+    assert row['permissions']['ai']['availability_override'] is None
+
+
+def test_combined_access_cannot_reopen_disabled_space_function(sync_request, admin_cookies):
+    ws, uid, _ = setup_member(sync_request, admin_cookies)
+    enabled = sync_request('PUT', f'/api/workspaces/{ws}/modules', cookies=admin_cookies, json={'enabled': ['tasks', 'crm', 'notes', 'reports', 'automation', 'ai']})
+    assert enabled.status_code == 200, enabled.text
+    restored = sync_request('PUT', '/api/features', cookies=admin_cookies, json={'scope': 'workspace', 'target_id': ws, 'key': 'ai', 'enabled': True})
+    assert restored.status_code == 200, restored.text
+    granted = sync_request('PUT', f'/api/workspaces/{ws}/members/{uid}/access', cookies=admin_cookies, json={'permissions': {'ai': True}, 'fields': {}, 'function_availability': {'ai': True}})
+    assert granted.status_code == 200, granted.text
+    disabled = sync_request('PUT', '/api/features', cookies=admin_cookies, json={'scope': 'workspace', 'target_id': ws, 'key': 'ai', 'enabled': False})
+    assert disabled.status_code == 200
+    response = sync_request('PUT', f'/api/workspaces/{ws}/members/{uid}/access', cookies=admin_cookies, json={'permissions': {'ai': True}, 'fields': {}, 'function_availability': {'ai': True}})
+    assert response.status_code == 403, response.text
+    report = sync_request('GET', f'/api/workspaces/{ws}/access', cookies=admin_cookies).json()
+    row = next(row for row in report['members'] if row['user_id'] == uid)
+    assert row['permissions']['ai']['granted'] is True
+    assert row['permissions']['ai']['availability_override'] is True
+    assert row['permissions']['ai']['allowed'] is False
+    assert 'пространства' in row['permissions']['ai']['reason']

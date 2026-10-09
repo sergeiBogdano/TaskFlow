@@ -3,7 +3,7 @@ export const SECTION_LABELS: Record<string, string> = {
   '/kanban': 'Канбан', '/calendar': 'Календарь', '/notifications': 'Уведомления',
   '/trash': 'Корзина', '/crm': 'CRM', '/clients': 'Клиенты', '/modules': 'Модули',
   '/reports': 'Отчёты', '/ai': 'Помощник', '/notes': 'Заметки',
-  '/users': 'Пользователи', '/settings': 'Настройки', '/workspace': 'Окружение',
+  '/access': 'Права и доступ', '/users': 'Пользователи', '/settings': 'Настройки', '/workspace': 'Окружение',
 };
 
 type LabelConfig = {

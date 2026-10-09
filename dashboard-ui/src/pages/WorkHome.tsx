@@ -5,7 +5,6 @@ import { getActiveWorkspaceDetail } from '../lib/workspace';
 import { sectionLabel } from '../lib/uiconfig';
 import { availableWorkAreas, WORK_AREAS, type WorkArea } from '../lib/workAreas';
 import { SpaceDirectory } from '../components/SpaceDirectory';
-import { FeaturesPanel } from '../components/FeaturesPanel';
 import { AiAdminPanel } from '../components/AiAdminPanel';
 
 const tools = [
@@ -25,8 +24,8 @@ export function WorkHome({ area = 'work' }: { area?: WorkArea }) {
   if (area === 'work' && !workspace) return <SpaceDirectory />;
   const visible = tools.filter(item => user?.features?.[item.permission] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[item.permission]));
   const cards = area === 'work' ? visible : area === 'manage'
-    ? [{ route: '/workspace', icon: Layers, description: 'Настройки, участники, профили доступа, поля и оформление.' }]
-    : [{ route: '/users', icon: Users, description: 'Аккаунты и права на управление приложением.' }];
+    ? [{ route: '/workspace', icon: Layers, description: 'Основные настройки и оформление пространства.' }, { route: '/access', icon: ShieldCheck, description: 'Единый центр команды, профилей, прав, функций и доступа к полям.' }]
+    : [{ route: '/access?scope=app', icon: Users, description: 'Единый центр аккаунтов, профилей приложения, групп и функций.' }];
   return <div className="mx-auto max-w-6xl space-y-8">
     <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 sm:p-8">
       <p className="text-xs font-semibold uppercase tracking-widest text-[var(--color-muted)]">{WORK_AREAS[area].title}{area !== 'admin' && workspace?.name ? ` · ${workspace.name}` : ''}</p>
@@ -35,10 +34,10 @@ export function WorkHome({ area = 'work' }: { area?: WorkArea }) {
     </section>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{cards.map(item => <Link key={item.route} to={item.route} className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 transition hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)]">
       <div className="flex items-center justify-between"><item.icon size={23} /><ArrowUpRight size={17} className="text-[var(--color-muted)]" /></div>
-      <h3 className="mt-4 font-semibold">{sectionLabel(item.route)}</h3><p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">{item.description}</p>
+      <h3 className="mt-4 font-semibold">{sectionLabel(item.route.split('?')[0])}</h3><p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">{item.description}</p>
     </Link>)}</div>
     {area === 'work' && !visible.length && <p className="tf-panel-flat p-5">В этом пространстве пока нет доступных инструментов. Попросите администратора проверить модули и ваш профиль.</p>}
-    {area === 'admin' && user?.is_root && <section className="space-y-4"><div className="flex items-center gap-2 font-semibold"><ShieldCheck size={19} />Возможности системы</div><FeaturesPanel scope="global" title="Включение функций для приложения" /></section>}
+
     {area === 'admin' && user?.is_root && <AiAdminPanel />}
     <div className="flex flex-wrap gap-3 text-sm"><Link className="tf-button" to="/settings">Личные настройки</Link><Link className="tf-button" to="/wiki">Руководство</Link></div>
   </div>;

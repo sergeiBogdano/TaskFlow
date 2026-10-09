@@ -3,7 +3,7 @@ type Account = { is_root?: boolean; permissions?: Record<string, boolean> } | nu
 
 export function workAreaForRoute(route: string): WorkArea {
   if (['/admin', '/users'].some(path => route === path || route.startsWith(path + '/'))) return 'admin';
-  if (['/manage', '/workspace'].some(path => route === path || route.startsWith(path + '/'))) return 'manage';
+  if (['/manage', '/workspace', '/access'].some(path => route === path || route.startsWith(path + '/'))) return 'manage';
   return 'work';
 }
 

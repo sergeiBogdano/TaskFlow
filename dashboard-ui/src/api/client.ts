@@ -413,7 +413,7 @@ export type WorkspaceAccessReport = {
   fields: Record<string, Record<string, { label: string; required: boolean }>>;
   members: { user_id: number; username: string; is_root: boolean; level: string; profile: string;
     profile_id: number | null; overrides: { permissions?: Record<string, boolean>; fields?: FieldAccess };
-    fields: FieldAccess; permissions: Record<string, { granted: boolean; available: boolean; allowed: boolean; source: string; reason: string }> }[];
+    fields: FieldAccess; permissions: Record<string, { granted: boolean; available: boolean; availability_override: boolean | null; allowed: boolean; source: string; reason: string }> }[];
 };
 
 export type WorkspaceRolesResponse = {
@@ -869,7 +869,7 @@ export const api = {
 
   // Workspace roles (Ф7)
   getWorkspaceAccess: (id: number) => request<WorkspaceAccessReport>(`/api/workspaces/${id}/access`),
-  setWorkspaceAccess: (id: number, userId: number, data: { permissions: Record<string, boolean>; fields: FieldAccess }) =>
+  setWorkspaceAccess: (id: number, userId: number, data: { permissions: Record<string, boolean>; fields: FieldAccess; function_availability?: Record<string, boolean | null> }) =>
     request<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}/access`, { method: 'PUT', body: JSON.stringify(data) }),
   getWsRoles: (id: number, deleted = false) => request<WorkspaceRolesResponse>(`/api/workspaces/${id}/roles${deleted ? '?deleted=true' : ''}`),
   createWsRole: (id: number, data: { name: string; permissions: Record<string, boolean>; field_access?: FieldAccess }) =>

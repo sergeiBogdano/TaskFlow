@@ -8,6 +8,7 @@ type FeaturesPanelProps = {
   title?: string;
   description?: string;
   workOnly?: boolean;
+  appOnly?: boolean;
 };
 
 /**
@@ -15,14 +16,14 @@ type FeaturesPanelProps = {
  * scope=global — «Настройки»; scope=workspace — настройки окружения.
  * Выключенная функция скрыта в меню и закрыта на бэке (403) для всех.
  */
-export function FeaturesPanel({ scope, targetId, title, description, workOnly = false }: FeaturesPanelProps) {
+export function FeaturesPanel({ scope, targetId, title, description, workOnly = false, appOnly = false }: FeaturesPanelProps) {
   const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [overrides, setOverrides] = useState<Record<string, { id: number; enabled: boolean }>>({});
   const [effective, setEffective] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const loadRevision = useRef(0);
-  const contextKey = `${scope}:${targetId ?? ''}:${workOnly}`;
+  const contextKey = `${scope}:${targetId ?? ''}:${workOnly}:${appOnly}`;
   const currentContext = useRef(contextKey);
   currentContext.current = contextKey;
   const [loadedContext, setLoadedContext] = useState('');
@@ -33,7 +34,7 @@ export function FeaturesPanel({ scope, targetId, title, description, workOnly = 
     try {
       const data = await api.getFeatures(scope, targetId);
       if (revision !== loadRevision.current) return;
-      setGroups((data.catalog || []).filter(group => (scope !== 'workspace' && !workOnly) || group.scope === 'work'));
+      setGroups((data.catalog || []).filter(group => appOnly ? group.scope === 'app' : (scope !== 'workspace' && !workOnly) || group.scope === 'work'));
       setEffective(data.scope_effective || {});
       const map: Record<string, { id: number; enabled: boolean }> = {};
       data.overrides
@@ -46,7 +47,7 @@ export function FeaturesPanel({ scope, targetId, title, description, workOnly = 
       setMsg('Не удалось загрузить настройки функций. Обновите страницу.');
       setGroups([]);
     }
-  }, [scope, targetId, workOnly, contextKey]);
+  }, [scope, targetId, workOnly, appOnly, contextKey]);
 
   useEffect(() => { load(); return () => { loadRevision.current++; }; }, [load]);
 
