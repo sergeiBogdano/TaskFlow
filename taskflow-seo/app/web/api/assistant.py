@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -20,6 +20,8 @@ class Submit(BaseModel):
     message: str = Field(min_length=1, max_length=6000)
     kind: Literal['chat', 'task', 'report', 'polish'] = 'chat'
     conversation_id: UUID | None = None
+    date_start: date | None = None
+    date_end: date | None = None
 
 
 class QueueSettings(BaseModel):
@@ -37,6 +39,7 @@ async def job_payload(session, job, user=None, signature=None, allowed_sources=N
     visible = not user or not job.result or await queue.result_is_visible(job, user, signature, allowed_sources)
     return {'id': job.id, 'workspace_id': job.workspace_id, 'conversation_id': job.conversation_id, 'kind': job.kind, 'message': redact_text(job.message),
             'status': job.status, 'position': position, 'cancel_requested': job.cancel_requested,
+            'date_start': job.date_start.isoformat() if job.date_start else None, 'date_end': job.date_end.isoformat() if job.date_end else None,
             'created_at': job.created_at.isoformat() + 'Z', 'error': job.error if visible else 'Доступ к данным изменился. Начните новый диалог.',
             'result': redact_value(json.loads(job.result)) if job.result and visible else None}
 
@@ -78,7 +81,7 @@ async def submit(payload: Submit, workspace_id: int | None = Query(None), user=D
     message = payload.message.strip()
     if not message:
         raise HTTPException(400, 'Введите сообщение')
-    job = await queue.enqueue(user, workspace_id, message, payload.kind, str(payload.conversation_id) if payload.conversation_id else None)
+    job = await queue.enqueue(user, workspace_id, message, payload.kind, str(payload.conversation_id) if payload.conversation_id else None, date_start=payload.date_start, date_end=payload.date_end)
     async with async_session() as session:
         return await job_payload(session, job, user)
 

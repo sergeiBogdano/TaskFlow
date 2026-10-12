@@ -670,3 +670,30 @@ def test_hidden_status_excludes_derived_statistics(queue_data, event_loop):
         assert 'status' not in facts['tasks']['items'][0]
         assert 'deadline' in facts['tasks']['items'][0]
     event_loop.run_until_complete(scenario())
+
+
+@pytest.mark.parametrize('start,end', [('2026-01-01', '2026-02-01'), ('2026-02-10', '2026-02-09'), ('2026-02-01', None)])
+def test_period_validation_rejects_invalid_ranges(start, end):
+    from datetime import date
+    with pytest.raises(HTTPException):
+        ai.normalize_period(date.fromisoformat(start), date.fromisoformat(end) if end else None)
+
+
+def test_period_http_persistence_and_history_boundary(queue_data, sync_request, executor_cookies, event_loop):
+    _, member, wid, _ = queue_data
+    url = f'/api/assistant/requests?workspace_id={wid}'
+    bad = sync_request('POST', url, json={'message': 'Too long', 'date_start': '2026-01-01', 'date_end': '2026-02-01'}, cookies=executor_cookies)
+    assert bad.status_code == 400
+    first = sync_request('POST', url, json={'message': 'January', 'date_start': '2026-01-01', 'date_end': '2026-01-31'}, cookies=executor_cookies)
+    assert first.status_code == 202, first.text
+    assert first.json()['date_start'] == '2026-01-01' and first.json()['date_end'] == '2026-01-31'
+    async def finish():
+        async with async_session() as session:
+            job = await session.get(AiRequest, first.json()['id'])
+            job.status = 'completed'; await session.commit()
+    event_loop.run_until_complete(finish())
+    changed = sync_request('POST', url, json={'message': 'Other period', 'conversation_id': first.json()['conversation_id'], 'date_start': '2026-02-01', 'date_end': '2026-02-28'}, cookies=executor_cookies)
+    assert changed.status_code == 409, changed.text
+    default = sync_request('POST', url, json={'message': 'Default month'}, cookies=executor_cookies)
+    assert default.status_code == 202, default.text
+    assert default.json()['date_start'].endswith('-01')

@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Date,
     Float,
     ForeignKey,
     Index,
@@ -45,6 +46,8 @@ class AiRequest(Base):
     kind = Column(String(20), nullable=False, default='chat')
     message = Column(Text, nullable=False)
     prepared_prompt = Column(Text, nullable=True)
+    date_start = Column(Date, nullable=True)
+    date_end = Column(Date, nullable=True)
     access_signature = Column(Text, nullable=True)
     source_ids = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default='queued', index=True)

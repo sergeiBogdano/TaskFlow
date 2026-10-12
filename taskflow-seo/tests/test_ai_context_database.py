@@ -83,3 +83,62 @@ async def test_dashboard_chart_timezone_bucketing(deletion_db, monkeypatch):
     assert payload['created'] == [0, 0, 0, 0, 0, 0, 1]
     assert payload['done'] == [0, 0, 0, 0, 0, 0, 1]
     dashboard_cache.clear()
+
+
+async def test_period_filters_before_sampling_and_counts(deletion_db, monkeypatch):
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from app.core.models import Client, Contract, Sprint
+    permissions = {'tasks': True, 'notes': True, 'clients': True, 'client_tab_contracts': True, 'kanban': True}
+    async def fields(*args): return {entity: {key: 'edit' for key in keys} for entity, keys in FIELD_CATALOG.items()}
+    async def features(*args): return True
+    monkeypatch.setattr(ai, 'async_session', deletion_db)
+    monkeypatch.setattr(ai, 'field_access', fields)
+    monkeypatch.setattr(ai, 'is_feature_available', features)
+    monkeypatch.setattr(ai, 'app_settings', SimpleNamespace(tz=ZoneInfo('Europe/Moscow')))
+    async with deletion_db() as session:
+        user = User(username='period-reader', password_hash='unused'); session.add(user); await session.flush()
+        ws = Workspace(name='period database', created_by=user.id); session.add(ws); await session.flush()
+        # The upper bound is exclusive: Jan 31 21:00 UTC = Feb 1 00:00 Moscow.
+        session.add_all([Task(title='Inside last second', workspace_id=ws.id, assignee_id=user.id, created_at=datetime(2026, 1, 31, 20, 59, 59)),
+                         Task(title='Outside next midnight', workspace_id=ws.id, assignee_id=user.id, created_at=datetime(2026, 1, 31, 21)),
+                         Task(title='Outside old', workspace_id=ws.id, assignee_id=user.id, created_at=datetime(2025, 12, 1)),
+                         Task(title='Updated inside', workspace_id=ws.id, assignee_id=user.id, created_at=datetime(2025, 12, 1), updated_at=datetime(2026, 1, 15)),
+                         Note(title='Outside note', content='Excluded', user_id=user.id, workspace_id=ws.id, created_at=datetime(2025, 12, 1)),
+                         Note(title='Inside note', content='Allowed', user_id=user.id, workspace_id=ws.id, created_at=datetime(2026, 1, 15)),
+                         Sprint(name='Outside sprint', workspace_id=ws.id, created_at=datetime(2025, 12, 1))])
+        client = Client(org_name='Outside client', workspace_id=ws.id, created_at=datetime(2025, 12, 1), contract_start=datetime(2025, 1, 1), contract_end=datetime(2027, 1, 1))
+        session.add(client); await session.flush()
+        session.add_all([Contract(client_id=client.id, contract_type='Overlapping contract', start_date=datetime(2025, 1, 1), end_date=datetime(2027, 1, 1)),
+                         Contract(client_id=client.id, contract_type='Outside contract', start_date=datetime(2027, 1, 1), end_date=datetime(2027, 12, 1))])
+        await session.commit(); wid = ws.id
+    context = await ai.context_for(user, wid, permissions, 'Outside', date(2026, 1, 1), date(2026, 1, 31))
+    assert context['tasks']['total_visible'] == 2
+    assert {item['title'] for item in context['tasks']['items']} == {'Inside last second', 'Updated inside'}
+    assert [note['title'] for note in context['notes']] == ['Inside note']
+    assert context['organizations'] == [] and context['sprints'] == []
+    assert [contract['type'] for contract in context['contracts']] == ['Overlapping contract']
+    assert context['period']['days'] == 31
+
+
+async def test_period_columns_migrate_existing_queue(deletion_db, monkeypatch):
+    from sqlalchemy import text
+    from app.core import database
+    from app.core.models import AiRequest
+    engine = deletion_db.kw['bind']
+    async with deletion_db() as session:
+        user = User(username='queue-migration', password_hash='unused'); session.add(user); await session.flush()
+        workspace = Workspace(name='Existing queue', created_by=user.id); session.add(workspace); await session.flush()
+        job = AiRequest(user_id=user.id, workspace_id=workspace.id, conversation_id='migration', message='Keep old message', status='completed')
+        session.add(job); await session.commit(); job_id = job.id
+    async with engine.begin() as connection:
+        await connection.execute(text('ALTER TABLE ai_requests DROP COLUMN date_start'))
+        await connection.execute(text('ALTER TABLE ai_requests DROP COLUMN date_end'))
+    monkeypatch.setattr(database, 'engine', engine)
+    monkeypatch.setattr(database, 'settings', SimpleNamespace(DATABASE_URL=str(engine.url)))
+    await database._migrate()
+    await database._ensure_indexes()
+    async with deletion_db() as session:
+        job = await session.get(AiRequest, job_id)
+        assert job.message == 'Keep old message'
+        assert job.date_start is None and job.date_end is None

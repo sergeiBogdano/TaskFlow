@@ -38,6 +38,8 @@ async def _migrate():
         return
     async with engine.begin() as conn:
         for col in [
+            'ALTER TABLE ai_requests ADD COLUMN date_start DATE',
+            'ALTER TABLE ai_requests ADD COLUMN date_end DATE',
             'ALTER TABLE roles ADD COLUMN deleted_at DATETIME',
             'ALTER TABLE groups ADD COLUMN deleted_at DATETIME',
             'ALTER TABLE workspace_roles ADD COLUMN deleted_at DATETIME',
@@ -166,6 +168,8 @@ async def _ensure_indexes():
     # Списки разъезжались (custom_role_id падал прод) — при добавлении колонки
     # дописывать в оба места.
     pg_statements = [
+        'ALTER TABLE ai_requests ADD COLUMN IF NOT EXISTS date_start DATE',
+        'ALTER TABLE ai_requests ADD COLUMN IF NOT EXISTS date_end DATE',
         'ALTER TABLE roles ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
         'ALTER TABLE groups ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',
         'ALTER TABLE workspace_roles ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE',

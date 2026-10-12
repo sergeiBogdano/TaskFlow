@@ -1,6 +1,8 @@
+import type { AssistantPeriod } from '../lib/assistantPeriod';
 import { request } from './client';
 
 export type AssistantCapabilities = {
+  default_period?: AssistantPeriod; period_timezone?: string;
   workspace_id: number; modules: Record<string, boolean>; task_scope: 'team' | 'participating';
   can_prepare_task: boolean; can_save: false; can_execute: false;
   limits: { message: number; tasks: number; notes: number; aggregate_tasks: number };
@@ -8,14 +10,15 @@ export type AssistantCapabilities = {
 export type AssistantJob = {
   id: string; workspace_id: number; conversation_id: string; kind: string; message: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  date_start?: string | null; date_end?: string | null;
   position: number; cancel_requested: boolean; error: string | null; created_at: string;
-  result: { answer: string; context?: AssistantCapabilities & { selected: Record<string, number> }; draft?: { title: string; notes: string } } | null;
+  result: { answer: string; context?: AssistantCapabilities & { selected: Record<string, number>; period?: { start: string; end: string; timezone: string; days: number } | null }; draft?: { title: string; notes: string } } | null;
 };
 export const assistant = {
   capabilities: () => request<AssistantCapabilities>('/api/assistant/capabilities'),
   active: () => request<AssistantJob | null>('/api/assistant/active'),
   history: () => request<AssistantJob[]>('/api/assistant/requests'),
-  submit: (message: string, kind = 'chat', conversation_id?: string) => request<AssistantJob>('/api/assistant/requests', { method: 'POST', body: JSON.stringify({ message, kind, conversation_id }) }),
+  submit: (message: string, kind = 'chat', conversation_id?: string, period?: AssistantPeriod) => request<AssistantJob>('/api/assistant/requests', { method: 'POST', body: JSON.stringify({ message, kind, conversation_id, ...period }) }),
   status: (id: string, workspace?: number) => request<AssistantJob>(`/api/assistant/requests/${id}${workspace ? `?workspace_id=${workspace}` : ''}`),
   cancel: (id: string, workspace?: number) => request<AssistantJob>(`/api/assistant/requests/${id}/cancel${workspace ? `?workspace_id=${workspace}` : ''}`, { method: 'POST' }),
   clear: () => request('/api/assistant/history', { method: 'DELETE' }),

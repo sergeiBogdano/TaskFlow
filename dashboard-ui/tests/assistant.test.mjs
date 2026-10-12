@@ -4,7 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 async function load(request) {
-  const source = (await readFile(new URL('../src/api/assistant.ts', import.meta.url), 'utf8')).replace("import { request } from './client';", 'const request = globalThis.taskflowAssistantRequest;');
+  const source = (await readFile(new URL('../src/api/assistant.ts', import.meta.url), 'utf8')).replace(/import type[^;]+;/g, '').replace("import { request } from './client';", 'const request = globalThis.taskflowAssistantRequest;');
   globalThis.taskflowAssistantRequest = request;
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(compiled + `\n// ${Math.random()}`).toString('base64')}`);
