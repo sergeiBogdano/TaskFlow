@@ -43,7 +43,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
         {task.visibility === 'private' && <EyeOff size={14} className="text-[var(--color-muted)]" />}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        {task.client && <span className="tf-chip max-w-full truncate">{task.client}</span>}
+        {task.client && <span className="tf-task-client" title={task.client}><span className="min-w-0 truncate">{task.client}</span></span>}
         {task.client_warning && <span className="tf-chip border-[var(--color-warning)]/45 text-[var(--color-warning)]"><AlertCircle size={12} />Важно</span>}
         <span className="tf-chip" style={{ color: 'var(--color-text-secondary)', background: `color-mix(in srgb, ${priority.color} 20%, transparent)`, borderColor: `color-mix(in srgb, ${priority.color} 35%, transparent)` }}><span className="tf-priority-marker" style={{ color: priority.color }} aria-hidden="true" />{priority.label}</span>
         {task.no_contract && <span className="tf-chip border-[var(--color-danger)]/40 text-[var(--color-danger)]">нет договора</span>}

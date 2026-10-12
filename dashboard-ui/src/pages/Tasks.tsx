@@ -575,7 +575,7 @@ export function Tasks() {
                 onChange={value => changeStatus(task, value)}
                 className="2xl:w-full"
               />
-              {crmEnabled && taskField('client').visible && <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="2xl:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span>}
+              {crmEnabled && taskField('client').visible && <span className={cn('tf-task-client', !task.client && 'tf-task-client-empty')} title={`${taskField('client').label}: ${task.client || 'Без клиента'}`}><span className="min-w-0 truncate"><span className="2xl:hidden">{taskField('client').label}: </span>{task.client || 'Без клиента'}</span></span>}
               <span className="truncate text-sm text-[var(--color-text-secondary)]"><span className="2xl:hidden">{taskField('assignee').label}: </span>{taskField('assignee').visible ? assignee?.username || 'Не назначен' : '—'}</span>
               <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} /><span className="2xl:hidden">{taskField('completionDate').label}:</span>{taskField('completionDate').visible ? formatDate(task.completion_date) : '—'}</span>
               <span className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]"><CalendarDays size={14} /><span className="2xl:hidden">{taskField('deadline').label}:</span>{taskField('deadline').visible ? formatDate(task.deadline) : '—'}</span>
