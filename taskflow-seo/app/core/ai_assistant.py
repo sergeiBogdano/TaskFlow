@@ -530,8 +530,14 @@ async def run_one(job_id, timeout):
             raise
     except (asyncio.TimeoutError, httpx.TimeoutException):
         error = 'Время ожидания истекло. Попробуйте более короткий запрос.'
-    except HTTPException:
-        error = 'Доступ изменился: запрос остановлен. Проверьте права пространства.'
+    except HTTPException as exc:
+        if exc.status_code in (401, 403, 404):
+            error = 'Запрос остановлен: изменился доступ к пространству или данным. Начните новый запрос; если ошибка повторяется, проверьте права с администратором.'
+        elif exc.status_code in (400, 413, 422):
+            error = 'Не удалось обработать запрос: проверьте текст и выбранные даты, затем отправьте заново.'
+        else:
+            error = 'Помощник временно недоступен. Повторите запрос позже.'
+        log.warning('AI request rejected: %s, HTTP %s', job_id, exc.status_code)
     except Exception:
         log.warning('AI request failed: %s', job_id, exc_info=True)
     finally:

@@ -697,3 +697,21 @@ def test_period_http_persistence_and_history_boundary(queue_data, sync_request, 
     default = sync_request('POST', url, json={'message': 'Default month'}, cookies=executor_cookies)
     assert default.status_code == 202, default.text
     assert default.json()['date_start'].endswith('-01')
+
+
+@pytest.mark.parametrize('status,fragment', [(403, 'изменился доступ'), (400, 'выбранные даты'), (503, 'временно недоступен')])
+def test_worker_error_messages_distinguish_access_and_service_failures(queue_data, event_loop, monkeypatch, status, fragment):
+    root, _, wid, _ = queue_data
+    async def rejected(*args):
+        raise HTTPException(status, 'private diagnostic must not reach the user')
+    monkeypatch.setattr(ai, 'execute', rejected)
+    async def scenario():
+        request = await ai.enqueue(root, wid, 'Test error')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            job = await session.get(AiRequest, request.id)
+            assert job.status == 'failed' and job.result is None
+            assert fragment in job.error
+            assert 'private diagnostic' not in job.error
+            assert (await session.get(AiQueueSettings, 1)).lease_owner is None
+    event_loop.run_until_complete(scenario())
