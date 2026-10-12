@@ -179,10 +179,14 @@ async def login_page(request: Request):
 
 @router.post('/login')
 async def login_post(request: Request, username: str = Form(''), password: str = Form('')):
+    from app.web.security import check_login_limit, login_succeeded
+    from app.core.auth import set_session_cookie
+    await check_login_limit(username)
     u = await authenticate(username, password)
     if u:
+        await login_succeeded(username)
         resp = RedirectResponse(url='/', status_code=302)
-        resp.set_cookie(key=COOKIE_NAME, value=make_session_token(u.id), httponly=True, max_age=86400 * 30)
+        set_session_cookie(resp, u.id, u.session_version)
         return resp
     return templates.TemplateResponse(request, 'login.html', ctx(request, error='Неверное имя или пароль'))
 

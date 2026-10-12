@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Consistent SQLite/PostgreSQL backup without credentials in process arguments."""
 import argparse
+from contextlib import closing
 import os
 import sqlite3
 import subprocess
@@ -10,9 +11,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-def backup(database_url, directory, *, encrypt=False, crypto_secret=None):
-    if encrypt and not crypto_secret:
-        raise ValueError('Для шифрования нужен существующий CRYPTO_SECRET')
+def _backup_plain(database_url, directory):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
@@ -22,8 +21,8 @@ def backup(database_url, directory, *, encrypt=False, crypto_secret=None):
         if not source.is_file():
             raise ValueError('База SQLite не найдена')
         target = directory / f'taskflow_{stamp}.db'
-        with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as connection:
-            with sqlite3.connect(target) as destination:
+        with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)) as connection:
+            with closing(sqlite3.connect(target)) as destination:
                 connection.backup(destination)
                 if destination.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise RuntimeError('Проверка копии SQLite не пройдена')
@@ -44,28 +43,48 @@ def backup(database_url, directory, *, encrypt=False, crypto_secret=None):
             raise RuntimeError('pg_dump не выполнил копирование; проверьте подключение и права') from None
     else:
         raise ValueError('Поддерживаются SQLite и PostgreSQL')
-    if encrypt:
-        import base64
-        import hashlib
-        from cryptography.fernet import Fernet
-        raw = crypto_secret.encode()
-        key = raw if len(raw) == 32 else hashlib.sha256(raw).digest()
-        encrypted = target.with_suffix(target.suffix + '.fernet')
-        encrypted.write_bytes(Fernet(base64.urlsafe_b64encode(key)).encrypt(target.read_bytes()))
-        target.unlink()
-        target = encrypted
     return target
+
+
+def backup(database_url, directory, *, encrypt=True, crypto_secret=None):
+    import tempfile, base64, hashlib
+    from cryptography.fernet import Fernet
+    directory = Path(directory).resolve()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not encrypt:
+        target = _backup_plain(database_url, directory)
+        target.chmod(0o600)
+        return target
+    if not crypto_secret or len(crypto_secret) < 32 or crypto_secret == 'taskflow-secret-key-change-in-production':
+        raise ValueError('Для копии нужен существующий случайный CRYPTO_SECRET длиной от 32 символов')
+    raw = crypto_secret.encode()
+    key = raw if len(raw) == 32 else hashlib.sha256(raw).digest()
+    with tempfile.TemporaryDirectory(prefix='.backup-', dir=directory) as temporary:
+        plain = _backup_plain(database_url, temporary)
+        plain.chmod(0o600)
+        encrypted = directory / (plain.name + '.fernet')
+        payload = Fernet(base64.urlsafe_b64encode(key)).encrypt(plain.read_bytes())
+        try:
+            descriptor = os.open(encrypted, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, 'wb') as output:
+                output.write(payload); output.flush(); os.fsync(output.fileno())
+        except Exception:
+            encrypted.unlink(missing_ok=True)
+            raise
+        return encrypted
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', default='backups')
-    parser.add_argument('--encrypt', action='store_true')
+    formats = parser.add_mutually_exclusive_group()
+    formats.add_argument('--encrypt', action='store_true', help='Совместимость: копии уже шифруются по умолчанию')
+    formats.add_argument('--plaintext', action='store_true', help='Явно создать незашифрованную копию только для контролируемого экспорта')
     arguments = parser.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from app.core.config import settings
     try:
-        output = backup(settings.DATABASE_URL, arguments.directory, encrypt=arguments.encrypt,
+        output = backup(settings.DATABASE_URL, arguments.directory, encrypt=not arguments.plaintext,
                         crypto_secret=settings.CRYPTO_SECRET)
         print(f'Резервная копия создана: {output}')
     except (ValueError, RuntimeError, FileNotFoundError, sqlite3.Error) as error:

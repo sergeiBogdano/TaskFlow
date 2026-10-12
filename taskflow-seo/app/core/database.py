@@ -12,7 +12,7 @@ from app.core.permission_catalog import DEFAULT_ROLE_PERMISSIONS, ROLE_MIGRATION
 
 logger = logging.getLogger(__name__)
 
-engine_options = {'echo': False, 'pool_pre_ping': True}
+engine_options = {'echo': False, 'pool_pre_ping': True, 'hide_parameters': True}
 if settings.DATABASE_URL.startswith('postgresql'):
     engine_options.update({
         'pool_size': settings.DB_POOL_SIZE,
@@ -539,6 +539,8 @@ async def init_db():
     await _migrate_role_permissions()
     await _migrate_custom_roles_exact()
     await _ensure_workspaces()
+    from app.core.access_migration import migrate_legacy_client_accesses
+    await migrate_legacy_client_accesses()
 
 
 async def close_db():

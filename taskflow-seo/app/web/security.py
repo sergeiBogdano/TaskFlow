@@ -1,38 +1,45 @@
 """Browser request protections without requiring HTTPS for private HTTP deployments."""
 import time
-from collections import deque
 from urllib.parse import urlsplit
 
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 
-_failed_logins: dict[str, deque] = {}
+def _login_key(username):
+    import hashlib, hmac
+    return hmac.new(settings.WEB_APP_SECRET.encode(), username.casefold().encode(), hashlib.sha256).hexdigest()
 
 
-def check_login_limit(username):
-    now = time.monotonic()
-    key = username.casefold()
-    attempts = _failed_logins.get(key, deque())
-    while attempts and attempts[0] < now - 900:
-        attempts.popleft()
-    if len(attempts) >= 10:
-        from fastapi import HTTPException
+async def check_login_limit(username):
+    from sqlalchemy import case, delete
+    from fastapi import HTTPException
+    from app.core.database import async_session
+    from app.core.models import LoginThrottle
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from sqlalchemy.dialects.postgresql import insert as postgres_insert
+    now = time.time()
+    insert = sqlite_insert if settings.DATABASE_URL.startswith('sqlite') else postgres_insert
+    expired = LoginThrottle.started_at <= now - 900
+    statement = insert(LoginThrottle).values(key=_login_key(username), started_at=now, attempts=1)
+    statement = statement.on_conflict_do_update(index_elements=[LoginThrottle.key], set_={
+        'started_at': case((expired, now), else_=LoginThrottle.started_at),
+        'attempts': case((expired, 1), else_=LoginThrottle.attempts + 1),
+    }, where=expired | (LoginThrottle.attempts < 10)).returning(LoginThrottle.attempts)
+    async with async_session() as session:
+        await session.execute(delete(LoginThrottle).where(LoginThrottle.started_at < now - 1800))
+        allowed = (await session.execute(statement)).scalar_one_or_none()
+        await session.commit()
+    if allowed is None:
         raise HTTPException(429, 'Слишком много попыток входа. Повторите через 15 минут.', headers={'Retry-After': '900'})
 
 
-def record_login_failure(username):
-    if len(_failed_logins) > 10_000:
-        now = time.monotonic()
-        for key in list(_failed_logins):
-            if not _failed_logins[key] or _failed_logins[key][-1] < now - 900:
-                del _failed_logins[key]
-    while len(_failed_logins) >= 10_000 and username.casefold() not in _failed_logins:
-        _failed_logins.pop(next(iter(_failed_logins)))
-    _failed_logins.setdefault(username.casefold(), deque(maxlen=10)).append(time.monotonic())
-
-
-def login_succeeded(username):
-    _failed_logins.pop(username.casefold(), None)
+async def login_succeeded(username):
+    from sqlalchemy import delete
+    from app.core.database import async_session
+    from app.core.models import LoginThrottle
+    async with async_session() as session:
+        await session.execute(delete(LoginThrottle).where(LoginThrottle.key == _login_key(username)))
+        await session.commit()
 
 
 async def security_headers(request, call_next):

@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.rich_text import clean_html, clean_payload
-from app.web.security import _failed_logins, check_login_limit, record_login_failure, login_succeeded
+from app.web.security import check_login_limit, login_succeeded
 
 
 def test_rich_text_removes_active_content_but_keeps_formatting():
@@ -17,16 +17,16 @@ def test_rich_text_removes_active_content_but_keeps_formatting():
     assert clean_payload({'format': 'code', 'content': '<script>example</script>'})['content'] == '<script>example</script>'
 
 
-def test_login_throttling_can_be_cleared_after_success():
+@pytest.mark.asyncio
+async def test_login_throttling_can_be_cleared_after_success(client):
     name = 'rate_' + uuid.uuid4().hex
     for _ in range(10):
-        record_login_failure(name)
+        await check_login_limit(name)
     with pytest.raises(HTTPException) as error:
-        check_login_limit(name.upper())
+        await check_login_limit(name.upper())
     assert error.value.status_code == 429
-    login_succeeded(name)
-    check_login_limit(name)
-    assert name not in _failed_logins
+    await login_succeeded(name)
+    await check_login_limit(name)
 
 
 def test_tables_and_checklists_survive_cleaning_without_active_attributes():

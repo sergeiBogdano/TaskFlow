@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -75,6 +76,13 @@ app = FastAPI(
     version="1.0.0-alpha.1",
     lifespan=lifespan,
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_input(request, error):
+    # Validation errors must not echo submitted passwords or other field values.
+    detail = [{key: item[key] for key in ('loc', 'msg', 'type') if key in item} for item in error.errors()]
+    return JSONResponse(status_code=422, content={'detail': detail})
+
 
 # work-права активного окружения → 403 для закрытых разделов API (Ф8)
 from app.web.middleware import work_permission_middleware  # noqa: E402

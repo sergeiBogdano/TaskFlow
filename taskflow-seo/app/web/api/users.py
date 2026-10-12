@@ -88,7 +88,7 @@ async def create_user(request: Request, user=Depends(require_permission('users_m
     password = data.get('password') or ''
     if not username or len(username) < 2:
         raise HTTPException(status_code=400, detail='Логин должен быть минимум 2 символа')
-    if not password or len(password) < 8:
+    if not isinstance(password, str) or not 8 <= len(password) <= 512:
         raise HTTPException(status_code=400, detail='Пароль минимум 8 символов')
     workspace_id = data.get('workspace_id')
     ws_role = (data.get('role') or 'member').strip()
@@ -130,7 +130,7 @@ async def create_user(request: Request, user=Depends(require_permission('users_m
 async def set_password(user_id: int, request: Request, user=Depends(get_current_user)):
     data = await request.json()
     password = data.get('password') or ''
-    if len(password) < 8:
+    if not isinstance(password, str) or not 8 <= len(password) <= 512:
         raise HTTPException(status_code=400, detail='Пароль минимум 8 символов')
     async with async_session() as session:
         target = await session.get(User, user_id)
@@ -269,7 +269,7 @@ async def delete_user(user_id: int, user=Depends(require_role(['superadmin']))):
 
 @router.post('/change-password')
 async def change_password(request: Request, user=Depends(get_current_user)):
-    from app.core.auth import COOKIE_NAME, make_session_token, verify_password
+    from app.core.auth import verify_password, set_session_cookie
     if user.is_root:
         raise HTTPException(status_code=403, detail='Пароль суперадмина меняется только командой на сервере')
     permissions = await get_user_permissions(user.id)
@@ -280,7 +280,7 @@ async def change_password(request: Request, user=Depends(get_current_user)):
     if not verify_password(data.get('current_password', ''), user.password_hash):
         raise HTTPException(status_code=400, detail='Неверный текущий пароль')
     password = data.get('new_password', '')
-    if len(password) < 8:
+    if not isinstance(password, str) or not 8 <= len(password) <= 512:
         raise HTTPException(status_code=400, detail='Новый пароль должен содержать минимум 8 символов')
     async with async_session() as session:
         account = await session.get(User, user.id)
@@ -289,8 +289,7 @@ async def change_password(request: Request, user=Depends(get_current_user)):
         account.session_version += 1
         await session.commit()
         response = JSONResponse({'ok': True})
-        response.set_cookie(COOKIE_NAME, make_session_token(account.id, account.session_version),
-                            httponly=True, samesite='lax', max_age=86400 * 30)
+        set_session_cookie(response, account.id, account.session_version)
         return response
 
 

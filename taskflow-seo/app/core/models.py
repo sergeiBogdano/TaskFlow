@@ -738,3 +738,10 @@ def _sanitize_model(_mapper, _connection, target):
 for _model in (Task, TaskComment, Note, Client, Module):
     _event.listen(_model, 'before_insert', _sanitize_model)
     _event.listen(_model, 'before_update', _sanitize_model)
+
+
+class LoginThrottle(Base):
+    __tablename__ = 'login_throttles'
+    key = Column(String(64), primary_key=True)
+    started_at = Column(Float, nullable=False, index=True)
+    attempts = Column(Integer, nullable=False)

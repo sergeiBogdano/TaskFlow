@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import COOKIE_NAME, hash_password, verify_password, verify_session_token
+from app.core.auth import COOKIE_NAME, hash_password, verify_password, verify_session_token, session_matches_user
 from app.core.database import async_session
 from app.core.models import User
 from app.core.sse import register_queue, unregister_queue
@@ -24,7 +24,8 @@ async def _current_user(request: Request):
     user_id = verify_session_token(token)
     if user_id is None:
         return None
-    return await get_user(user_id)
+    user = await get_user(user_id)
+    return user if session_matches_user(token, user) else None
 
 
 # ─── SSE ────────────────────────────────────────────────────
@@ -63,20 +64,27 @@ async def api_change_password(request: Request, current_password: str = Form('')
     user = await _current_user(request)
     if not user:
         return JSONResponse({'error': 'auth'}, status_code=401)
+    if user.is_root:
+        raise HTTPException(403, 'Пароль root меняется только на сервере')
     from app.core.permissions import get_user_permissions
     permissions = await get_user_permissions(user.id)
     if not (permissions.get('all') or permissions.get('users_password_own', True) is not False):
         return JSONResponse({'error': 'Нет права "users_password_own"'}, status_code=403)
     if not verify_password(current_password, user.password_hash):
         return JSONResponse({'error': 'Неверный текущий пароль'}, status_code=400)
-    if not new_password or len(new_password) < 4:
-        return JSONResponse({'error': 'Новый пароль должен быть минимум 4 символа'}, status_code=400)
+    if not 8 <= len(new_password) <= 512:
+        return JSONResponse({'error': 'Новый пароль должен быть минимум 8 символов'}, status_code=400)
     async with async_session() as session:
         u = await session.get(User, user.id)
         if u:
             u.password_hash = hash_password(new_password)
+            u.session_version += 1
             await session.commit()
-    return JSONResponse({'ok': True})
+            from app.core.auth import set_session_cookie
+            response = JSONResponse({'ok': True})
+            set_session_cookie(response, u.id, u.session_version)
+            return response
+    raise HTTPException(401, 'User not found')
 
 
 def ctx(request: Request, **kw) -> dict:

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import COOKIE_NAME, hash_password, make_session_token, verify_session_token, session_matches_user
+from app.core.auth import COOKIE_NAME, verify_session_token, session_matches_user, set_session_cookie
 from app.core.database import async_session
 from app.core.models import Role, User, UserRole
 from app.services.user_service import authenticate, get_user
@@ -41,14 +41,12 @@ def _get_user_data(user: User, roles_list: list = None, permissions: dict | None
 
 @router.post('/login')
 async def login(body: LoginRequest):
-    from app.web.security import check_login_limit, record_login_failure, login_succeeded
-    check_login_limit(body.username)
+    from app.web.security import check_login_limit, login_succeeded
+    await check_login_limit(body.username)
     u = await authenticate(body.username, body.password)
     if not u:
-        record_login_failure(body.username)
         return JSONResponse({'error': 'Неверное имя или пароль'}, status_code=401)
-    login_succeeded(body.username)
-    token = make_session_token(u.id, u.session_version)
+    await login_succeeded(body.username)
     async with async_session() as session:
         r = await session.execute(
             select(UserRole).options(selectinload(UserRole.role))
@@ -59,7 +57,7 @@ async def login(body: LoginRequest):
     response = JSONResponse({
         'user': _get_user_data(u, roles, await get_user_permissions(u.id)),
     })
-    response.set_cookie(key=COOKIE_NAME, value=token, httponly=True, max_age=86400 * 30, samesite='lax', secure=settings.COOKIE_SECURE)
+    set_session_cookie(response, u.id, u.session_version)
     return response
 
 
