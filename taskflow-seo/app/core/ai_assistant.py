@@ -60,7 +60,7 @@ async def authorize(user, workspace_id):
 async def access_signature(user, wid):
     permissions = await effective_permissions(user, wid)
     features = {key: await is_feature_available(user, key, wid) for key in ('ai', 'tasks', 'notes', 'clients', 'crm', 'kanban', 'client_tab_contracts')}
-    return json.dumps({'security_policy': 3, 'permissions': permissions, 'features': features, 'fields': await field_access(user, wid),
+    return json.dumps({'security_policy': 4, 'permissions': permissions, 'features': features, 'fields': await field_access(user, wid),
                       'session_version': user.session_version}, sort_keys=True)
 
 
@@ -212,9 +212,11 @@ async def context_for(user, wid, permissions, message=""):
                         value = getattr(task, attr)
                         row[attr] = value.isoformat() if isinstance(value, datetime) else excerpt(value, message) if value is not None else None
                 rows.append(row)
-            counts = (await session.execute(select(Task.status, func.count(Task.id)).where(*aggregate_conditions).group_by(Task.status))).all()
-            context['tasks'] = {'total_visible': total, 'sample_limit': 40, 'items': rows, 'by_status': dict(counts), 'totals_complete': complete, 'aggregate_limit': 1000}
-            if fields['tasks']['deadline'] != 'hidden':
+            context['tasks'] = {'total_visible': total, 'sample_limit': 40, 'items': rows, 'totals_complete': complete, 'aggregate_limit': 1000}
+            if fields['tasks']['status'] != 'hidden':
+                counts = (await session.execute(select(Task.status, func.count(Task.id)).where(*aggregate_conditions).group_by(Task.status))).all()
+                context['tasks']['by_status'] = dict(counts)
+            if fields['tasks']['deadline'] != 'hidden' and fields['tasks']['status'] != 'hidden':
                 context['tasks']['overdue_active'] = await session.scalar(select(func.count()).select_from(Task).where(*aggregate_conditions,
                     Task.deadline < now(), Task.status.notin_(('done', 'completed', 'cancelled'))))
         if (permissions.get('all') or permissions.get('notes')) and await is_feature_available(user, 'notes', wid):

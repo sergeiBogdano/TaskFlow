@@ -653,3 +653,20 @@ def test_hidden_fields_are_not_used_for_retrieval_ranking(queue_data, event_loop
         assert 'Secretrankingkeyword' not in json.dumps(facts)
         assert all('notes' not in item for item in facts['tasks']['items'])
     event_loop.run_until_complete(scenario())
+
+
+def test_hidden_status_excludes_derived_statistics(queue_data, event_loop):
+    _, member, wid, _ = queue_data
+    async def scenario():
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'fields': {'tasks': {'status': 'hidden'}}})
+            session.add(Task(title='Visible task, hidden status', status='in_progress', deadline=ai.now() - timedelta(days=1), assignee_id=member.id, workspace_id=wid))
+            await session.commit()
+        _, permissions = await ai.authorize(member, wid)
+        facts = await ai.context_for(member, wid, permissions)
+        assert 'by_status' not in facts['tasks']
+        assert 'overdue_active' not in facts['tasks']
+        assert 'status' not in facts['tasks']['items'][0]
+        assert 'deadline' in facts['tasks']['items'][0]
+    event_loop.run_until_complete(scenario())
