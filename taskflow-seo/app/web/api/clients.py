@@ -85,6 +85,7 @@ def _client_to_dict(c: Client, contacts, contracts, accesses, allowed_user_ids: 
         'org_name': c.org_name,
         'domain': c.domain or '',
         'favicon_url': c.favicon_url or '',
+        'has_contract': any(ct.status not in ('archived', 'closed') for ct in contracts) if user_can_view_client_tab(role_names, permissions, 'contracts') else None,
         'status': c.status,
         'contract_start': _contract_date_value(c.contract_start),
         'contract_end': _contract_date_value(c.contract_end),
@@ -934,21 +935,21 @@ async def client_contract_check(client_id: int, deadline: str = Query(''), user=
         if not client_is_visible_to_user(client_id, role_names, accessible_client_ids):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_client_workspace(session, c, user, role_names)
-        if not deadline or not c.contract_end:
-            return JSONResponse({'valid': True, 'message': '', 'contract_end': _contract_date_value(c.contract_end)})
-        from datetime import datetime
-        from app.core.utils.timezone import safe_dt
-        dl = datetime.fromisoformat(deadline)
-        if dl.tzinfo is None:
-            dl = to_utc(dl)
-        contract_end = safe_dt(c.contract_end)
-        if contract_end < dl:
-            return JSONResponse({
-                'valid': False,
-                'message': 'Договор истекает раньше дедлайна',
-                'contract_end': _contract_date_value(c.contract_end),
-            })
-        return JSONResponse({'valid': True, 'message': '', 'contract_end': _contract_date_value(c.contract_end)})
+        permissions = await request_permissions(user)
+        if not user_can_view_client_tab(role_names, permissions, 'contracts'):
+            raise HTTPException(status_code=403, detail='No access to contracts tab')
+        contracts = (await session.execute(select(Contract).where(Contract.client_id == client_id))).scalars().all()
+        relevant = [ct for ct in contracts if ct.status not in ('archived', 'closed')]
+        dates = [safe_dt(ct.end_date) for ct in relevant if ct.end_date]
+        contract_end = max(dates) if dates else None
+        result = {'valid': True, 'message': '', 'has_contract': bool(relevant), 'contract_end': _contract_date_value(contract_end)}
+        if deadline and contract_end:
+            dl = datetime.fromisoformat(deadline)
+            if dl.tzinfo is None:
+                dl = to_utc(dl)
+            if contract_end < dl:
+                result.update(valid=False, message='Договор истекает раньше дедлайна')
+        return JSONResponse(result)
 
 
 @router.get('/{client_id}/accesses/decrypt')
@@ -964,3 +965,23 @@ async def decrypt_client_accesses(client_id: int, user=Depends(require_permissio
             return JSONResponse(decrypted)
         except Exception:
             return JSONResponse({'error': 'Failed to decrypt'}, status_code=400)
+
+
+@router.get('/{client_id}/favicon')
+async def client_favicon(client_id: int, user=Depends(require_permission('clients'))):
+    async with async_session() as session:
+        client = await session.get(Client, client_id)
+        if not client or client.deleted_at:
+            raise HTTPException(404, 'Client not found')
+        role_names = await get_user_role_names(user.id)
+        accessible = await get_accessible_client_ids(session, user.id, role_names)
+        if not client_is_visible_to_user(client_id, role_names, accessible):
+            raise HTTPException(403, 'Forbidden')
+        await _assert_client_workspace(session, client, user, role_names)
+        domain = client.domain
+    from app.core.favicons import favicon
+    value = await favicon(domain)
+    if not value:
+        return Response(status_code=404)
+    data, mime = value
+    return Response(data, media_type=mime, headers={'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff'})

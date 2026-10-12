@@ -1,3 +1,5 @@
+import { getActiveWorkspaceId } from '../lib/workspace';
+import { clientFaviconUrl, clientContractSummary } from '../lib/clientPresentation';
 import { TextEditor } from '../components/TextEditor';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { sectionLabel } from '../lib/uiconfig';
@@ -259,7 +261,7 @@ export function Clients() {
               </div>
               <div className="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
                 <CalendarDays size={13} />
-                <span>Договор до {formatDate(client.contract_end)}</span>
+                <span>{clientContractSummary(client).hasContract === null ? 'Сведения о договоре недоступны' : clientContractSummary(client).hasContract ? (clientContractSummary(client).end ? `Договор до ${formatDate(clientContractSummary(client).end)}` : 'Договор без даты окончания') : 'Нет договора'}</span>
               </div>
               <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
                 <UserRoundCheck size={13} />
@@ -492,11 +494,12 @@ function Metric({ label, value, icon, tone = 'accent' }: { label: string; value:
 }
 
 function FaviconBadge({ client }: { client: Client | null }) {
+  const favicon = client && clientFaviconUrl(client) ? `/api/clients/${client.id}/favicon?workspace_id=${encodeURIComponent(getActiveWorkspaceId() || '')}&domain=${encodeURIComponent(client.domain)}` : '';
+  const [failedUrl, setFailedUrl] = useState('');
   const initials = client?.org_name?.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'OR';
 
   return <span className="relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-accent)]/15 text-[11px] font-black text-[var(--color-accent)]">
-    {initials}
-
+    {favicon && failedUrl !== favicon ? <img key={favicon} src={favicon} alt="" className="h-6 w-6 object-contain" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedUrl(favicon)} /> : initials}
   </span>;
 }
 

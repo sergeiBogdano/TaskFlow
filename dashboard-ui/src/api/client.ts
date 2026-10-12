@@ -106,6 +106,7 @@ export type Client = {
   org_name: string;
   domain: string;
   favicon_url?: string;
+  has_contract?: boolean | null;
   status: string;
   contract_start: string;
   contract_end: string;

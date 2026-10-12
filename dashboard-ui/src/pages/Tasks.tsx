@@ -1,3 +1,4 @@
+import { clientContractSummary } from '../lib/clientPresentation';
 import { currentFieldAccess } from '../lib/fieldAccess';
 import { runAssistant, queueLabel, type AssistantJob } from '../api/assistant';
 import { richInputHtml } from '../lib/editorHtml';
@@ -614,6 +615,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   const [deadline, setDeadline] = useState(source.deadline ? source.deadline.slice(0, 10) : '');
   const [visibility, setVisibility] = useState<'public' | 'private'>(source.visibility || 'public');
   const [noContract, setNoContract] = useState(source.no_contract || false);
+  const manualContractClient = useRef<string | null>(task || source.no_contract !== undefined ? clientId : null);
   const [notes, setNotes] = useState(source.notes || '');
   const [comment, setComment] = useState(source.comment || '');
   const [contractWarning, setContractWarning] = useState('');
@@ -693,7 +695,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
   }), [crmEnabled]);
   const showParams = uiFields.status.visible || uiFields.priority.visible || uiFields.taskType.visible || uiFields.sprint.visible;
   const showPeople = uiFields.client.visible || uiFields.assignee.visible || uiFields.coExecutors.visible;
-  const showDates = uiFields.completionDate.visible || uiFields.deadline.visible || uiFields.visibility.visible || uiFields.noContract.visible;
+  const showDates = uiFields.completionDate.visible || uiFields.deadline.visible || uiFields.visibility.visible;
   const initialSnapshot = useMemo(() => ({
     title: source.title || '',
     status: source.status || 'todo',
@@ -751,7 +753,15 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
     ));
   }, [assigneeId, coExecutorIds, coExecutorSearch, users]);
 
+  const selectClient = (id: string) => {
+    manualContractClient.current = null;
+    setClientId(id);
+    const summary = clientContractSummary(clients.find(client => String(client.id) === id));
+    if (uiFields.noContract.editable && (!id || summary.hasContract !== null)) setNoContract(id ? !summary.hasContract : false);
+  };
+
   useEffect(() => {
+    setContractEnd(''); contractEndRef.current = '';
     if (!clientId) {
       setClientAccesses([]);
       setSelectedAccessIds([]);
@@ -770,7 +780,9 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
         if (cancelled) return;
         setClientAccesses(Array.from(byId.values()));
         setClientWarning(client.client_warning || '');
-        setContractEnd(client.contract_end || '');
+        const summary = clientContractSummary(client);
+        setContractEnd(summary.end); contractEndRef.current = summary.end;
+        if (manualContractClient.current !== clientId && uiFields.noContract.editable && summary.hasContract !== null) setNoContract(!summary.hasContract);
       })
       .catch(async () => {
         const taskAccessList = await loadTaskAccesses();
@@ -780,24 +792,24 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
         setContractEnd('');
       });
     return () => { cancelled = true; };
-  }, [clientId, task?.id, task?.client_warning]);
+  }, [clientId, task?.id, task?.client_warning, uiFields.noContract.editable]);
 
   useEffect(() => {
     const dateToCheck = [completionDate, deadline].filter(Boolean).sort().at(-1) || '';
     if (!clientId || !dateToCheck) {
       setContractWarning('');
-      setContractEnd('');
-      contractEndRef.current = '';
       return;
     }
-    fetch(`/api/clients/${clientId}/contract-check?deadline=${encodeURIComponent(new Date(`${dateToCheck}T12:00:00`).toISOString())}&workspace_id=${encodeURIComponent(getActiveWorkspaceId() || '')}`, { credentials: 'include' })
-      .then(r => r.json())
+    const controller = new AbortController();
+    fetch(`/api/clients/${clientId}/contract-check?deadline=${encodeURIComponent(new Date(`${dateToCheck}T12:00:00`).toISOString())}&workspace_id=${encodeURIComponent(getActiveWorkspaceId() || '')}`, { credentials: 'include', signal: controller.signal })
+      .then(r => { if (!r.ok) throw new Error('Не удалось проверить договор'); return r.json(); })
       .then(result => {
         contractEndRef.current = result.contract_end || '';
         setContractEnd(result.contract_end || '');
         setContractWarning(result.valid ? '' : result.message);
       })
-      .catch(() => setContractWarning(''));
+      .catch(() => { if (!controller.signal.aborted) setContractWarning(''); });
+    return () => controller.abort();
   }, [clientId, completionDate, deadline]);
 
   useEffect(() => {
@@ -998,6 +1010,10 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
               </div>
 
               <aside className="min-w-0 space-y-3">
+                {uiFields.noContract.visible && <Panel title="Договор клиента">
+                    {crmEnabled && clientId && contractEnd && <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm">Договор до {formatFullDate(contractEnd)}</div>}
+                    {uiFields.noContract.visible && <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"><input type="checkbox" disabled={!uiFields.noContract.editable} checked={noContract} onChange={event => { manualContractClient.current = clientId; setNoContract(event.target.checked); }} className="accent-[var(--color-accent)]" />{uiFields.noContract.label}</label>}
+                </Panel>}
                 {clientWarning && (
                   <div className="rounded-lg border border-[var(--color-warning)]/55 bg-[var(--color-warning)]/10 px-3 py-3 text-sm">
                     <div className="flex items-center gap-2 font-black text-[var(--color-warning)]"><AlertCircle size={16} />Памятка клиента</div>
@@ -1025,7 +1041,7 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                 {showPeople && (
                 <CollapsiblePanel title={crmEnabled ? 'Клиент и команда' : 'Команда'} collapsed={collapsedSections.people} onToggle={() => toggleSection('people')} summary={`${crmEnabled ? (clients.find(client => String(client.id) === clientId)?.org_name || 'Без клиента') + ' · ' : ''}${users.find(user => String(user.id) === assigneeId)?.username || 'Не назначен'}`}>
                   <div className="grid gap-3">
-                    {uiFields.client.visible && <Field disabled={!uiFields.client.editable} order={uiFields.client.order} label={uiFields.client.label}><SearchSelect value={clientId} options={clientOptions} onChange={setClientId} emptyLabel="Без клиента" searchPlaceholder="Найти клиента или домен" /></Field>}
+                    {uiFields.client.visible && <Field disabled={!uiFields.client.editable} order={uiFields.client.order} label={uiFields.client.label}><SearchSelect value={clientId} options={clientOptions} onChange={selectClient} emptyLabel="Без клиента" searchPlaceholder="Найти клиента или домен" /></Field>}
                     {uiFields.assignee.visible && <Field disabled={!uiFields.assignee.editable} order={uiFields.assignee.order} label={uiFields.assignee.label}><SearchSelect value={assigneeId} options={availableAssigneeOptions} onChange={value => { setAssigneeId(value); setCoExecutorIds(prev => prev.filter(id => String(id) !== value)); }} emptyLabel="Не назначен" searchPlaceholder="Найти сотрудника" /></Field>}
                     {uiFields.coExecutors.visible && (
                     <div>
@@ -1055,7 +1071,6 @@ export function TaskModal({ task, initialTask, clients, users, onClose, onSave, 
                     {uiFields.completionDate.visible && <Field disabled={!uiFields.completionDate.editable} order={uiFields.completionDate.order} label={uiFields.completionDate.label}><input className="tf-input" type="date" disabled={!uiFields.completionDate.editable} value={completionDate} max={deadline || undefined} onChange={event => setCompletionDate(event.target.value)} /></Field>}
                     {uiFields.deadline.visible && <Field disabled={!uiFields.deadline.editable} order={uiFields.deadline.order} label={uiFields.deadline.label}><input className="tf-input" type="date" disabled={!uiFields.deadline.editable} value={deadline} min={completionDate || undefined} onChange={event => setDeadline(event.target.value)} /></Field>}
                     {uiFields.visibility.visible && <Field disabled={!uiFields.visibility.editable} order={uiFields.visibility.order} label={uiFields.visibility.label}><Select value={visibility} options={[{ value: 'public', label: 'Публичная' }, { value: 'private', label: 'Приватная' }]} onChange={value => setVisibility(value as 'public' | 'private')} /></Field>}
-                    {uiFields.noContract.visible && <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"><input type="checkbox" disabled={!uiFields.noContract.editable} checked={noContract} onChange={event => setNoContract(event.target.checked)} className="accent-[var(--color-accent)]" />{uiFields.noContract.label}</label>}
                   </div>
                 </CollapsiblePanel>
                 )}
