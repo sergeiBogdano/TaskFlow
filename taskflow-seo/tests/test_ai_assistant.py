@@ -23,7 +23,7 @@ def queue_data(client, admin_cookies, executor_cookies, event_loop, monkeypatch)
             ws = Workspace(name='AI isolated tests', created_by=root.id, enabled_modules='["ai", "tasks", "notes"]')
             other = Workspace(name='AI other tests', created_by=root.id, enabled_modules='["ai", "tasks", "notes"]')
             session.add_all([ws, other]); await session.flush()
-            role = WorkspaceRole(workspace_id=ws.id, name='Assistant tester', permissions=json.dumps({'ai': True, 'tasks': True, 'notes': True}), field_access='{}')
+            role = WorkspaceRole(workspace_id=ws.id, name='Assistant tester', permissions=json.dumps({'ai': True, 'tasks': True, 'tasks_create': True, 'notes': True}), field_access='{}')
             session.add(role); await session.flush()
             session.add(WorkspaceMember(workspace_id=ws.id, user_id=member.id, role='member', custom_role_id=role.id))
             await session.commit()
@@ -519,4 +519,137 @@ def test_group_feature_deny_does_not_grant_workspace_rights(queue_data, event_lo
                 await session.execute(delete(FeatureOverride).where(FeatureOverride.id == oid))
                 await session.execute(delete(UserGroup).where(UserGroup.group_id == gid))
                 await session.execute(delete(Group).where(Group.id == gid)); await session.commit()
+    event_loop.run_until_complete(scenario())
+
+
+def test_retrieval_finds_older_sources_without_crossing_acl(queue_data, event_loop):
+    root, member, wid, other = queue_data
+    async def scenario():
+        async with async_session() as session:
+            wanted = Task(title='Rarequartz target', notes='Visible details', workspace_id=wid, assignee_id=member.id, updated_at=ai.now() - timedelta(days=30))
+            note = Note(title='Rarequartz notebook', content='Requested note', user_id=member.id, workspace_id=wid)
+            session.add_all([wanted, note]); await session.flush()
+            wanted_id, note_id = wanted.id, note.id
+            session.add_all([Task(title=f'Unrelated newer {i}', workspace_id=wid, assignee_id=member.id) for i in range(45)])
+            session.add_all([Note(title=f'Newer note {i}', content='Unrelated', user_id=member.id, workspace_id=wid) for i in range(10)])
+            session.add_all([Task(title='Rarequartz FOREIGN', workspace_id=other, assignee_id=member.id),
+                             Task(title='Rarequartz PRIVATE', workspace_id=wid, assignee_id=root.id),
+                             Note(title='Rarequartz PRIVATE NOTE', content='Hidden', user_id=root.id, workspace_id=wid)])
+            await session.commit()
+        _, permissions = await ai.authorize(member, wid)
+        facts = await ai.context_for(member, wid, permissions, 'Rarequartz')
+        assert facts['tasks']['items'][0]['id'] == wanted_id
+        assert facts['notes'][0]['id'] == note_id
+        assert 'FOREIGN' not in json.dumps(facts) and 'PRIVATE' not in json.dumps(facts)
+        assert facts['tasks']['total_visible'] == 46
+        assert facts['tasks']['totals_complete'] is True
+    event_loop.run_until_complete(scenario())
+
+
+def test_aggregate_sources_revalidated_outside_sample(queue_data, event_loop, monkeypatch):
+    root, member, wid, _ = queue_data
+    async def fake(*args): return 'Report with totals', {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        async with async_session() as session:
+            old = Task(title='Old outside sample', workspace_id=wid, assignee_id=member.id, updated_at=ai.now() - timedelta(days=30))
+            session.add(old); await session.flush(); old_id = old.id
+            session.add_all([Task(title=f'Fresh {i}', workspace_id=wid, assignee_id=member.id) for i in range(41)])
+            await session.commit()
+        job = await ai.enqueue(member, wid, 'Report', 'report')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            done = await session.get(AiRequest, job.id)
+            assert done.status == 'completed'
+            assert old_id in json.loads(done.source_ids)['tasks']
+            assert await ai.result_is_visible(done, member)
+            await session.execute(update(Task).where(Task.id == old_id).values(assignee_id=root.id)); await session.commit()
+            assert not await ai.result_is_visible(done, member)
+            allowed = await ai.visible_sources(member, wid, [done])
+            assert not await ai.result_is_visible(done, member, allowed_sources=allowed)
+    event_loop.run_until_complete(scenario())
+
+
+def test_chat_draft_never_writes_business_objects(queue_data, event_loop, monkeypatch):
+    _, member, wid, _ = queue_data
+    captured = []
+    async def fake(messages, *args):
+        captured.extend(messages)
+        return '{"title":"Unsaved chat draft", "notes":"Review this", "command":"rm -rf /", "workspace_id":999, "action":"save"}', {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        job = await ai.enqueue(member, wid, 'Подготовь задачу в этом диалоге')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            done = await session.get(AiRequest, job.id)
+            assert done.status == 'completed'
+            result = json.loads(done.result)
+            assert result['draft'] == {'title': 'Unsaved chat draft', 'notes': 'Review this'}
+            assert result['context']['can_save'] is False and result['context']['can_execute'] is False
+            assert not await session.scalar(select(Task.id).where(Task.title == 'Unsaved chat draft'))
+        assert all(set(item) == {'role', 'content'} for item in captured)
+        assert '_source_ids' not in captured[0]['content']
+        assert 'разрешённым данным приложения текущего пространства' in captured[0]['content']
+    event_loop.run_until_complete(scenario())
+
+
+def test_capabilities_and_task_mode_require_create_right(queue_data, event_loop, sync_request, executor_cookies):
+    _, member, wid, other = queue_data
+    async def scenario():
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'permissions': {'tasks_create': False}})
+            await session.commit()
+        with pytest.raises(HTTPException) as error:
+            await ai.enqueue(member, wid, 'Task', 'task')
+        assert error.value.status_code == 403
+    event_loop.run_until_complete(scenario())
+    response = sync_request('GET', f'/api/assistant/capabilities?workspace_id={wid}', cookies=executor_cookies)
+    assert response.status_code == 200
+    assert response.json()['can_prepare_task'] is False
+    assert response.json()['task_scope'] == 'participating'
+    assert sync_request('GET', f'/api/assistant/capabilities?workspace_id={other}', cookies=executor_cookies).status_code == 403
+
+
+def test_team_read_right_keeps_workspace_boundary(queue_data, event_loop, sync_request, executor_cookies):
+    root, member, wid, other = queue_data
+    async def scenario():
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'permissions': {'tasks_view_team': True}})
+            session.add_all([Task(title='Authorized colleague work', workspace_id=wid, assignee_id=root.id),
+                             Task(title='Foreign colleague work', workspace_id=other, assignee_id=root.id)])
+            await session.commit()
+        _, permissions = await ai.authorize(member, wid)
+        facts = json.dumps(await ai.context_for(member, wid, permissions))
+        assert 'Authorized colleague work' in facts and 'Foreign colleague work' not in facts
+        assert (await ai.capabilities(member, wid, permissions))['task_scope'] == 'team'
+        async with async_session() as session:
+            return await session.scalar(select(Task.id).where(Task.workspace_id == wid, Task.title == 'Authorized colleague work'))
+    task_id = event_loop.run_until_complete(scenario())
+    detail = sync_request('GET', f'/api/tasks/{task_id}?workspace_id={wid}', cookies=executor_cookies)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['title'] == 'Authorized colleague work'
+
+
+def test_task_draft_rejects_non_text_and_action_only_payloads():
+    for answer in ('{"action":"save","command":"whoami"}', '{"title":{"sql":"SELECT"}}', '{"title":"Valid","notes":["execute"]}'):
+        assert ai.task_draft(answer) is None
+
+
+def test_hidden_fields_are_not_used_for_retrieval_ranking(queue_data, event_loop):
+    _, member, wid, _ = queue_data
+    async def scenario():
+        async with async_session() as session:
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'fields': {'tasks': {'notes': 'hidden'}}})
+            old = Task(title='Old allowed title', notes='Secretrankingkeyword', assignee_id=member.id, workspace_id=wid, updated_at=ai.now() - timedelta(days=30))
+            session.add(old); await session.flush(); old_id = old.id
+            session.add_all([Task(title=f'Fresh allowed {index}', workspace_id=wid, assignee_id=member.id) for index in range(41)])
+            await session.commit()
+        _, permissions = await ai.authorize(member, wid)
+        facts = await ai.context_for(member, wid, permissions, 'Secretrankingkeyword')
+        assert old_id not in {item['id'] for item in facts['tasks']['items']}
+        assert 'Secretrankingkeyword' not in json.dumps(facts)
+        assert all('notes' not in item for item in facts['tasks']['items'])
     event_loop.run_until_complete(scenario())

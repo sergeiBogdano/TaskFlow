@@ -67,6 +67,12 @@ async def owned_request_user(job_id: UUID, workspace_id: int | None = Query(None
 owned_request_user._tf_guard = 'permission'
 
 
+@router.get('/api/assistant/capabilities')
+async def capabilities(workspace_id: int | None = Query(None), user=Depends(assistant_user)):
+    wid, permissions = await queue.authorize(user, workspace_id)
+    return await queue.capabilities(user, wid, permissions)
+
+
 @router.post('/api/assistant/requests', status_code=202)
 async def submit(payload: Submit, workspace_id: int | None = Query(None), user=Depends(assistant_user)):
     message = payload.message.strip()
@@ -84,7 +90,7 @@ async def history(workspace_id: int | None = Query(None), user=Depends(assistant
         jobs = (await session.scalars(select(AiRequest).where(AiRequest.user_id == user.id, AiRequest.workspace_id == wid)
             .order_by(AiRequest.created_at.desc(), AiRequest.id.desc()).limit(100))).all()
         signature = await queue.access_signature(user, wid)
-        sources = await queue.visible_sources(user, wid, jobs)
+        sources = await queue.visible_sources(user, wid, [job for job in jobs if job.access_signature == signature])
         return [await job_payload(session, job, user, signature, sources) for job in reversed(jobs)]
 
 

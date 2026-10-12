@@ -49,16 +49,13 @@ def _add_member(sync_request, cookies, ws_id, user_id, role='member'):
 
 class TestNotesPage:
 
-    @pytest.mark.legacy_ui
-    def test_notes_page_admin(self, sync_request, admin_cookies):
-        resp = sync_request('GET', '/notes', cookies=admin_cookies)
+    def test_notes_list_shape(self, sync_request, admin_cookies):
+        resp = sync_request('GET', '/api/notes', cookies=admin_cookies)
         assert resp.status_code == 200
-        assert 'Доска заметок' in resp.text
+        assert isinstance(resp.json()['notes'], list)
 
-    @pytest.mark.legacy_ui
-    def test_notes_page_unauth_redirect(self, sync_request):
-        resp = sync_request('GET', '/notes', cookies={})
-        assert resp.status_code in (302, 307)
+    def test_notes_require_auth(self, sync_request):
+        assert sync_request('GET', '/api/notes', cookies={}).status_code == 401
 
 
 class TestNotesCrud:
@@ -229,10 +226,16 @@ class TestNoteFolders:
 
     def test_foreign_folder_rejected(self, sync_request, admin_cookies, executor_cookies):
         folder = sync_request('POST', '/api/notes/folders', json={'name': 'Admin folder'}, cookies=admin_cookies).json()
-        note = sync_request('POST', '/api/notes', json=_login_note_payload(title='Folder bound note'), cookies=executor_cookies)
-        if note.status_code != 201:
-            pytest.skip(note.text)
-        resp = sync_request('PUT', f"/api/notes/{note.json()['id']}", json={'folder_id': folder['id']}, cookies=executor_cookies)
+        ws = _make_ws(sync_request, admin_cookies, 'Folder authorization', 'seo')
+        user_id = sync_request('GET', '/api/auth/me', cookies=executor_cookies).json()['user']['id']
+        _add_member(sync_request, admin_cookies, ws['id'], user_id)
+        role = sync_request('POST', f"/api/workspaces/{ws['id']}/roles", json={'name': 'Note editor test', 'permissions': {'notes': True}}, cookies=admin_cookies)
+        assert role.status_code == 201, role.text
+        assigned = sync_request('PUT', f"/api/workspaces/{ws['id']}/members/{user_id}/custom-role", json={'role_id': role.json()['id']}, cookies=admin_cookies)
+        assert assigned.status_code == 200, assigned.text
+        note = sync_request('POST', f"/api/notes?workspace_id={ws['id']}", json=_login_note_payload(title='Folder bound note'), cookies=executor_cookies)
+        assert note.status_code == 201, note.text
+        resp = sync_request('PUT', f"/api/notes/{note.json()['id']}?workspace_id={ws['id']}", json={'folder_id': folder['id']}, cookies=executor_cookies)
         assert resp.status_code == 400
 
     def test_delete_folder_keeps_notes(self, sync_request, admin_cookies):

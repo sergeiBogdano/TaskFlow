@@ -3,10 +3,8 @@ import pytest
 
 class TestTasks:
 
-    @pytest.mark.legacy_ui
-    def test_tasks_page(self, sync_request, client, admin_cookies):
-        resp = sync_request('GET', '/tasks', cookies=admin_cookies)
-        assert resp.status_code == 200
+    def test_tasks_require_auth(self, sync_request, client):
+        assert sync_request('GET', '/api/tasks', cookies={}).status_code == 401
 
     def test_api_tasks_list(self, sync_request, client, admin_cookies):
         resp = sync_request('GET', '/api/tasks', cookies=admin_cookies)
@@ -18,13 +16,12 @@ class TestTasks:
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
-    @pytest.mark.legacy_ui
-    def test_task_create_form(self, sync_request, client, admin_cookies):
-        resp = sync_request('POST', '/tasks/create',
-                           data={'title': 'New Task', 'status': 'todo'},
-                           cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
-        assert '/tasks' in resp.headers['location']
+    def test_task_create_and_read(self, sync_request, client, admin_cookies):
+        created = sync_request('POST', '/api/tasks', json={'title': 'New task readback', 'notes': 'Draft manually saved'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        task = sync_request('GET', f"/api/tasks/{created.json()['id']}", cookies=admin_cookies)
+        assert task.status_code == 200
+        assert task.json()['title'] == 'New task readback'
 
     def test_task_create_api(self, sync_request, client, admin_cookies):
         resp = sync_request('POST', '/api/tasks',
@@ -86,15 +83,15 @@ class TestTasks:
 
 
 
-    @pytest.mark.legacy_ui
-    def test_kanban_page(self, sync_request, client, admin_cookies):
-        resp = sync_request('GET', '/kanban', cookies=admin_cookies)
+    def test_kanban_sprints_api(self, sync_request, client, admin_cookies):
+        resp = sync_request('GET', '/api/sprints', cookies=admin_cookies)
         assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
 
-    @pytest.mark.legacy_ui
-    def test_calendar_page(self, sync_request, client, admin_cookies):
-        resp = sync_request('GET', '/calendar', cookies=admin_cookies)
+    def test_calendar_data_api(self, sync_request, client, admin_cookies):
+        resp = sync_request('GET', '/api/calendar?scope=all', cookies=admin_cookies)
         assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
 
     def test_task_get_api(self, sync_request, client, admin_cookies):
         sync_request('POST', '/api/tasks',

@@ -220,7 +220,7 @@ def task_co_executor_ids(task) -> set[int]:
 
 def task_is_visible_to_user(task, user, role_names: set[str], accessible_client_ids: set[int] | None = None, permissions: dict | None = None) -> bool:
     permissions = permissions or {}
-    if user_is_superadmin(role_names) or permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others'):
+    if user_is_superadmin(role_names) or permissions.get('all') or permissions.get('tasks_view_all') or permissions.get('tasks_view_others') or permissions.get('tasks_view_team'):
         return True
     if accessible_client_ids is not None and not user_can_access_task_client(task, role_names, accessible_client_ids):
         return False

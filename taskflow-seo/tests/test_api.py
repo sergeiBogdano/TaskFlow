@@ -3,15 +3,13 @@ import pytest
 
 class TestDashboard:
 
-    @pytest.mark.legacy_ui
-    def test_dashboard_admin(self, sync_request, admin_cookies):
-        resp = sync_request('GET', '/', cookies=admin_cookies)
+    def test_dashboard_authorized_data(self, sync_request, admin_cookies):
+        resp = sync_request('GET', '/api/dashboard/stats', cookies=admin_cookies)
         assert resp.status_code == 200
+        assert isinstance(resp.json()['total'], int)
 
-    @pytest.mark.legacy_ui
     def test_dashboard_unauth(self, sync_request):
-        resp = sync_request('GET', '/', cookies={})
-        assert resp.status_code in (302, 307)
+        assert sync_request('GET', '/api/dashboard/stats', cookies={}).status_code == 401
 
     def test_dashboard_stats(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/api/dashboard/stats', cookies=admin_cookies)
@@ -20,7 +18,6 @@ class TestDashboard:
         assert 'total' in data
         assert 'done' in data
 
-    @pytest.mark.skip(reason='uses PostgreSQL-specific timezone() function')
     def test_dashboard_chart(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/api/dashboard/chart', cookies=admin_cookies)
         assert resp.status_code == 200
@@ -101,26 +98,21 @@ class TestTemplates:
 
 class TestSettings:
 
-    @pytest.mark.legacy_ui
-    def test_settings_page(self, sync_request, admin_cookies):
-        resp = sync_request('GET', '/settings', cookies=admin_cookies)
+    def test_personal_settings_identity(self, sync_request, admin_cookies):
+        resp = sync_request('GET', '/api/auth/me', cookies=admin_cookies)
         assert resp.status_code == 200
+        assert resp.json()['user']['is_root'] is True
 
-    @pytest.mark.legacy_ui
-    def test_settings_save(self, sync_request, admin_cookies):
-        resp = sync_request('POST', '/settings',
-                           data={'timezone': 'Europe/Moscow', 'theme': 'dark'},
-                           cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
-        assert '/settings' in resp.headers['location']
+    def test_notification_settings_save(self, sync_request, admin_cookies):
+        resp = sync_request('PUT', '/api/notifications/users/notification-settings', json={'calendar_view_mode': 'month', 'default_reminder_offset_hours': 24}, cookies=admin_cookies)
+        assert resp.status_code == 200
+        assert resp.json()['ok'] is True
 
 
 class TestReports:
 
-    @pytest.mark.legacy_ui
-    def test_reports_page(self, sync_request, admin_cookies):
-        resp = sync_request('GET', '/reports', cookies=admin_cookies)
-        assert resp.status_code == 200
+    def test_reports_require_auth(self, sync_request):
+        assert sync_request('GET', '/api/reports', cookies={}).status_code == 401
 
     def test_reports_data(self, sync_request, admin_cookies):
         resp = sync_request('GET', '/api/reports/data', cookies=admin_cookies)

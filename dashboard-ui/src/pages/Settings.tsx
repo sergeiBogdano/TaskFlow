@@ -127,7 +127,7 @@ export function Settings() {
 
       <section className="tf-panel-flat p-5">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><HardDrive size={16} />Личные заметки на этом ПК</h3>
-        <p className="text-sm text-[var(--color-text-secondary)]">Личные заметки никогда не отправляются на сервер. Они лежат только здесь: файлами в выбранной папке или во встроенном хранилище браузера. Общие заметки всегда хранятся на сервере.</p>
+        <p className="text-sm text-[var(--color-text-secondary)]">Личные заметки не отправляются на сервер автоматически. В помощнике можно явно выбрать и отправить фрагмент: он останется в истории диалога. Сами заметки хранятся здесь: файлами в выбранной папке или во встроенном хранилище браузера. Общие заметки всегда хранятся на сервере.</p>
         <div className="mt-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-sm">
           {storage == null ? (
             <span className="text-[var(--color-text-secondary)]">Проверяем хранилище...</span>

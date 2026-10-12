@@ -3,34 +3,24 @@ import pytest
 
 class TestClients:
 
-    @pytest.mark.legacy_ui
-    def test_clients_page(self, sync_request, client, admin_cookies):
-        resp = sync_request('GET', '/clients', cookies=admin_cookies)
-        assert resp.status_code == 200
+    def test_clients_require_auth(self, sync_request, client):
+        assert sync_request('GET', '/api/clients', cookies={}).status_code == 401
 
-    @pytest.mark.legacy_ui
     def test_client_detail(self, sync_request, client, admin_cookies):
-        resp = sync_request('POST', '/clients/create',
-                           data={'org_name': 'Detail Test Org',
-                                'contract_end': '2027-12-31',
-                                'status': 'active'},
-                           cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
-        r = sync_request('GET', '/api/clients', cookies=admin_cookies)
-        clients = r.json()
-        c = next((c for c in clients if c['org_name'] == 'Detail Test Org'), None)
-        assert c is not None
-        resp = sync_request('GET', f'/clients/{c["id"]}', cookies=admin_cookies)
-        assert resp.status_code == 200
+        created = sync_request('POST', '/api/clients', json={'org_name': 'test_client_detail', 'status': 'active'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        client_id = created.json()['id']
+        detail = sync_request('GET', f'/api/clients/{client_id}', cookies=admin_cookies)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['org_name'] == 'test_client_detail'
 
-    @pytest.mark.legacy_ui
-    def test_client_create_form(self, sync_request, client, admin_cookies):
-        resp = sync_request('POST', '/clients/create',
-                           data={'org_name': 'New Org', 'contract_end': '2027-06-30',
-                                'status': 'active'},
-                           cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
-        assert '/clients' in resp.headers['location']
+    def test_client_create_readback(self, sync_request, client, admin_cookies):
+        created = sync_request('POST', '/api/clients', json={'org_name': 'test_client_create_form', 'status': 'active'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        client_id = created.json()['id']
+        detail = sync_request('GET', f'/api/clients/{client_id}', cookies=admin_cookies)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['org_name'] == 'test_client_create_form'
 
     def test_client_create_api(self, sync_request, client, admin_cookies):
         resp = sync_request('POST', '/api/clients',
@@ -41,45 +31,33 @@ class TestClients:
         assert resp.status_code == 201
         assert 'id' in resp.json()
 
-    @pytest.mark.legacy_ui
     def test_client_update(self, sync_request, client, admin_cookies):
-        sync_request('POST', '/clients/create',
-                    data={'org_name': 'Update Test Org',
-                         'contract_end': '2027-12-31', 'status': 'active'},
-                    cookies=admin_cookies, follow_redirects=False)
-        r = sync_request('GET', '/api/clients', cookies=admin_cookies)
-        c = next((c for c in r.json() if c['org_name'] == 'Update Test Org'), None)
-        assert c is not None
-        resp = sync_request('POST', f'/clients/{c["id"]}/update',
-                           data={'org_name': 'Updated Org', 'contract_end': '2027-12-31'},
-                           cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
+        created = sync_request('POST', '/api/clients', json={'org_name': 'test_client_update', 'status': 'active'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        client_id = created.json()['id']
+        updated = sync_request('PUT', f'/api/clients/{client_id}', json={'org_name': 'Updated Org'}, cookies=admin_cookies)
+        assert updated.status_code == 200, updated.text
+        detail = sync_request('GET', f'/api/clients/{client_id}', cookies=admin_cookies)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['org_name'] == 'Updated Org'
 
-    @pytest.mark.legacy_ui
     def test_client_status_change(self, sync_request, client, admin_cookies):
-        sync_request('POST', '/clients/create',
-                    data={'org_name': 'Status Test Org',
-                         'contract_end': '2027-12-31', 'status': 'active'},
-                    cookies=admin_cookies, follow_redirects=False)
-        r = sync_request('GET', '/api/clients', cookies=admin_cookies)
-        c = next((c for c in r.json() if c['org_name'] == 'Status Test Org'), None)
-        assert c is not None
-        resp = sync_request('POST', f'/clients/{c["id"]}/status',
-                           data={'status': 'paused'}, cookies=admin_cookies, follow_redirects=False)
-        assert resp.status_code == 302
+        created = sync_request('POST', '/api/clients', json={'org_name': 'test_client_status_change', 'status': 'active'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        client_id = created.json()['id']
+        updated = sync_request('PUT', f'/api/clients/{client_id}', json={'status': 'paused'}, cookies=admin_cookies)
+        assert updated.status_code == 200, updated.text
+        detail = sync_request('GET', f'/api/clients/{client_id}', cookies=admin_cookies)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['status'] == 'paused'
 
-    @pytest.mark.legacy_ui
-    def test_client_print(self, sync_request, client, admin_cookies):
-        sync_request('POST', '/clients/create',
-                    data={'org_name': 'Print Test Org',
-                         'contract_end': '2027-12-31', 'status': 'active'},
-                    cookies=admin_cookies, follow_redirects=False)
-        r = sync_request('GET', '/api/clients', cookies=admin_cookies)
-        c = next((c for c in r.json() if c['org_name'] == 'Print Test Org'), None)
-        assert c is not None
-        resp = sync_request('GET', f'/clients/{c["id"]}/print',
-                           cookies=admin_cookies)
-        assert resp.status_code == 200
+    def test_client_health(self, sync_request, client, admin_cookies):
+        created = sync_request('POST', '/api/clients', json={'org_name': 'test_client_print', 'status': 'active'}, cookies=admin_cookies)
+        assert created.status_code == 201, created.text
+        client_id = created.json()['id']
+        detail = sync_request('GET', f'/api/clients/{client_id}/health', cookies=admin_cookies)
+        assert detail.status_code == 200, detail.text
+        assert isinstance(detail.json(), dict)
 
 
     def test_client_api_get(self, sync_request, client, admin_cookies):

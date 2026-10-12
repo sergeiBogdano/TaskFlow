@@ -538,7 +538,7 @@ async def get_task(task_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        if not task_is_visible_to_user(t, user, role_names, accessible_client_ids):
+        if not task_is_visible_to_user(t, user, role_names, accessible_client_ids, await request_permissions(user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, t, user, role_names)
         data = _task_to_dict(t)
@@ -571,7 +571,7 @@ async def task_activity(task_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
+        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, await request_permissions(user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, task, user, role_names)
     logs = await list_activity(limit=100, entity_type='task', entity_id=task_id)
@@ -809,7 +809,7 @@ async def list_comments(task_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
+        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, await request_permissions(user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, task, user, role_names)
         r = await session.execute(
@@ -887,7 +887,7 @@ async def list_files(task_id: int, user=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
+        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, await request_permissions(user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, task, user, role_names)
         files = (await session.execute(
@@ -913,7 +913,7 @@ async def download_file(task_id: int, file_id: int, user=Depends(get_current_use
             raise HTTPException(status_code=404, detail='Task not found')
         role_names = await get_user_role_names(user.id)
         accessible_client_ids = await get_accessible_client_ids(session, user.id, role_names)
-        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids):
+        if not task_is_visible_to_user(task, user, role_names, accessible_client_ids, await request_permissions(user)):
             raise HTTPException(status_code=403, detail='Forbidden')
         await _assert_task_workspace(session, task, user, role_names)
         att = await session.get(FileAttachment, file_id)

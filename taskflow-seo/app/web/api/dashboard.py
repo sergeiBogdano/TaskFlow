@@ -111,16 +111,17 @@ async def dashboard_chart(period: str = Query('month'), workspace_id: int = Quer
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
-        created_day = func.date(func.timezone(str(tz), Task.created_at))
-        done_day = func.date(func.timezone(str(tz), Task.updated_at))
-        created_rows = (await session.execute(select(created_day, func.count(Task.id)).where(
-            *conditions, Task.created_at >= to_utc(start_day),
-        ).group_by(created_day))).all()
-        done_rows = (await session.execute(select(done_day, func.count(Task.id)).where(
-            *conditions, Task.status == 'done', Task.updated_at >= to_utc(start_day),
-        ).group_by(done_day))).all()
-    created_by_day = {day: int(count) for day, count in created_rows if day}
-    done_by_day = {day: int(count) for day, count in done_rows if day}
+        # Python timezone bucketing works with both SQLite and PostgreSQL.
+        created_by_day, done_by_day = {}, {}
+        rows = await session.stream(select(Task.created_at, Task.updated_at, Task.status).where(
+            *conditions, or_(Task.created_at >= to_utc(start_day),
+                             (Task.status == 'done') & (Task.updated_at >= to_utc(start_day)))))
+        async for created_at, updated_at, status in rows:
+            for stamp, counts in ((created_at, created_by_day), (updated_at if status == 'done' else None, done_by_day)):
+                if stamp:
+                    day = safe_dt(stamp).astimezone(tz).date()
+                    if day >= start_day.date():
+                        counts[day] = counts.get(day, 0) + 1
     labels, created_data, done_data = [], [], []
     for i in range(days - 1, -1, -1):
         day = now_local - timedelta(days=i)

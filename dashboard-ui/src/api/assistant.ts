@@ -1,12 +1,18 @@
 import { request } from './client';
 
+export type AssistantCapabilities = {
+  workspace_id: number; modules: Record<string, boolean>; task_scope: 'team' | 'participating';
+  can_prepare_task: boolean; can_save: false; can_execute: false;
+  limits: { message: number; tasks: number; notes: number; aggregate_tasks: number };
+};
 export type AssistantJob = {
   id: string; workspace_id: number; conversation_id: string; kind: string; message: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   position: number; cancel_requested: boolean; error: string | null; created_at: string;
-  result: { answer: string; draft?: { title: string; notes: string } } | null;
+  result: { answer: string; context?: AssistantCapabilities & { selected: Record<string, number> }; draft?: { title: string; notes: string } } | null;
 };
 export const assistant = {
+  capabilities: () => request<AssistantCapabilities>('/api/assistant/capabilities'),
   active: () => request<AssistantJob | null>('/api/assistant/active'),
   history: () => request<AssistantJob[]>('/api/assistant/requests'),
   submit: (message: string, kind = 'chat', conversation_id?: string) => request<AssistantJob>('/api/assistant/requests', { method: 'POST', body: JSON.stringify({ message, kind, conversation_id }) }),
