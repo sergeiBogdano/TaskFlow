@@ -6,13 +6,40 @@ on:
     types: [completed]
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: taskflow-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify tested commit is still main
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          request = urllib.request.Request(
+              'https://api.github.com/repos/' + os.environ['GH_REPOSITORY'] + '/git/ref/heads/main',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'TaskFlow-deploy'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              current = json.load(response)['object']['sha']
+          eligible = current == os.environ['TESTED_COMMIT']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('eligible=' + str(eligible).lower() + '\n')
+          print('Deploy current tested main' if eligible else 'Skip: a newer main commit exists')
+          PY
       - name: Prepare SSH keys
+        if: steps.revision.outputs.eligible == 'true'
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -26,6 +53,7 @@ jobs:
           chmod 600 ~/.ssh/vps_key ~/.ssh/deploy_key
 
       - name: Prepare known hosts
+        if: steps.revision.outputs.eligible == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
@@ -36,6 +64,7 @@ jobs:
             >> ~/.ssh/known_hosts
 
       - name: Deploy through VPS tunnel
+        if: steps.revision.outputs.eligible == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
