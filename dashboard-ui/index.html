@@ -1,21 +1,14 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>dashboard-ui</title>
-    <script>
-      try {
-        const theme = localStorage.getItem('taskflow:theme');
-        if (theme === 'graphite') {
-          document.documentElement.dataset.theme = theme;
-        }
-      } catch (e) {}
-    </script>
+    <title>TaskFlow</title>
+    <script src="/startup.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><p role="status" style="padding:24px;font-family:system-ui">Загрузка TaskFlow…</p></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
