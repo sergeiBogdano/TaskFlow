@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { SearchSelect } from '../components/SearchSelect';
 import { TaskScopeFilter } from '../components/TaskScopeFilter';
-import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
+import type { TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import type { Client, SavedView, Task, User } from '../api/client';
 import { cn, formatDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
@@ -143,7 +143,7 @@ export function Kanban() {
       referenceCache.users().catch(() => []),
       referenceCache.savedViews('kanban').catch(() => []),
     ]);
-    setTasks(taskList.filter(task => taskMatchesScope(task, currentUser, scope, scopeUserId)));
+    setTasks(taskList);
     setClients(clientList);
     setUsers(userList);
     setSavedViews(views);

@@ -376,7 +376,9 @@ async def list_tasks(
 
         status_counts = None
         if paginated:
-            status_keys = ('todo', 'in_progress', 'waiting', 'client_check', 'done', 'overdue')
+            status_keys = ('todo', 'in_progress', 'waiting', 'client_check', 'done')
+            if field_is_visible('tasks', 'deadline') and field_is_visible('tasks', 'completionDate'):
+                status_keys += ('overdue',)
             counts = (await session.execute(select(*[func.count(Task.id).filter(overdue_condition() if key == 'overdue' else Task.status == key) for key in status_keys]).where(*conditions))).one()
             status_counts = {key: int(count) for key, count in zip(status_keys, counts)}
         statuses = [item.strip() for item in (status or '').split(',') if item.strip()]

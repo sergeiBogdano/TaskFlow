@@ -1,3 +1,4 @@
+import { setTabWorkspaceValue } from '../lib/workspaceSession.ts';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
@@ -28,7 +29,7 @@ export function AccessCenter() {
         const list = await api.getWorkspaces();
         const chosen = list.find(item => String(item.id) === getActiveWorkspaceId()) || list[0];
         if (!active || current !== revision) return;
-        try { if (chosen) localStorage.setItem(WORKSPACE_KEY, String(chosen.id)); else localStorage.removeItem(WORKSPACE_KEY); } catch { /* storage unavailable */ }
+        try { if (chosen) setTabWorkspaceValue(WORKSPACE_KEY, String(chosen.id)); else setTabWorkspaceValue(WORKSPACE_KEY, null); } catch { /* storage unavailable */ }
         const detail = chosen ? await api.getWorkspace(chosen.id) : null;
         if (active && current === revision) setWorkspace(detail);
       } catch (err) { if (active && current === revision) setError(err instanceof Error ? err.message : 'Не удалось загрузить пространство'); }
