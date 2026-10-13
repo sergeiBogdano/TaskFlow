@@ -6,7 +6,24 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  project-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_project_policy.py
+      - run: python -m unittest discover -s scripts/tests -v
+
   postgres-user-deletion:
     runs-on: ubuntu-latest
     services:
@@ -74,7 +91,18 @@ jobs:
           mkdir -p logs
 
       - name: Run tests
-        run: pytest --cov=app --cov-report=term
+        run: pytest --cov=app --cov-report=term --cov-report=xml:coverage.xml --cov-report=json:coverage.json
+
+      - name: Save coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            taskflow-seo/coverage.xml
+            taskflow-seo/coverage.json
+          if-no-files-found: warn
+          retention-days: 30
 
   frontend:
     runs-on: ubuntu-latest
