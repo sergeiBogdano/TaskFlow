@@ -73,7 +73,7 @@ class TestAnalyticsOverdue:
         data = resp.json()
         assert data["facts"]["total"] >= 2
         assert "Анализ готов" in data["analysis"]
-        assert data["model"] == "qwen2.5:7b"
+        assert data["model"] == analytics.OLLAMA_MODEL
         assert any(row["name"] == "testexec" for row in data["facts"]["by_assignee"])
         assert any(row["name"] == "AI Test Client" for row in data["facts"]["by_client"])
         assert data["facts"]["buckets"]["over_14"] >= 1
