@@ -7,6 +7,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.core.task_deadlines import overdue_condition
 from app.core.database import async_session
 from app.core.models import Client, FileAttachment, Notification, SprintTask, Task, TaskCoExecutor, TaskComment
 from app.core.permissions import (
@@ -348,10 +349,6 @@ async def list_tasks(
         if scope_condition is not None:
             conditions.append(scope_condition)
 
-        if status:
-            statuses = [item.strip() for item in status.split(',') if item.strip()]
-            if statuses:
-                conditions.append(Task.status.in_(statuses))
         if priority:
             conditions.append(Task.priority == priority)
         if assignee:
@@ -377,6 +374,18 @@ async def list_tasks(
                 search_fields.append(Task.client.has(Client.org_name.ilike(needle)))
             conditions.append(or_(*search_fields))
 
+        status_counts = None
+        if paginated:
+            status_keys = ('todo', 'in_progress', 'waiting', 'client_check', 'done', 'overdue')
+            counts = (await session.execute(select(*[func.count(Task.id).filter(overdue_condition() if key == 'overdue' else Task.status == key) for key in status_keys]).where(*conditions))).one()
+            status_counts = {key: int(count) for key, count in zip(status_keys, counts)}
+        statuses = [item.strip() for item in (status or '').split(',') if item.strip()]
+        if statuses:
+            clauses = [Task.status.in_([item for item in statuses if item != 'overdue'])]
+            if 'overdue' in statuses:
+                clauses.append(overdue_condition())
+            conditions.append(or_(*clauses))
+
         total = (await session.execute(
             select(func.count(Task.id)).where(*conditions)
         )).scalar_one()
@@ -394,6 +403,7 @@ async def list_tasks(
                 'total': total,
                 'page': page,
                 'page_size': page_size,
+                'status_counts': status_counts,
             })
         tasks = list((await session.execute(query)).scalars().unique().all())
         result = [_task_to_dict(t) for t in tasks]

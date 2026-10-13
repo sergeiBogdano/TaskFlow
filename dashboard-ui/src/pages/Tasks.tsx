@@ -79,6 +79,7 @@ export function Tasks() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [totalTasks, setTotalTasks] = useState(0);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState(searchParams.get('search') || '');
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -113,6 +114,7 @@ export function Tasks() {
     const scopedItems = taskPage.items.filter(task => taskMatchesScope(task, currentUser, filters.scope, filters.scopeUserId));
     setTasks(scopedItems);
     setTotalTasks(taskPage.total);
+    setStatusCounts(taskPage.status_counts || null);
     setClients(clientList);
     setUsers(userList);
     setSavedViews(views);
@@ -176,7 +178,7 @@ export function Tasks() {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
-  const counts = statusOptions.reduce<Record<string, number>>((acc, status) => {
+  const counts = statusCounts || statusOptions.reduce<Record<string, number>>((acc, status) => {
     acc[status] = tasks.filter(task => task.status === status).length;
     return acc;
   }, {});
@@ -195,7 +197,7 @@ export function Tasks() {
 
   const changeStatus = async (task: Task, status: string) => {
     await api.moveTask(task.id, status);
-    setTasks(prev => prev.map(item => item.id === task.id ? { ...item, status } : item));
+    await load();
   };
 
   const saveTask = async (data: Partial<Task> & { sprint_id?: string | null }) => {

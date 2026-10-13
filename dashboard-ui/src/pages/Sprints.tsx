@@ -81,7 +81,7 @@ export function Sprints() {
               <div className="mt-4">
                 <div className="h-2.5 overflow-hidden rounded-full bg-[var(--color-overlay)]">
                   <div
-                    className="h-full rounded-full transition-[width] duration-500"
+                    className="h-full rounded-full "
                     style={{ width: `${sprint.progress.percent}%`, background: 'var(--color-accent)' }}
                   />
                 </div>
@@ -306,7 +306,7 @@ function SprintDetailModal({ sprintId, onClose }: { sprintId: number; onClose: (
             <>
               <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                 <div className="h-2.5 overflow-hidden rounded-full bg-[var(--color-overlay)]">
-                  <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${detail.progress.percent}%`, background: 'var(--color-accent)' }} />
+                  <div className="h-full rounded-full " style={{ width: `${detail.progress.percent}%`, background: 'var(--color-accent)' }} />
                 </div>
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <span className="text-[var(--color-text-secondary)]">{detail.progress.done} из {detail.progress.total} задач</span>

@@ -95,6 +95,7 @@ export type Task = {
 };
 
 export type TaskListResponse = {
+  status_counts?: Record<string, number>;
   items: Task[];
   total: number;
   page: number;
@@ -199,6 +200,7 @@ export type Notification = {
 };
 
 export type DashboardStats = {
+  task_scope?: 'all' | 'involved';
   total: number;
   done: number;
   in_progress: number;

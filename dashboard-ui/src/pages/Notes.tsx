@@ -534,15 +534,15 @@ export function Notes() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          {notes.map((note, index) => (
+          {notes.map(note => (
             <article
               key={note.uid}
               onClick={() => !trash && openEdit(note)}
               className={cn(
-                'anim-rise group rounded-[24px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 transition duration-300 sm:p-7',
-                !trash && 'cursor-pointer hover:-translate-y-1',
+                'anim-rise group rounded-[24px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 transition duration-100 sm:p-7',
+                !trash && 'cursor-pointer',
               )}
-              style={{ boxShadow: 'var(--shadow-soft)', animationDelay: `${Math.min(index * 45, 360)}ms` }}
+              style={{ boxShadow: 'var(--shadow-soft)' }}
             >
               <div className="flex items-start gap-4">
                 <div className="min-w-0 flex-1">

@@ -80,10 +80,10 @@ export function Dashboard() {
   if (!stats) return <div className="tf-panel-flat p-6"><p>{error || 'Нет доступа к сводке. Выберите доступный раздел в меню.'}</p></div>;
 
   const cards = [
-    { label: 'Видимых задач', value: stats.total, icon: ListTodo, color: 'var(--color-accent)', soft: 'rgba(43,38,32,.08)', to: '/tasks' },
-    { label: 'В работе', value: stats.in_progress, icon: Clock3, color: 'var(--color-warning)', soft: 'rgba(150,112,42,.13)', to: '/kanban' },
-    { label: 'Просрочено', value: stats.overdue, icon: AlertTriangle, color: 'var(--color-danger)', soft: 'rgba(188,90,72,.12)', to: '/tasks?status=overdue' },
-    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', soft: 'rgba(95,143,106,.13)', to: '/tasks?status=done' },
+    { label: 'Видимых задач', value: stats.total, icon: ListTodo, color: 'var(--color-accent)', soft: 'rgba(43,38,32,.08)', to: `/tasks?scope=${stats.task_scope || 'involved'}` },
+    { label: 'В работе', value: stats.in_progress, icon: Clock3, color: 'var(--color-warning)', soft: 'rgba(150,112,42,.13)', to: `/tasks?scope=${stats.task_scope || 'involved'}&status=in_progress` },
+    { label: 'Просрочено', value: stats.overdue, icon: AlertTriangle, color: 'var(--color-danger)', soft: 'rgba(188,90,72,.12)', to: `/tasks?scope=${stats.task_scope || 'involved'}&status=overdue` },
+    { label: 'Готово', value: stats.done, icon: CheckCircle2, color: 'var(--color-success)', soft: 'rgba(95,143,106,.13)', to: `/tasks?scope=${stats.task_scope || 'involved'}&status=done` },
   ];
 
   return (
@@ -92,7 +92,7 @@ export function Dashboard() {
         <div className="tf-panel-flat overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
             <div><h2 className="text-sm font-bold">Фокус на сегодня</h2><p className="text-xs text-[var(--color-text-secondary)]">Ближайшие сроки и просрочки</p></div>
-            <button onClick={() => navigate('/tasks')} className="text-xs font-semibold text-[var(--color-accent)]">Все задачи</button>
+            <button onClick={() => navigate(`/tasks?scope=${stats.task_scope || 'involved'}`)} className="text-xs font-semibold text-[var(--color-accent)]">Все задачи</button>
           </div>
           <div className="divide-y divide-[var(--color-border)]/70">
             {focusTasks.map(task => {

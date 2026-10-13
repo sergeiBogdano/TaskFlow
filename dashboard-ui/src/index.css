@@ -256,7 +256,7 @@ a:hover {
   padding: 10px 14px;
   font-size: 14px;
   outline: none;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .08s linear;
 }
 
 select.tf-input {
@@ -340,11 +340,11 @@ select.tf-input option {
   font-weight: 600;
   letter-spacing: -.01em;
   box-shadow: 0 1px 2px rgba(62, 52, 36, .08);
-  transition: background .15s ease, border-color .15s ease, transform .1s ease, box-shadow .15s ease;
+  transition: background-color .08s linear, border-color .08s linear;
 }
 
 .tf-button:active {
-  transform: scale(.98);
+  transform: none;
 }
 
 .tf-button:hover {
@@ -442,7 +442,7 @@ select.tf-input option {
   border: 1px solid var(--color-border-strong);
   border-radius: 24px;
   box-shadow: var(--shadow-modal);
-  animation: modal-pop .22s cubic-bezier(.2, .9, .3, 1.2);
+  animation: tf-fade-in .08s linear;
 }
 
 .tf-table-row {
@@ -543,15 +543,15 @@ section.grid.grid-cols-2.gap-3 > .tf-panel-flat .text-2xl {
 }
 
 .anim-page {
-  animation: tf-page-in .28s ease;
+  animation: none;
 }
 
 .anim-modal {
-  animation: tf-fade-in .18s ease;
+  animation: tf-fade-in .08s linear;
 }
 
 .anim-rise {
-  animation: tf-rise .35s cubic-bezier(.2, .7, .3, 1) backwards;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

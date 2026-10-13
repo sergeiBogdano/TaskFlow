@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select
+from app.core.task_deadlines import overdue_condition
 from app.core.cache import dashboard_cache
 from app.core.config import settings
 from app.core.database import async_session
@@ -32,16 +33,9 @@ def _task_visibility_condition(user_id: int, is_superadmin: bool):
 
 @router.get('/stats')
 async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_current_user)):
-    cache_key = ('stats', user.id, workspace_id)
-    if cached := dashboard_cache.get(cache_key):
-        return JSONResponse(cached)
     async with async_session() as session:
         role_names = await get_user_role_names(user.id)
         workspace, _ = await resolve_workspace(session, user, role_names, workspace_id)
-        tz = settings.tz
-        now_local = datetime.now(tz)
-        today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_start_utc = to_utc(today_start)
         conditions = [Task.deleted_at.is_(None), Task.workspace_id == workspace.id]
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
@@ -50,10 +44,7 @@ async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_curr
             func.count(Task.id),
             func.count(Task.id).filter(Task.status == 'done'),
             func.count(Task.id).filter(Task.status == 'in_progress'),
-            func.count(Task.id).filter(
-                Task.status != 'done',
-                func.coalesce(Task.completion_date, Task.deadline) < today_start_utc,
-            ),
+            func.count(Task.id).filter(overdue_condition()),
         ).where(*conditions))).one()
         total, done, in_progress, overdue = (int(value or 0) for value in task_counts)
         active_clients = int((await session.execute(select(func.count(Client.id)).where(
@@ -67,6 +58,7 @@ async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_curr
         ))).scalar_one() or 0)
 
     payload = {
+        'task_scope': 'all' if user_is_superadmin(role_names) else 'involved',
         'total': total,
         'done': done,
         'in_progress': in_progress,
@@ -78,7 +70,6 @@ async def dashboard_stats(workspace_id: int = Query(None), user=Depends(get_curr
     if not await is_feature_available(user, 'clients', workspace.id):
         payload['active_clients'] = 0
         payload['ending_clients'] = 0
-    dashboard_cache.set(cache_key, payload)
     return JSONResponse(payload)
 
 
@@ -331,13 +322,11 @@ async def client_work_summaries(workspace_id: int = Query(None), user=Depends(ge
         visibility = _task_visibility_condition(user.id, user_is_superadmin(role_names))
         if visibility is not None:
             conditions.append(visibility)
-        task_date = func.coalesce(Task.completion_date, Task.deadline)
-        today_start = to_utc(datetime.now(settings.tz).replace(hour=0, minute=0, second=0, microsecond=0))
         rows = (await session.execute(select(
             Task.client_id,
             func.count(Task.id).label('total'),
             func.count(Task.id).filter(Task.status != 'done').label('active'),
-            func.count(Task.id).filter(Task.status != 'done', task_date < today_start).label('overdue'),
+            func.count(Task.id).filter(overdue_condition()).label('overdue'),
             func.max(func.coalesce(Task.updated_at, Task.created_at)).label('last_activity'),
         ).where(*conditions, Task.client_id.is_not(None)).group_by(Task.client_id))).all()
     payload = [{
