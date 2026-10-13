@@ -1,3 +1,4 @@
+import { getTabWorkspaceId, setTabWorkspaceValue, clearTabWorkspace, WORKSPACE_DETAIL_KEY } from '../lib/workspaceSession.ts';
 import { TextEditor } from '../components/TextEditor';
 import { Link } from 'react-router-dom';
 import { SECTION_LABELS, resolveSectionLabel, resolveFieldLabels } from '../lib/uiLabels';
@@ -41,7 +42,7 @@ export function WorkspaceSettings({ accessTeam = false }: { accessTeam?: boolean
       const list = await api.getWorkspaces();
       const stored = (() => {
         try {
-          return localStorage.getItem('taskflow:workspace');
+          return getTabWorkspaceId();
         } catch {
           return null;
         }
@@ -182,8 +183,7 @@ export function WorkspaceSettings({ accessTeam = false }: { accessTeam?: boolean
     try {
       await api.deleteWorkspace(detail.id);
       try {
-        localStorage.removeItem('taskflow:workspace');
-        localStorage.removeItem('taskflow:workspace-detail');
+        clearTabWorkspace();
       } catch {
         /* ignore */
       }
@@ -431,7 +431,7 @@ function UiEditor({ detail, canManage, onSaved }: {
     try {
       const updated = await api.updateWorkspace(detail.id, { ui_config: cfg });
       try {
-        localStorage.setItem('taskflow:workspace-detail', JSON.stringify({ ...detail, ui_config: (updated as any).ui_config ?? cfg }));
+        setTabWorkspaceValue(WORKSPACE_DETAIL_KEY, JSON.stringify({ ...detail, ui_config: (updated as any).ui_config ?? cfg }));
       } catch {
         /* ignore */
       }

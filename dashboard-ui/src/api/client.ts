@@ -3,15 +3,8 @@ import { currentFieldAccess, writableFields, type FieldAccess } from '../lib/fie
 const API_BASE = '';
 export { request };
 
-const WORKSPACE_KEY = 'taskflow:workspace';
-
-function activeWorkspaceId(): string | null {
-  try {
-    return localStorage.getItem(WORKSPACE_KEY);
-  } catch {
-    return null;
-  }
-}
+import { getTabWorkspaceId } from '../lib/workspaceSession.ts';
+const activeWorkspaceId = getTabWorkspaceId;
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   let finalUrl = url;
@@ -503,7 +496,7 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
-  getMe: () => request<{ user: User }>('/api/auth/me'),
+  getMe: (signal?: AbortSignal) => request<{ user: User }>('/api/auth/me', { signal }),
 
   parseVoiceTask: (text: string, draft?: VoiceTaskDraft) =>
     request<VoiceTaskParseResult>('/api/ai/task-command', {
@@ -577,8 +570,8 @@ export const api = {
 
   // Tasks
   getTasks: (params?: string) => request<Task[]>(`/api/tasks/all${params ? `?${params}` : ''}`),
-  getTasksPage: (params?: string) =>
-    request<TaskListResponse>(`/api/tasks/all?paginated=1${params ? `&${params}` : ''}`),
+  getTasksPage: (params?: string, signal?: AbortSignal) =>
+    request<TaskListResponse>(`/api/tasks/all?paginated=1${params ? `&${params}` : ''}`, { signal }),
   getTask: (id: number) => request<Task>(`/api/tasks/${id}`),
   getTaskAccesses: (id: number) => request<any[]>(`/api/tasks/${id}/accesses`),
   createTask: (data: Partial<Task>) =>
@@ -837,10 +830,10 @@ export const api = {
     request<{ ok: boolean; moved_notes: number }>(`/api/notes/folders/${id}`, { method: 'DELETE' }),
 
   // Workspaces
-  getWorkspaces: (deleted?: boolean) => request<Workspace[]>(`/api/workspaces${deleted ? '?deleted=true' : ''}`),
+  getWorkspaces: (deleted?: boolean, signal?: AbortSignal) => request<Workspace[]>(`/api/workspaces${deleted ? '?deleted=true' : ''}`, { signal }),
   createWorkspace: (name: string, preset: string) =>
     request<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, preset }) }),
-  getWorkspace: (id: number) => request<WorkspaceDetail>(`/api/workspaces/${id}`),
+  getWorkspace: (id: number, signal?: AbortSignal) => request<WorkspaceDetail>(`/api/workspaces/${id}`, { signal }),
   updateWorkspace: (id: number, data: Record<string, any>) =>
     request<Workspace>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteWorkspace: (id: number, permanent?: boolean) =>

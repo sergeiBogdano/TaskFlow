@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api, type Client, type QuickTaskTemplate, type Task, type User } from '../api/client';
 import { referenceCache } from '../api/cache';
 import { TaskScopeFilter } from '../components/TaskScopeFilter';
-import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
+import type { TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import { dateInputValue, shiftCalendarDate } from '../lib/dates';
 import { cn, statusMeta } from '../lib/taskflow';
@@ -91,7 +91,7 @@ export function Calendar() {
       referenceCache.users().catch(() => []),
       api.getQuickTasks().catch(() => []),
     ]);
-    setEvents(eventList.filter(event => taskMatchesScope(event as Task, currentUser, scope, scopeUserId)));
+    setEvents(eventList);
     setClients(clientList);
     setUsers(userList);
     setQuickTemplates(quickList);

@@ -1,13 +1,13 @@
 import { api, type Workspace } from '../api/client';
 import { applyTheme } from './theme';
+import { WORKSPACE_KEY, WORKSPACE_DETAIL_KEY as DETAIL_KEY, getTabWorkspaceId, getTabWorkspaceDetail, setTabWorkspaceValue, clearTabWorkspace } from './workspaceSession.ts';
+export { WORKSPACE_KEY } from './workspaceSession.ts';
 
-export const WORKSPACE_KEY = 'taskflow:workspace';
-const DETAIL_KEY = 'taskflow:workspace-detail';
 export const WORKSPACE_EVENT = 'taskflow:workspace-changed';
 
 export function getActiveWorkspaceId(): string | null {
   try {
-    return localStorage.getItem(WORKSPACE_KEY);
+    return getTabWorkspaceId();
   } catch {
     return null;
   }
@@ -15,7 +15,7 @@ export function getActiveWorkspaceId(): string | null {
 
 export function getActiveWorkspaceDetail(): Record<string, any> | null {
   try {
-    const raw = localStorage.getItem(DETAIL_KEY);
+    const raw = getTabWorkspaceDetail();
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -29,18 +29,15 @@ export function workspaceClientsLabel(): string {
 }
 
 /** Гарантирует выбранный воркспейс: чинит протухший id, возвращает список + активный. */
-export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; activeId: string | null }> {
-  const workspaces = await api.getWorkspaces().catch(() => null);
-  if (workspaces === null) {
-    // Ошибка сети/авторизации — не трогаем сохранённый выбор.
-    return { workspaces: [], activeId: null };
-  }
+export async function ensureWorkspace(signal?: AbortSignal): Promise<{ workspaces: Workspace[]; activeId: string | null }> {
+  const workspaces = await api.getWorkspaces(false, signal);
+  signal?.throwIfAborted();
   if (!workspaces.length) {
     // Окружений нет — чистим протухший id, иначе все API будут ходить
     // с чужим workspace_id и возвращать 403 «Нет доступа».
     try {
-      localStorage.removeItem(WORKSPACE_KEY);
-      localStorage.removeItem(DETAIL_KEY);
+      setTabWorkspaceValue(WORKSPACE_KEY, null);
+      setTabWorkspaceValue(DETAIL_KEY, null);
     } catch {
       /* ignore */
     }
@@ -50,25 +47,26 @@ export async function ensureWorkspace(): Promise<{ workspaces: Workspace[]; acti
   const ok = stored && workspaces.some(w => String(w.id) === stored);
   const activeId = ok && stored ? stored : String(workspaces[0].id);
   try {
-    localStorage.setItem(WORKSPACE_KEY, activeId);
+    setTabWorkspaceValue(WORKSPACE_KEY, activeId);
   } catch {
     /* ignore */
   }
-  const detail = await api.getWorkspace(Number(activeId)).catch(() => workspaces.find(w => String(w.id) === activeId));
-  try { localStorage.setItem(DETAIL_KEY, JSON.stringify(detail)); } catch { /* ignore */ }
+  const detail = await api.getWorkspace(Number(activeId), signal);
+  signal?.throwIfAborted();
+  try { setTabWorkspaceValue(DETAIL_KEY, JSON.stringify(detail)); } catch { /* ignore */ }
   return { workspaces, activeId };
 }
 
 export async function switchWorkspace(id: string): Promise<void> {
   try {
-    localStorage.setItem(WORKSPACE_KEY, id);
+    setTabWorkspaceValue(WORKSPACE_KEY, id);
   } catch {
     /* ignore */
   }
   try {
     const detail = await api.getWorkspace(Number(id));
     try {
-      localStorage.setItem(DETAIL_KEY, JSON.stringify(detail));
+      setTabWorkspaceValue(DETAIL_KEY, JSON.stringify(detail));
     } catch {
       /* ignore */
     }
@@ -83,5 +81,5 @@ export async function switchWorkspace(id: string): Promise<void> {
 }
 
 export function clearWorkspace(): void {
-  try { localStorage.removeItem(WORKSPACE_KEY); localStorage.removeItem(DETAIL_KEY); } catch { /* ignore */ }
+  clearTabWorkspace();
 }

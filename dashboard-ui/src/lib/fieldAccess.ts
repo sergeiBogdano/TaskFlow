@@ -1,3 +1,4 @@
+import { getTabWorkspaceDetail } from './workspaceSession.ts';
 export type FieldMode = 'hidden' | 'view' | 'edit';
 export type FieldAccess = Record<string, Record<string, FieldMode>>;
 export const FIELD_ALIASES: Record<string, Record<string, string[]>> = {
@@ -19,6 +20,6 @@ export function writableFields<T extends Record<string, unknown>>(entity: string
 }
 
 export function currentFieldAccess(): FieldAccess {
-  try { return JSON.parse(localStorage.getItem('taskflow:workspace-detail') || '{}').field_access || {}; }
+  try { return JSON.parse(getTabWorkspaceDetail() || '{}').field_access || {}; }
   catch { return {}; }
 }

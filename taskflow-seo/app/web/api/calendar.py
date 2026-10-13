@@ -134,7 +134,7 @@ async def calendar_events(
             except (ValueError, TypeError):
                 pass
 
-        days_until = (day_start - datetime.now(tz)).days
+        days_until = (day_start.date() - datetime.now(tz).date()).days
         if t.status == 'done':
             color = '#6c757d'
         elif t.status == 'overdue' or days_until < 0:
