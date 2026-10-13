@@ -16,7 +16,9 @@ services:
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
       WORKSPACE_STORAGE_MB: ${WORKSPACE_STORAGE_MB:-512}
       OLLAMA_URL: ${OLLAMA_URL:-http://172.20.0.1:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-ministral-3:8b-instruct-2512-q4_K_M_ru}
+      # Pin the production model: legacy host .env files still contain qwen2.5.
+      # Keep changes versioned so blue/green deployments use the same model.
+      OLLAMA_MODEL: ministral-3:8b-instruct-2512-q4_K_M_ru
 
     volumes:
       - taskflow_logs:/app/logs
