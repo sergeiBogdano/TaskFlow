@@ -25,7 +25,7 @@ from app.core.utils.timezone import safe_dt, utc_now
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://172.20.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "ministral-3:8b-instruct-2512-q4_K_M_ru")
 
 class ReportGeneratePayload(BaseModel):
     client_id: int

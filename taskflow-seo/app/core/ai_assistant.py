@@ -408,7 +408,7 @@ async def execute(job_id, timeout):
         messages.extend([{'role': 'user', 'content': previous.message[:2000]},
                          {'role': 'assistant', 'content': json.loads(previous.result or '{}').get('answer', '')[:2000]}])
     messages.append({'role': 'user', 'content': message})
-    model = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b')[:80]
+    model = os.getenv('OLLAMA_MODEL', 'ministral-3:8b-instruct-2512-q4_K_M_ru')[:80]
     async def validate_delivery():
         async with async_session() as session:
             current = await session.get(AiRequest, job_id)

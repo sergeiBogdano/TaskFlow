@@ -26,7 +26,7 @@ from app.core.utils.timezone import utc_now
 router = APIRouter(prefix="/api/ai", tags=["ai-analytics"])
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b-instruct-2512-q4_K_M_ru")
 
 admin_user = require_role(["superadmin", "admin"])
 
