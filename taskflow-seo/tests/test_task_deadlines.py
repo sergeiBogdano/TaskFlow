@@ -1,3 +1,4 @@
+import pytest
 import json
 from datetime import datetime, timedelta
 
@@ -62,3 +63,55 @@ def test_dashboard_and_overdue_filter_match_without_status_worker(client, admin_
     event_loop.run_until_complete(close())
     fresh = sync_request('GET', f'/api/dashboard/stats?workspace_id={wid}', cookies=admin_cookies).json()
     assert fresh['overdue'] == 2
+
+
+@pytest.mark.parametrize('hidden', ['deadline', 'completionDate'])
+def test_hidden_dates_block_overdue_filter_and_aggregate(client, admin_cookies, executor_cookies, sync_request, event_loop, hidden):
+    async def prepare():
+        async with async_session() as session:
+            root = await session.scalar(select(User).where(User.username == '4dmin'))
+            member = await session.scalar(select(User).where(User.username == 'testexec'))
+            ws = Workspace(name='Hidden date privacy', created_by=root.id)
+            session.add(ws); await session.flush()
+            role = WorkspaceRole(workspace_id=ws.id, name='Hidden date reader', permissions=json.dumps({'tasks': True}), field_access=json.dumps({'tasks': {hidden: 'hidden', 'assignee': 'hidden'}}))
+            session.add(role); await session.flush()
+            session.add(WorkspaceMember(workspace_id=ws.id, user_id=member.id, role='member', custom_role_id=role.id))
+            past = to_utc(datetime.now(settings.tz)) - timedelta(days=2)
+            task = Task(title='Authorized but redacted', assignee_id=member.id, workspace_id=ws.id, status='todo', deadline=past, completion_date=past)
+            session.add(task); await session.flush(); ident = task.id
+            await session.commit(); return ws.id, ident
+    wid, ident = event_loop.run_until_complete(prepare())
+    for status in ['overdue', 'done,overdue', 'todo, overdue']:
+        r = sync_request('GET', f'/api/tasks?workspace_id={wid}&scope=mine&status={status}', cookies=executor_cookies)
+        assert r.status_code == 403, r.text
+    r = sync_request('GET', f'/api/tasks?workspace_id={wid}&scope=mine&paginated=true', cookies=executor_cookies)
+    assert r.status_code == 200, r.text
+    assert r.json()['total'] == 1 and r.json()['items'][0]['id'] == ident
+    assert 'assignee_id' not in r.json()['items'][0]
+    assert 'overdue' not in r.json()['status_counts']
+    assert ('deadline' if hidden == 'deadline' else 'completion_date') not in r.json()['items'][0]
+
+
+def test_calendar_today_not_overdue(client, admin_cookies, sync_request, event_loop, monkeypatch):
+    from app.web.api import calendar
+    fixed = datetime.now(settings.tz).replace(hour=12, minute=0, second=0, microsecond=0)
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+    monkeypatch.setattr(calendar, 'datetime', FrozenDateTime)
+    async def prepare():
+        async with async_session() as session:
+            root = await session.scalar(select(User).where(User.username == '4dmin'))
+            ws = Workspace(name='Calendar days', created_by=root.id)
+            session.add(ws); await session.flush()
+            for title, offset, status in [('Today', 0, 'todo'), ('Yesterday', -1, 'todo'), ('Tomorrow', 1, 'todo'), ('Done', -1, 'done')]:
+                day = fixed.replace(hour=18) + timedelta(days=offset)
+                session.add(Task(title=title, workspace_id=ws.id, status=status, completion_date=to_utc(day), deadline=to_utc(day + timedelta(days=1))))
+            await session.commit(); return ws.id
+    wid = event_loop.run_until_complete(prepare())
+    r = sync_request('GET', f'/api/calendar?workspace_id={wid}&scope=all', cookies=admin_cookies)
+    assert r.status_code == 200, r.text
+    colors = {row['title']: row['color'] for row in r.json()}
+    assert colors == {'Today': '#ffc107', 'Yesterday': '#dc3545', 'Tomorrow': '#ffc107'}
+    assert 'Done' not in colors  # Completed tasks are intentionally excluded from this calendar.

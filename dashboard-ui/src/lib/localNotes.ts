@@ -52,27 +52,28 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 async function idbGet<T>(key: string): Promise<T | null> {
+  const db = await openDb();
   try {
-    const db = await openDb();
     return await new Promise<T | null>((resolve, reject) => {
       const tx = db.transaction('kv', 'readonly');
       const q = tx.objectStore('kv').get(key);
       q.onsuccess = () => resolve((q.result as T) ?? null);
       q.onerror = () => reject(q.error);
     });
-  } catch {
-    return null;
-  }
+  } finally { db.close(); }
 }
 
 async function idbSet(key: string, value: unknown): Promise<void> {
   const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('kv', 'readwrite');
-    const q = tx.objectStore('kv').put(value, key);
-    q.onsuccess = () => resolve();
-    q.onerror = () => reject(q.error);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error || new Error('Не удалось сохранить локальную заметку.'));
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore('kv').put(value, key);
+    });
+  } finally { db.close(); }
 }
 
 async function idbDel(key: string): Promise<void> {
@@ -117,10 +118,10 @@ export async function pickNotesDirectory(): Promise<string> {
     const granted = await handle.requestPermission({ mode: 'readwrite' });
     if (granted !== 'granted') throw new Error('Нет доступа к папке.');
   }
+  // Do not switch storage until every fallback note was written successfully.
+  await migrateFallbackToDir(handle);
   await idbSet('notesDir', handle);
   await idbSet('notesDirName', String(handle?.name || ''));
-  // Переносим заметки из встроенного хранилища в папку при первом выборе
-  await migrateFallbackToDir(handle);
   return String(handle?.name || '');
 }
 
@@ -221,11 +222,7 @@ async function migrateFallbackToDir(dir: any): Promise<void> {
   const fallback = await idbGet<LocalNote[]>('notesFallback');
   if (!fallback || !fallback.length) return;
   for (const note of fallback) {
-    try {
-      await writeToDir(dir, note);
-    } catch {
-      /* ignore */
-    }
+    await writeToDir(dir, note);
   }
   await idbDel('notesFallback');
 }

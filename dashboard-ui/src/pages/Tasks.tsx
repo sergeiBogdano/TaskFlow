@@ -1,3 +1,4 @@
+import { withRequestDeadline, requestErrorMessage } from '../lib/requestDeadline';
 import { clientContractSummary } from '../lib/clientPresentation';
 import { currentFieldAccess } from '../lib/fieldAccess';
 import { runAssistant, queueLabel, type AssistantJob } from '../api/assistant';
@@ -14,7 +15,7 @@ import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
 import { sectionLabel, taskField } from '../lib/uiconfig';
 import { TaskScopeFilter } from '../components/TaskScopeFilter';
-import { taskMatchesScope, type TaskScope } from '../lib/taskScope';
+import type { TaskScope } from '../lib/taskScope';
 import { useAuth } from '../hooks/useAuth';
 import { getActiveWorkspaceId } from '../lib/workspace';
 import { cn, formatDate, formatFullDate, priorityMeta, statusMeta, taskTypeMeta, workflowStatuses } from '../lib/taskflow';
@@ -79,6 +80,9 @@ export function Tasks() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [totalTasks, setTotalTasks] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const loadRevision = useRef(0);
+  const canFilterOverdue = currentFieldAccess().tasks?.deadline !== 'hidden' && currentFieldAccess().tasks?.completionDate !== 'hidden';
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState(searchParams.get('search') || '');
@@ -92,38 +96,47 @@ export function Tasks() {
   const userOptions = useMemo(() => users.map(user => ({ value: String(user.id), label: user.username })), [users]);
 
   const load = useCallback(async () => {
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('page_size', String(pageSize));
-    if (filters.search.trim()) params.set('search', filters.search.trim());
-    if (filters.status.length) params.set('status', filters.status.join(','));
-    if (filters.priority !== 'all') params.set('priority', filters.priority);
-    if (filters.client !== 'all') params.set('client_id', filters.client);
-    if (filters.assignee !== 'all') params.set('assignee', filters.assignee);
-    if (filters.sprint) params.set('sprint_id', filters.sprint);
-    params.set('scope', filters.scope);
-    if (filters.scope === 'user' && filters.scopeUserId) params.set('scope_user_id', filters.scopeUserId);
+    const revision = ++loadRevision.current;
+    setLoading(true); setLoadError('');
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('page_size', String(pageSize));
+      if (filters.search.trim()) params.set('search', filters.search.trim());
+      if (filters.status.length) params.set('status', filters.status.join(','));
+      if (filters.priority !== 'all') params.set('priority', filters.priority);
+      if (filters.client !== 'all') params.set('client_id', filters.client);
+      if (filters.assignee !== 'all') params.set('assignee', filters.assignee);
+      if (filters.sprint) params.set('sprint_id', filters.sprint);
+      params.set('scope', filters.scope);
+      if (filters.scope === 'user' && filters.scopeUserId) params.set('scope_user_id', filters.scopeUserId);
 
-    const [taskPage, clientList, userList, views, sprintList] = await Promise.all([
-      api.getTasksPage(params.toString()),
-      referenceCache.clients().catch(() => []),
-      referenceCache.users().catch(() => []),
-      referenceCache.savedViews('tasks').catch(() => []),
-      api.getSprints().catch(() => [] as Sprint[]),
-    ]);
-    const scopedItems = taskPage.items.filter(task => taskMatchesScope(task, currentUser, filters.scope, filters.scopeUserId));
-    setTasks(scopedItems);
-    setTotalTasks(taskPage.total);
-    setStatusCounts(taskPage.status_counts || null);
-    setClients(clientList);
-    setUsers(userList);
-    setSavedViews(views);
-    setSprints(sprintList);
+      const [taskPage, clientList, userList, views, sprintList] = await withRequestDeadline(signal => Promise.all([
+        api.getTasksPage(params.toString(), signal),
+        referenceCache.clients().catch(() => []),
+        referenceCache.users().catch(() => []),
+        referenceCache.savedViews('tasks').catch(() => []),
+        api.getSprints().catch(() => [] as Sprint[]),
+      ]));
+      if (revision !== loadRevision.current) return;
+      setTasks(taskPage.items);
+      setTotalTasks(taskPage.total);
+      setStatusCounts(taskPage.status_counts || null);
+      setClients(clientList);
+      setUsers(userList);
+      setSavedViews(views);
+      setSprints(sprintList);
+    } catch (error) {
+      if (revision !== loadRevision.current) return;
+      referenceCache.invalidate();
+      setTasks([]); setTotalTasks(0); setStatusCounts(null);
+      setLoadError(requestErrorMessage(error));
+    } finally { if (revision === loadRevision.current) setLoading(false); }
   }, [filters, page, pageSize, currentUser]);
 
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
+    void load();
+    return () => { loadRevision.current++; };
   }, [load]);
 
   useEffect(() => {
@@ -352,6 +365,10 @@ export function Tasks() {
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
+      {loadError && <section role="alert" className="tf-panel-flat space-y-3 p-4">
+        <p className="text-[var(--color-danger)]">{loadError}</p>
+        <div className="flex flex-wrap gap-2"><button className="tf-button" onClick={() => void load()}>Повторить загрузку</button><button className="tf-button" onClick={() => setFilters({ ...baseFilters })}>Сбросить фильтры</button></div>
+      </section>}
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
         <div className="min-w-0 xl:col-span-2">
           <h2 className="text-xl font-black">{sectionLabel('/tasks')}</h2>
@@ -376,10 +393,10 @@ export function Tasks() {
           const meta = statusMeta[status as keyof typeof statusMeta] || statusMeta.todo;
           const active = filters.status.includes(status);
           return (
-            <button key={status} onClick={() => setFilters(prev => ({ ...prev, status: prev.status.length === 1 && prev.status[0] === status ? [] : [status] }))} className={cn('tf-panel-flat flex items-center gap-2.5 px-3.5 py-2.5 text-left transition hover:border-[var(--color-border-strong)] active:scale-[.98]', active && 'border-[var(--color-accent)]')}>
+            <button key={status} disabled={status === 'overdue' && !canFilterOverdue} title={status === 'overdue' && !canFilterOverdue ? 'Просрочка требует просмотра обеих дат задачи' : undefined} onClick={() => setFilters(prev => ({ ...prev, status: prev.status.length === 1 && prev.status[0] === status ? [] : [status] }))} className={cn('tf-panel-flat flex items-center gap-2.5 px-3.5 py-2.5 text-left transition hover:border-[var(--color-border-strong)] active:scale-[.98]', active && 'border-[var(--color-accent)]')}>
               <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: meta.color }} />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--color-text-secondary)]">{meta.label}</span>
-              <span className="text-xl font-semibold tracking-tight" style={{ color: active ? meta.color : 'var(--color-text)' }}>{counts[status] || 0}</span>
+              <span className="text-xl font-semibold tracking-tight" style={{ color: active ? meta.color : 'var(--color-text)' }}>{status === 'overdue' && !canFilterOverdue ? '—' : counts[status] || 0}</span>
             </button>
           );
         })}
@@ -585,7 +602,7 @@ export function Tasks() {
             </div>
           );
         })}
-        {totalTasks === 0 && <div className="p-10 text-center text-sm text-[var(--color-text-secondary)]">Задач по этим фильтрам нет</div>}
+        {!loadError && totalTasks === 0 && <div className="p-10 text-center text-sm text-[var(--color-text-secondary)]">Задач по этим фильтрам нет</div>}
       </section>
 
       {showModal && <TaskModal task={editingTask} initialTask={assistantDraft} clients={clients} users={users} onClose={() => { setShowModal(false); setAssistantDraft(undefined); }} onSave={saveTask} onDelete={editingTask ? deleteTask : undefined} />}

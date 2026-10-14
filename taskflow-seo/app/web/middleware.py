@@ -164,6 +164,8 @@ async def work_permission_middleware(request: Request, call_next):
     if path.startswith('/api/calendar') and any(fields['tasks'][key] == 'hidden' for key in ('deadline', 'completionDate', 'assignee', 'client')):
         return JSONResponse({'detail': 'Календарь требует просмотра сроков, исполнителя и клиента'}, status_code=403)
     if path.startswith('/api/tasks') and method == 'GET':
+        if 'overdue' in [value.strip() for value in request.query_params.get('status', '').split(',')] and any(fields['tasks'][key] == 'hidden' for key in ('deadline', 'completionDate')):
+            return JSONResponse({'detail': 'Фильтр просрочки требует просмотра даты выполнения и крайнего срока'}, status_code=403)
         query_fields = {'client': ('client', 'client_id'), 'assignee': ('assignee', 'scope_user_id'), 'priority': ('priority',), 'taskType': ('task_type',),
                         'sprint': ('sprint', 'sprint_id'), 'deadline': ('date_from', 'date_to')}
         for field, params in query_fields.items():
