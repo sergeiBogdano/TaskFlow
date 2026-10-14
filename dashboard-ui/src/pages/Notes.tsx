@@ -1,3 +1,6 @@
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import { getActiveWorkspaceId } from '../lib/workspace';
 import { linkedNotes } from '../lib/noteLinks';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -93,6 +96,11 @@ function toViewLocal(n: LocalNote, folderName: (id: string) => string): ViewNote
 }
 
 export function Notes() {
+  const location = useLocation(); const navigate = useNavigate(); const { user } = useAuth();
+  const [localOnly, setLocalOnly] = useState(false);
+  const [view, setView] = useState<'list' | 'cards'>('list');
+  const [sort, setSort] = useState('updated');
+  const noteAccessKey = JSON.stringify([user?.id, getActiveWorkspaceId(), user?.permissions, user?.features, user?.field_access]);
   const [tab, setTab] = useState<Tab>('mine');
   const [notes, setNotes] = useState<ViewNote[]>([]);
   const [inventory, setInventory] = useState<ViewNote[]>([]);
@@ -103,7 +111,7 @@ export function Notes() {
       if (active) setInventory([...local.notes.map(note => toViewLocal(note, () => '')), ...server.notes.filter(note => !note.deleted_at).map(toViewServer)]);
     }).catch(() => {});
     return () => { active = false; };
-  }, [inventoryVersion]);
+  }, [inventoryVersion, noteAccessKey]);
   const [tags, setTags] = useState<string[]>([]);
   const [serverFolders, setServerFolders] = useState<NoteFolder[]>([]);
   const [localFolders, setLocalFolders] = useState<LocalFolder[]>([]);
@@ -113,6 +121,7 @@ export function Notes() {
 
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setSearch(searchInput.trim()), 300); return () => clearTimeout(timer); }, [searchInput]);
   const [folder, setFolder] = useState('');
   const [tag, setTag] = useState('');
   const [format, setFormat] = useState('');
@@ -122,10 +131,21 @@ export function Notes() {
   const [newFolderName, setNewFolderName] = useState('');
   const [folderEditorOpen, setFolderEditorOpen] = useState(false);
 
+  useEffect(() => {
+    const state = location.state as { assistantNoteDraft?: { title: string; content: string }; userId?: number; workspace?: string } | null;
+    if (!state?.assistantNoteDraft || state.userId !== user?.id || state.workspace !== getActiveWorkspaceId()) return;
+    const draft = state.assistantNoteDraft;
+    if (typeof draft.title !== 'string' || typeof draft.content !== 'string') return;
+    setTab('mine'); setLocalOnly(true);
+    setEditing({ uid: 'assistant-local-draft', origin: 'local', id: '', title: draft.title.slice(0, 200), content: draft.content.slice(0, 100000), format: 'markdown', tags: [], folderId: '', folderName: null, is_public: false, username: null, is_owner: true, updated_at: '', deleted_at: null });
+    setEditorOpen(true); navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, user?.id, navigate, location.pathname]);
+  const sortedNotes = useMemo(() => [...notes].sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'ru') : b.updated_at.localeCompare(a.updated_at)), [notes, sort]);
   const trash = tab === 'trash';
 
+  const loadRevision = useRef(0);
   const load = async () => {
-    setInventoryVersion(value => value + 1);
+    const revision = ++loadRevision.current;
     setLoading(true);
     setError('');
     try {
@@ -150,8 +170,9 @@ export function Notes() {
           sharedTags = list.tags;
         } catch (err) {
           // Ошибка сервера (например 403) не должна ронять всю страницу заметок.
-          setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
+          if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
         }
+        if (revision !== loadRevision.current) return;
         setNotes(sharedNotes.filter(n => n.is_public).map(toViewServer));
         setTags(sharedTags);
         setServerFolders(folderList);
@@ -171,7 +192,7 @@ export function Notes() {
           serverTags = res.tags;
         } catch (err) {
           // Ошибка сервера не должна скрывать локальные заметки.
-          setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
+          if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
         }
         const localMap = new Map(localFolderList.map(f => [f.id, f.name]));
         const localView = local.notes.map(n => toViewLocal(n, id => localMap.get(id) || '—'));
@@ -182,22 +203,24 @@ export function Notes() {
           serverView = [];
         }
         const merged = [...localView, ...serverView].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+        if (revision !== loadRevision.current) return;
         setNotes(merged);
         setTags(Array.from(new Set([...local.tags, ...serverTags])).sort());
         setServerFolders(serverFolderList);
         setLocalFolders(localFolderList);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки.');
+      if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки.');
     } finally {
-      setLoading(false);
+      if (revision === loadRevision.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     void load();
+    return () => { loadRevision.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, search, folder, tag, format]);
+  }, [tab, search, folder, tag, format, noteAccessKey]);
 
   const switchTab = (next: Tab) => {
     setTab(next);
@@ -206,11 +229,13 @@ export function Notes() {
   };
 
   const openCreate = () => {
+    setLocalOnly(false);
     setEditing(null);
     setEditorOpen(true);
   };
 
   const openEdit = (note: ViewNote) => {
+    setLocalOnly(false);
     setEditing(note);
     setEditorOpen(true);
   };
@@ -218,8 +243,11 @@ export function Notes() {
   const saveNote = async (data: Record<string, any>) => {
     setSaving(true);
     setError('');
+    if (localOnly) data = { ...data, is_public: false };
     try {
-      if (editing?.origin === 'server' && typeof editing.id === 'number') {
+      if (localOnly) {
+        await createLocalNote({ title: data.title, content: data.content, format: data.format, tags: data.tags, folderId: data.folder_id || '' });
+      } else if (editing?.origin === 'server' && typeof editing.id === 'number') {
         await api.updateNote(editing.id, {
           title: data.title,
           content: data.content,
@@ -228,7 +256,7 @@ export function Notes() {
           is_public: data.is_public,
           folder_id: data.folder_id ? Number(data.folder_id) : null,
         });
-      } else if (editing?.origin === 'local') {
+      } else if (editing?.origin === 'local' && editing.id) {
         if (data.is_public) {
           // переезд локальной заметки на сервер
           await api.createNote({ title: data.title, content: data.content, format: data.format, tags: data.tags, is_public: true });
@@ -262,6 +290,7 @@ export function Notes() {
       }
       setEditorOpen(false);
       setEditing(null);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить заметку.');
@@ -276,6 +305,7 @@ export function Notes() {
     try {
       if (note.origin === 'local') await softDeleteLocalNote(String(note.id));
       else if (typeof note.id === 'number') await api.deleteNote(note.id);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить заметку.');
@@ -286,6 +316,7 @@ export function Notes() {
     try {
       if (note.origin === 'local') await restoreLocalNote(String(note.id));
       else if (typeof note.id === 'number') await api.restoreNote(note.id);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось восстановить заметку.');
@@ -297,6 +328,7 @@ export function Notes() {
     try {
       if (note.origin === 'local') await purgeLocalNote(String(note.id));
       else if (typeof note.id === 'number') await api.deleteNote(note.id, true);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить заметку.');
@@ -307,6 +339,7 @@ export function Notes() {
     try {
       if (note.origin === 'local') await duplicateLocalNote(String(note.id));
       else if (typeof note.id === 'number') await api.duplicateNote(note.id);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось дублировать заметку.');
@@ -319,6 +352,7 @@ export function Notes() {
     try {
       await createLocalNote({ title: note.title, content: note.content, format: note.format, tags: note.tags, folderId: '' });
       await api.deleteNote(note.id, true);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось перенести заметку.');
@@ -333,6 +367,7 @@ export function Notes() {
       else await createLocalFolder(name);
       setNewFolderName('');
       setFolderEditorOpen(false);
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось создать папку.');
@@ -345,6 +380,7 @@ export function Notes() {
       if (tab === 'shared') await api.deleteNoteFolder(Number(id));
       else await deleteLocalFolder(id);
       if (folder === id) setFolder('');
+      setInventoryVersion(value => value + 1);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить папку.');
@@ -360,18 +396,13 @@ export function Notes() {
   const hasFilters = search || folder || tag || format;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-2 pb-16 sm:px-6" style={{ fontFamily: APPLE_FONT }}>
-      <header className="relative overflow-visible pt-4 sm:pt-8">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-24 left-1/2 h-72 w-[42rem] -translate-x-1/2 rounded-full"
-          style={{ background: 'radial-gradient(closest-side, rgba(120,100,70,.14), transparent)' }}
-        />
+    <div className="mx-auto max-w-6xl space-y-4 pb-8" style={{ fontFamily: APPLE_FONT }}>
+      <header className="relative overflow-visible">
         <div className="relative flex flex-wrap items-end gap-6">
-          <div className="min-w-0">
-            <h2 className="text-4xl font-semibold tracking-tight text-[var(--color-text)] sm:text-5xl">{sectionLabel('/notes')}</h2>
-            <p className="mt-3 max-w-xl text-[17px] leading-relaxed text-[var(--color-text-secondary)]">
-              Общие живут на сервере. Личные — только на этом ПК.
+          <div className="min-w-0 flex-1 sm:max-w-xl">
+            <h2 className="tf-page-title">{sectionLabel('/notes')}</h2>
+            <p className="tf-page-subtitle">
+              Локальные заметки хранятся на устройстве. Общие и прежние серверные заметки отмечены отдельно.
             </p>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-3">
@@ -379,7 +410,7 @@ export function Notes() {
               <button
                 type="button"
                 onClick={() => setFolderEditorOpen(prev => !prev)}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-2.5 text-[15px] font-medium text-[var(--color-text)] transition hover:border-[var(--color-border-strong)] active:scale-[.98]"
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-2.5 text-[15px] font-medium text-[var(--color-text)] transition hover:border-[var(--color-border-strong)] "
                 style={{ boxShadow: 'var(--shadow-soft)' }}
               >
                 <FolderPlus size={17} /> Папки
@@ -389,7 +420,7 @@ export function Notes() {
               <button
                 type="button"
                 onClick={openCreate}
-                className="inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98]"
+                className="inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-[15px] font-semibold transition hover:opacity-90 "
                 style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
               >
                 <Plus size={17} strokeWidth={2.5} /> Новая заметка
@@ -397,14 +428,14 @@ export function Notes() {
             )}
           </div>
         </div>
-        <div className="relative mt-6 flex flex-wrap gap-2.5">
+        <div className="relative mt-4 flex flex-wrap gap-2">
           <Pill active={tab === 'mine'} onClick={() => switchTab('mine')}><HardDrive size={15} /> Мои</Pill>
           <Pill active={tab === 'shared'} onClick={() => switchTab('shared')}><Server size={15} /> Общие</Pill>
           <Pill active={tab === 'trash'} onClick={() => switchTab('trash')}><Trash2 size={15} /> Корзина</Pill>
         </div>
       </header>
 
-      <div className="relative mx-auto max-w-2xl">
+      <div className="relative w-full">
         <Search size={18} className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
         <input
           value={searchInput}
@@ -417,7 +448,7 @@ export function Notes() {
         <button
           type="button"
           onClick={() => setSearch(searchInput.trim())}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-5 py-2 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98]"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-5 py-2 text-[15px] font-semibold transition hover:opacity-90 "
           style={{ background: ACCENT, color: ON_ACCENT }}
         >
           Найти
@@ -448,12 +479,12 @@ export function Notes() {
                   onKeyDown={event => { if (event.key === 'Enter') void createFolder(); }}
                   placeholder="Название новой папки"
                   maxLength={200}
-                  className="tf-input min-w-[220px] flex-1 rounded-full"
+                  className="tf-input min-w-0 w-full sm:w-auto flex-1 rounded-full"
                 />
                 <button
                   type="button"
                   onClick={createFolder}
-                  className="rounded-full px-6 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98]"
+                  className="rounded-full px-6 py-2.5 text-[15px] font-semibold transition hover:opacity-90 "
                   style={{ background: ACCENT, color: ON_ACCENT }}
                 >
                   Создать
@@ -493,6 +524,10 @@ export function Notes() {
         )}
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+        <span className="text-sm text-[var(--color-muted)]">Заметок: {notes.length}</span>
+        <div className="flex flex-wrap gap-2"><Select value={sort} onChange={setSort} label="Порядок" options={[{ value: 'updated', label: 'Сначала обновлённые' }, { value: 'title', label: 'По названию' }]} /><button className="tf-button" onClick={() => setView(view === 'list' ? 'cards' : 'list')}>{view === 'list' ? 'Карточки' : 'Список'}</button></div>
+      </div>
       {error && (
         <div className="rounded-[20px] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/[.07] px-6 py-4 text-[15px] font-medium text-[var(--color-danger)]">
           {error}
@@ -518,14 +553,14 @@ export function Notes() {
             {trash
               ? 'Удалённые заметки появятся здесь. Их можно восстановить или удалить навсегда.'
               : tab === 'shared'
-                ? 'Отметьте заметку как общую — и она появится здесь для всех.'
+                ? 'Отметьте заметку как общую — её увидят участники пространства с доступом к заметкам.'
                 : 'Создайте первую заметку — идея, черновик или сниппет. Это займёт пару секунд.'}
           </p>
           {!trash && (
             <button
               type="button"
               onClick={openCreate}
-              className="mt-7 inline-flex items-center gap-2 rounded-full px-7 py-3 text-[16px] font-semibold transition hover:brightness-125 active:scale-[.98]"
+              className="mt-7 inline-flex items-center gap-2 rounded-full px-7 py-3 text-[16px] font-semibold transition hover:opacity-90 "
               style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
             >
               <Plus size={17} strokeWidth={2.5} /> Создать заметку
@@ -533,13 +568,15 @@ export function Notes() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          {notes.map(note => (
+        <div className={view === 'list' ? 'space-y-2' : 'grid grid-cols-1 gap-3 xl:grid-cols-2'}>
+          {sortedNotes.map(note => (
             <article
               key={note.uid}
               onClick={() => !trash && openEdit(note)}
+              tabIndex={trash ? undefined : 0}
+              onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!trash) openEdit(note); } }}
               className={cn(
-                'anim-rise group rounded-[24px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 transition duration-100 sm:p-7',
+                'group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 focus-within:ring-2 focus-within:ring-[var(--color-ring)]',
                 !trash && 'cursor-pointer',
               )}
               style={{ boxShadow: 'var(--shadow-soft)' }}
@@ -615,6 +652,7 @@ export function Notes() {
       {editorOpen && (
         <NoteModal
           key={editing?.uid || "new"}
+          localOnly={localOnly}
           inventory={inventory}
           onNavigate={openEdit}
           note={editing}
@@ -651,10 +689,10 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-2 rounded-full px-5 py-2 text-[14.5px] font-medium transition active:scale-[.97]',
+        'inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium',
         active ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
       )}
-      style={active ? { background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' } : undefined}
+      style={active ? { background: ACCENT, color: ON_ACCENT,  } : undefined}
     >
       {children}
     </button>
@@ -683,7 +721,8 @@ function CircleButton({ onClick, title, danger, children }: {
   );
 }
 
-function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, saving, onClose, onSave }: {
+function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolders, localFolders, saving, onClose, onSave }: {
+  localOnly?: boolean;
   inventory: ViewNote[];
   onNavigate: (note: ViewNote) => void;
   note: ViewNote | null;
@@ -783,9 +822,9 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
         className="tf-modal-shell flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden"
         onClick={event => event.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center gap-4 px-7 pb-5 pt-7 sm:px-9">
+        <div className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-4 sm:px-6">
           <h2 className="text-[24px] font-semibold tracking-tight text-[var(--color-text)]">
-            {note ? 'Заметка' : 'Новая заметка'}
+            {localOnly ? 'Локальный черновик' : note ? 'Заметка' : 'Новая заметка'}
           </h2>
           {note && (
             <span className="rounded-full bg-[var(--color-overlay)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)]">
@@ -832,20 +871,21 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
             <span className="mx-1 h-5 w-px bg-[var(--color-border-strong)]" />
             <button
               type="button"
+              disabled={localOnly}
               onClick={() => setIsPublic(prev => !prev)}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13.5px] font-medium transition active:scale-[.97]',
                 isPublic ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
               )}
               style={isPublic ? { background: '#5f8f6a', color: '#fff' } : undefined}
-              title={isPublic ? 'Хранится на сервере, видна всем' : 'Хранится только на этом ПК'}
+              title={isPublic ? 'Хранится на сервере, видна участникам пространства' : 'Хранится только на этом ПК'}
             >
               {isPublic ? <Globe size={13} /> : <Lock size={13} />}
-              {isPublic ? 'Общая' : 'Личная'}
+              {localOnly ? 'Только локально · черновик ИИ' : isPublic ? 'Общая' : 'Личная'}
             </button>
           </div>
           <p className="-mt-3 text-[13px] text-[var(--color-muted)]">
-            {isPublic
+            {localOnly ? 'Локальная заметка. Сохранение на сервере отключено.' : isPublic
               ? 'Общая заметка хранится на сервере.'
               : origin === 'server'
                 ? 'Серверная заметка. Кнопка «Скачать на ПК» в списке перенесёт её только на этот компьютер.'
@@ -856,7 +896,8 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
             <div className="mt-3 flex gap-2"><button type="button" className="tf-button tf-button-primary" onClick={() => applyFormat(pendingFormat)}>Преобразовать</button><button type="button" className="tf-button" onClick={() => setPendingFormat(null)}>Оставить формат</button></div>
           </div>}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <details className="rounded-xl border border-[var(--color-border)] p-3"><summary className="cursor-pointer text-sm font-medium">Папка и теги</summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-2 block text-[13px] font-medium text-[var(--color-text-secondary)]">
                 Папка {origin === 'server' ? '(на сервере)' : '(на этом ПК)'}
@@ -880,6 +921,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
               />
             </label>
           </div>
+          </details>
 
           </fieldset>
           <div>
@@ -896,7 +938,7 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
           {error && <div className="text-[14.5px] font-medium text-[var(--color-danger)]">{error}</div>}
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 px-7 py-5 sm:px-9">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
           <button
             type="button"
             onClick={requestClose}
@@ -907,10 +949,10 @@ function NoteModal({ note, inventory, onNavigate, serverFolders, localFolders, s
           <button
             type="submit"
             disabled={saving || readOnly}
-            className="rounded-full px-8 py-2.5 text-[15px] font-semibold transition hover:brightness-125 active:scale-[.98] disabled:opacity-60"
+            className="rounded-full px-8 py-2.5 text-[15px] font-semibold transition hover:opacity-90  disabled:opacity-60"
             style={{ background: ACCENT, color: ON_ACCENT, boxShadow: 'var(--shadow-accent)' }}
           >
-            {saving ? 'Сохранение...' : note ? 'Готово' : 'Создать'}
+            {saving ? 'Сохранение...' : localOnly ? 'Сохранить на устройстве' : note ? 'Сохранить' : 'Создать'}
           </button>
           {!readOnly && <span className="hidden text-xs text-[var(--color-muted)] sm:inline">Ctrl+S — сохранить</span>}
         </div>

@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TaskFlow",
-    version="1.0.0-alpha.2",
+    version="1.0.0-alpha.3",
     lifespan=lifespan,
 )
 

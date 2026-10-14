@@ -4,7 +4,7 @@ import { request } from './client';
 export type AssistantCapabilities = {
   default_period?: AssistantPeriod; period_timezone?: string;
   workspace_id: number; modules: Record<string, boolean>; task_scope: 'team' | 'participating';
-  can_prepare_task: boolean; can_save: false; can_execute: false;
+  can_prepare_task: boolean; can_prepare_note: boolean; can_save: false; can_execute: false;
   limits: { message: number; tasks: number; notes: number; aggregate_tasks: number };
 };
 export type AssistantJob = {
@@ -12,7 +12,7 @@ export type AssistantJob = {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   date_start?: string | null; date_end?: string | null;
   position: number; cancel_requested: boolean; error: string | null; created_at: string;
-  result: { answer: string; context?: AssistantCapabilities & { selected: Record<string, number>; period?: { start: string; end: string; timezone: string; days: number } | null }; draft?: { title: string; notes: string } } | null;
+  result: { answer: string; context?: AssistantCapabilities & { selected: Record<string, number>; period?: { start: string; end: string; timezone: string; days: number } | null }; draft?: { title: string; notes: string; assignee_id?: number; client_id?: number; deadline?: string; priority?: string }; note_draft?: { title: string; content: string; format: string } } | null;
 };
 export const assistant = {
   capabilities: () => request<AssistantCapabilities>('/api/assistant/capabilities'),
