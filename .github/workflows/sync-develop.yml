@@ -1,0 +1,49 @@
+name: Sync develop after release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: taskflow-sync-develop
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: develop
+      - name: Merge release ancestry without changing develop files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch origin main develop
+            git checkout --detach origin/develop
+            if git merge-base --is-ancestor origin/main HEAD; then
+              echo 'develop already includes main'
+              exit 0
+            fi
+            before=$(git rev-parse HEAD^{tree})
+            git merge --no-ff origin/main -m 'chore(git): synchronize main release history into develop'
+            after=$(git rev-parse HEAD^{tree})
+            if [ "$before" != "$after" ]; then
+              echo '::error::Sync would change develop files; resolve through a reviewed PR.'
+              exit 1
+            fi
+            if git push origin HEAD:refs/heads/develop; then
+              exit 0
+            fi
+          done
+          echo '::error::Could not update develop; inspect branch rules or concurrent pushes.'
+          exit 1
