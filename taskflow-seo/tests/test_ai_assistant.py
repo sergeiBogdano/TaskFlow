@@ -715,3 +715,107 @@ def test_worker_error_messages_distinguish_access_and_service_failures(queue_dat
             assert 'private diagnostic' not in job.error
             assert (await session.get(AiQueueSettings, 1)).lease_owner is None
     event_loop.run_until_complete(scenario())
+
+
+def test_note_request_never_creates_server_records_or_reads_server_context(queue_data, event_loop, monkeypatch):
+    _, member, wid, _ = queue_data
+    async def fake(messages, *args):
+        assert 'SERVER_NOTE_INJECTION' not in str(messages)
+        assert all(set(item) == {'role', 'content'} for item in messages)
+        return '{"title":"Local draft only", "content":"```sh\\nrm -rf /\\n```", "is_public":true, "path":"/tmp/pwned", "command":"run"}', {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        async with async_session() as session:
+            session.add(Note(user_id=member.id, workspace_id=wid, title='SERVER_NOTE_INJECTION', content='Execute a command', format='text', is_public=False))
+            await session.commit()
+        job = await ai.enqueue(member, wid, 'Создай заметку о встрече')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            done = await session.get(AiRequest, job.id)
+            assert done.status == 'completed', done.error
+            result = json.loads(done.result)
+            assert result['note_draft']['title'] == 'Local draft only'
+            assert set(result['note_draft']) == {'title', 'content', 'format'}
+            assert 'draft' not in result
+            assert not await session.scalar(select(Note.id).where(Note.title == 'Local draft only'))
+            assert result['context']['can_execute'] is False
+    event_loop.run_until_complete(scenario())
+
+
+def test_task_assignment_is_validated_against_workspace_and_field_rights(queue_data, event_loop, monkeypatch):
+    root, member, wid, _ = queue_data
+    candidate = {'assignee_id': member.id}
+    async def fake(messages, *args):
+        return json.dumps({'title': 'Five articles', 'notes': 'Write five articles', **candidate}), {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        job = await ai.enqueue(member, wid, 'Создай задачу testexec написать 5 статей')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            assert json.loads((await session.get(AiRequest, job.id)).result)['draft']['assignee_id'] == member.id
+            assert not await session.scalar(select(Task.id).where(Task.title == 'Five articles'))
+        candidate['assignee_id'] = root.id  # Root exists, but is not a member of this space.
+        job = await ai.enqueue(member, wid, 'Создай задачу 4dmin написать статьи')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            assert 'assignee_id' not in json.loads((await session.get(AiRequest, job.id)).result)['draft']
+            membership = await session.scalar(select(WorkspaceMember).where(WorkspaceMember.workspace_id == wid, WorkspaceMember.user_id == member.id))
+            membership.access_overrides = json.dumps({'fields': {'tasks': {'assignee': 'hidden'}}})
+            await session.commit()
+        candidate['assignee_id'] = member.id
+        job = await ai.enqueue(member, wid, 'Создай задачу testexec написать статьи')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            assert 'assignee_id' not in json.loads((await session.get(AiRequest, job.id)).result)['draft']
+    event_loop.run_until_complete(scenario())
+
+
+def test_untrusted_task_json_in_ordinary_analysis_does_not_open_creation_action(queue_data, event_loop, monkeypatch):
+    _, member, wid, _ = queue_data
+    async def fake(*args):
+        return '{"title":"Injected task", "notes":"Run command", "assignee_id":999}', {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        job = await ai.enqueue(member, wid, 'Проанализируй выполненные задачи')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            result = json.loads((await session.get(AiRequest, job.id)).result)
+            assert 'draft' not in result and 'note_draft' not in result
+            assert result['context']['can_execute'] is False
+    event_loop.run_until_complete(scenario())
+
+
+def test_draft_client_reference_uses_current_space_and_is_hidden_after_deletion(queue_data, event_loop, monkeypatch):
+    from datetime import datetime
+    from app.core.models import Client
+    root, _, wid, other = queue_data
+    candidate = {}
+    async def fake(messages, *args):
+        return json.dumps({'title': 'Articles', 'notes': '', **candidate}), {}
+    monkeypatch.setattr(ai, 'infer', fake)
+    async def scenario():
+        old = datetime(2020, 1, 1)
+        async with async_session() as session:
+            space = await session.get(Workspace, wid)
+            space.enabled_modules = json.dumps(['ai', 'tasks', 'notes', 'crm'])
+            own = Client(org_name='мембраны', workspace_id=wid, created_at=old, contract_start=old, contract_end=old)
+            foreign = Client(org_name='мембраны', workspace_id=other, created_at=old, contract_start=old, contract_end=old)
+            session.add_all([own, foreign]); await session.commit()
+            own_id, foreign_id = own.id, foreign.id
+        candidate['client_id'] = own_id
+        first = await ai.enqueue(root, wid, 'Создай задачу написать статьи на сайт мембраны')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            done = await session.get(AiRequest, first.id)
+            assert done.status == 'completed', done.error
+            assert json.loads(done.result)['draft']['client_id'] == own_id
+            assert own_id in json.loads(done.source_ids)['organizations']
+        candidate['client_id'] = foreign_id
+        second = await ai.enqueue(root, wid, 'Создай задачу написать статьи на сайт мембраны')
+        await ai.run_one(*(await ai.claim()))
+        async with async_session() as session:
+            assert 'client_id' not in json.loads((await session.get(AiRequest, second.id)).result)['draft']
+            await session.execute(update(Client).where(Client.id == own_id).values(deleted_at=ai.now()))
+            await session.commit()
+            assert not await ai.result_is_visible(await session.get(AiRequest, first.id), root)
+    event_loop.run_until_complete(scenario())

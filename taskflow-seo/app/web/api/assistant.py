@@ -18,7 +18,7 @@ router = APIRouter()
 
 class Submit(BaseModel):
     message: str = Field(min_length=1, max_length=6000)
-    kind: Literal['chat', 'task', 'report', 'polish'] = 'chat'
+    kind: Literal['chat', 'task', 'note', 'report', 'polish'] = 'chat'
     conversation_id: UUID | None = None
     date_start: date | None = None
     date_end: date | None = None

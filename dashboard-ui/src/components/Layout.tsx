@@ -17,7 +17,6 @@ import {
   GripVertical,
   LayoutDashboard,
   LogOut,
-  Mic,
   Layers,
   NotebookPen,
   Puzzle,
@@ -166,7 +165,6 @@ export function Layout() {
   }, []);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const notificationsAvailable = Boolean(user?.is_root || (user?.features?.notifications !== false && (user?.permissions?.all || user?.permissions?.notifications)));
-  const voiceAvailable = ['ai'].every(key => user?.features?.[key] !== false && (user?.is_root || user?.permissions?.all || user?.permissions?.[key]));
 
   useEffect(() => {
     const sync = () => {
@@ -350,9 +348,6 @@ export function Layout() {
             <p className="hidden text-xs text-[var(--color-text-secondary)] lg:block">{WORK_AREAS[area].hint}</p><p className="truncate text-xs text-[var(--color-muted)] lg:hidden" title={getActiveWorkspaceDetail()?.name}>{getActiveWorkspaceDetail()?.name || WORK_AREAS[area].hint}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-          {area === 'work' && voiceAvailable && <button onClick={() => navigate('/ai')} className="tf-button w-10 px-0 text-[var(--color-accent)]" aria-label="Помощник">
-            <Mic size={16} />
-          </button>}
           {notificationsAvailable && <button onClick={() => navigate('/notifications')} className="tf-button relative w-10 px-0" aria-label="Уведомления">
             <Bell size={16} />
             {unreadCount > 0 && <span aria-label={`${unreadCount} непрочитанных`} className="absolute -right-2 -top-2 min-w-4 rounded-full bg-[var(--color-danger)] px-1 text-[10px] font-semibold leading-4 text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
