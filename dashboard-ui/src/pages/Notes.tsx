@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getActiveWorkspaceId } from '../lib/workspace';
 import { linkedNotes } from '../lib/noteLinks';
+import { folderMatches, folderSelection } from '../lib/noteFolders';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Eye, FolderPlus, Globe, HardDrive, Lock, Pencil, Plus, RotateCcw, Search, Server, StickyNote, Tag, Trash2, X } from 'lucide-react';
@@ -129,7 +130,9 @@ export function Notes() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<ViewNote | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderOrigin, setNewFolderOrigin] = useState('local');
   const [folderEditorOpen, setFolderEditorOpen] = useState(false);
+  const editorScope = useRef(noteAccessKey);
 
   useEffect(() => {
     const state = location.state as { assistantNoteDraft?: { title: string; content: string }; userId?: number; workspace?: string } | null;
@@ -137,6 +140,7 @@ export function Notes() {
     const draft = state.assistantNoteDraft;
     if (typeof draft.title !== 'string' || typeof draft.content !== 'string') return;
     setTab('mine'); setLocalOnly(true);
+    editorScope.current = noteAccessKey;
     setEditing({ uid: 'assistant-local-draft', origin: 'local', id: '', title: draft.title.slice(0, 200), content: draft.content.slice(0, 100000), format: 'markdown', tags: [], folderId: '', folderName: null, is_public: false, username: null, is_owner: true, updated_at: '', deleted_at: null });
     setEditorOpen(true); navigate(location.pathname, { replace: true, state: null });
   }, [location.state, user?.id, navigate, location.pathname]);
@@ -157,7 +161,8 @@ export function Notes() {
 
       if (tab === 'shared') {
         const withFolder = new URLSearchParams(query);
-        if (folder) withFolder.set('folder_id', folder);
+        const chosen = folderSelection(folder);
+        if (chosen.id) withFolder.set('folder_id', chosen.id);
         const [folderList, localFolderList] = await Promise.all([
           api.getNoteFolders().catch(() => [] as NoteFolder[]),
           listLocalFolders().catch(() => [] as LocalFolder[]),
@@ -180,7 +185,7 @@ export function Notes() {
       } else {
         // «Мои» и «Корзина»: локальные + собственные серверные
         const [local, localFolderList, serverFolderList] = await Promise.all([
-          listLocalNotes({ q: search, folderId: folder || undefined, tag: tag || undefined, format: format || undefined, trash }),
+          listLocalNotes({ q: search, tag: tag || undefined, format: format || undefined, trash }),
           listLocalFolders().catch(() => [] as LocalFolder[]),
           api.getNoteFolders().catch(() => [] as NoteFolder[]),
         ]);
@@ -195,13 +200,8 @@ export function Notes() {
           if (revision === loadRevision.current) setError(err instanceof Error ? err.message : 'Не удалось загрузить заметки с сервера.');
         }
         const localMap = new Map(localFolderList.map(f => [f.id, f.name]));
-        const localView = local.notes.map(n => toViewLocal(n, id => localMap.get(id) || '—'));
-        let serverView = serverNotes.map(toViewServer);
-        if (tab === 'mine' && folder) {
-          // серверные показываем только из выбранной локальной папки? нет — папки разные,
-          // поэтому при фильтре по папке серверные скрываем, чтобы не врать
-          serverView = [];
-        }
+        const localView = local.notes.filter(n => folderMatches(folder, 'local', n.folderId)).map(n => toViewLocal(n, id => localMap.get(id) || '—'));
+        const serverView = serverNotes.filter(n => folderMatches(folder, 'server', n.folder_id == null ? '' : String(n.folder_id))).map(toViewServer);
         const merged = [...localView, ...serverView].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
         if (revision !== loadRevision.current) return;
         setNotes(merged);
@@ -229,18 +229,23 @@ export function Notes() {
   };
 
   const openCreate = () => {
+    editorScope.current = noteAccessKey;
     setLocalOnly(false);
-    setEditing(null);
+    const chosen = folderSelection(folder);
+    const server = tab === 'shared' || chosen.origin === 'server';
+    setEditing({ uid: 'new', origin: server ? 'server' : 'local', id: '', title: '', content: '', format: 'html', tags: [], folderId: chosen.id === 'root' ? '' : chosen.id, folderName: null, is_public: tab === 'shared', username: null, is_owner: true, updated_at: '', deleted_at: null });
     setEditorOpen(true);
   };
 
   const openEdit = (note: ViewNote) => {
+    editorScope.current = noteAccessKey;
     setLocalOnly(false);
     setEditing(note);
     setEditorOpen(true);
   };
 
   const saveNote = async (data: Record<string, any>) => {
+    if (editorScope.current !== noteAccessKey) throw new Error('Окружение или права изменились. Откройте заметку заново перед сохранением.');
     setSaving(true);
     setError('');
     if (localOnly) data = { ...data, is_public: false };
@@ -259,7 +264,7 @@ export function Notes() {
       } else if (editing?.origin === 'local' && editing.id) {
         if (data.is_public) {
           // переезд локальной заметки на сервер
-          await api.createNote({ title: data.title, content: data.content, format: data.format, tags: data.tags, is_public: true });
+          await api.createNote({ title: data.title, content: data.content, format: data.format, tags: data.tags, is_public: true, folder_id: data.folder_id ? Number(data.folder_id) : null });
           await purgeLocalNote(String(editing.id));
         } else {
           await updateLocalNote(String(editing.id), {
@@ -270,13 +275,13 @@ export function Notes() {
             folderId: data.folder_id || '',
           });
         }
-      } else if (data.is_public) {
+      } else if (data.is_public || editing?.origin === 'server') {
         await api.createNote({
           title: data.title,
           content: data.content,
           format: data.format,
           tags: data.tags,
-          is_public: true,
+          is_public: Boolean(data.is_public),
           folder_id: data.folder_id ? Number(data.folder_id) : null,
         });
       } else {
@@ -363,12 +368,13 @@ export function Notes() {
     const name = newFolderName.trim();
     if (!name) return;
     try {
-      if (tab === 'shared') await api.createNoteFolder({ name });
-      else await createLocalFolder(name);
+      const server = tab === 'shared' || newFolderOrigin === 'server';
+      const created = server ? await api.createNoteFolder({ name }) : await createLocalFolder(name);
       setNewFolderName('');
       setFolderEditorOpen(false);
       setInventoryVersion(value => value + 1);
       await load();
+      setFolder(`${server ? 'server' : 'local'}:${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось создать папку.');
     }
@@ -377,8 +383,9 @@ export function Notes() {
   const removeFolder = async (id: string, name: string) => {
     if (!confirm(`Удалить папку «${name}»? Заметки останутся без папки.`)) return;
     try {
-      if (tab === 'shared') await api.deleteNoteFolder(Number(id));
-      else await deleteLocalFolder(id);
+      const selected = folderSelection(id);
+      if (selected.origin === 'server') await api.deleteNoteFolder(Number(selected.id));
+      else await deleteLocalFolder(selected.id);
       if (folder === id) setFolder('');
       setInventoryVersion(value => value + 1);
       await load();
@@ -387,10 +394,13 @@ export function Notes() {
     }
   };
 
-  const folders = tab === 'shared' ? serverFolders.map(f => ({ id: String(f.id), name: f.name })) : localFolders;
+  const folders = [
+    ...(tab === 'shared' ? [] : localFolders.map(f => ({ id: `local:${f.id}`, name: f.name, origin: 'local' as const }))),
+    ...serverFolders.map(f => ({ id: `server:${f.id}`, name: f.name, origin: 'server' as const })),
+  ];
   const folderName = useMemo(() => {
     const map = new Map(folders.map(f => [f.id, f.name]));
-    return (id: string) => (id ? map.get(id) || '—' : 'Без папки');
+    return (id: string, origin: 'local' | 'server') => (id ? map.get(`${origin}:${id}`) || '—' : 'Без папки');
   }, [folders]);
 
   const hasFilters = search || folder || tag || format;
@@ -398,14 +408,14 @@ export function Notes() {
   return (
     <div className="mx-auto max-w-6xl space-y-4 pb-8" style={{ fontFamily: APPLE_FONT }}>
       <header className="relative overflow-visible">
-        <div className="relative flex flex-wrap items-end gap-6">
-          <div className="min-w-0 flex-1 sm:max-w-xl">
+        <div className="relative flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-0 sm:flex-1 sm:max-w-xl">
             <h2 className="tf-page-title">{sectionLabel('/notes')}</h2>
             <p className="tf-page-subtitle">
-              Локальные заметки хранятся на устройстве. Общие и прежние серверные заметки отмечены отдельно.
+              Ваши записи, документы и идеи. Папки устройства и пространства — в одной библиотеке.
             </p>
           </div>
-          <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             {!trash && (
               <button
                 type="button"
@@ -429,8 +439,8 @@ export function Notes() {
           </div>
         </div>
         <div className="relative mt-4 flex flex-wrap gap-2">
-          <Pill active={tab === 'mine'} onClick={() => switchTab('mine')}><HardDrive size={15} /> Мои</Pill>
-          <Pill active={tab === 'shared'} onClick={() => switchTab('shared')}><Server size={15} /> Общие</Pill>
+          <Pill active={tab === 'mine'} onClick={() => switchTab('mine')}><StickyNote size={15} /> Мои заметки</Pill>
+          <Pill active={tab === 'shared'} onClick={() => switchTab('shared')}><Server size={15} /> Общие в окружении</Pill>
           <Pill active={tab === 'trash'} onClick={() => switchTab('trash')}><Trash2 size={15} /> Корзина</Pill>
         </div>
       </header>
@@ -455,23 +465,30 @@ export function Notes() {
         </button>
       </div>
 
-      {!trash && (
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Pill active={folder === ''} onClick={() => setFolder('')}>Все</Pill>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 lg:self-start">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">Библиотека</h3>
+          <div className="lg:hidden"><Select value={folder} onChange={setFolder} label="Папка" options={[{ value: '', label: 'Все заметки' }, { value: 'root', label: 'Без папки' }, ...folders.map(f => ({ value: f.id, label: `${f.name} · ${f.origin === 'local' ? 'устройство' : 'сервер'}` }))]} /></div>
+          <div className="hidden flex-col items-stretch gap-1 lg:flex [&>button]:justify-start [&>button]:text-left [&>button]:break-words">
+            <Pill active={folder === ''} onClick={() => setFolder('')}>Все заметки</Pill>
             <Pill active={folder === 'root'} onClick={() => setFolder('root')}>Без папки</Pill>
-            {folders.map(f => (
+            {(['local', 'server'] as const).map(origin => <div key={origin} className="mt-3 min-w-0 space-y-1 [&>button]:w-full [&>button]:justify-start [&>button]:text-left [&>button]:break-words">
+              {(origin !== 'local' || tab !== 'shared') && <p className="px-3 py-2 text-xs font-semibold text-[var(--color-muted)]">{origin === 'local' ? 'На этом устройстве' : 'На сервере · мои папки'}</p>}
+              {folders.filter(f => f.origin === origin).map(f => (
               <Pill key={f.id} active={folder === f.id} onClick={() => setFolder(folder === f.id ? '' : f.id)}>
-                {f.name}
+                <span className="min-w-0 break-words">{f.name}</span>
               </Pill>
-            ))}
+              ))}
+            </div>)}
           </div>
+          <p className="hidden border-t border-[var(--color-border)] pt-3 text-xs leading-relaxed text-[var(--color-muted)] lg:block">На устройстве — личные записи этого аккаунта, общие для его окружений. Серверные заметки — только из текущего окружения.</p>
 
           {folderEditorOpen && (
             <div className="rounded-[24px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6" style={{ boxShadow: 'var(--shadow-soft)' }}>
               <div className="text-sm font-semibold text-[var(--color-text)]">
-                {tab === 'shared' ? 'Папки на сервере' : 'Папки на этом ПК'}
+                Новая папка
               </div>
+              {tab !== 'shared' && <Select value={newFolderOrigin} onChange={setNewFolderOrigin} label="Хранение" options={[{ value: 'local', label: 'На устройстве' }, { value: 'server', label: 'На сервере' }]} />}
               <div className="mt-3 flex flex-wrap gap-3">
                 <input
                   value={newFolderName}
@@ -509,8 +526,8 @@ export function Notes() {
               )}
             </div>
           )}
-        </section>
-      )}
+        </aside>
+        <section className="min-w-0 space-y-4" aria-label="Список заметок">
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-[14px]">
         <Select size="pill" value={format} onChange={setFormat} label="Формат" options={[{ value: '', label: 'Любой' }, ...Object.entries(NOTE_FORMATS).map(([key, label]) => ({ value: key, label }))]} />
@@ -547,12 +564,12 @@ export function Notes() {
             <StickyNote size={34} className="text-[var(--color-muted)]" strokeWidth={1.5} />
           </div>
           <p className="mt-6 text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
-            {trash ? 'Корзина пуста' : 'Пока пусто'}
+            {trash ? 'Корзина пуста' : hasFilters ? 'Заметки не найдены' : 'Начните с первой заметки'}
           </p>
           <p className="mt-2 max-w-sm text-[15px] leading-relaxed text-[var(--color-text-secondary)]">
             {trash
               ? 'Удалённые заметки появятся здесь. Их можно восстановить или удалить навсегда.'
-              : tab === 'shared'
+              : hasFilters ? 'В выбранной папке или по текущим фильтрам заметок нет. Можно сбросить фильтры или создать запись здесь.' : tab === 'shared'
                 ? 'Отметьте заметку как общую — её увидят участники пространства с доступом к заметкам.'
                 : 'Создайте первую заметку — идея, черновик или сниппет. Это займёт пару секунд.'}
           </p>
@@ -581,13 +598,13 @@ export function Notes() {
               )}
               style={{ boxShadow: 'var(--shadow-soft)' }}
             >
-              <div className="flex items-start gap-4">
+              <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-[19px] font-semibold tracking-tight text-[var(--color-text)]">{note.title}</h3>
+                  <h3 className="line-clamp-2 break-words text-base font-semibold text-[var(--color-text)]">{note.title}</h3>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[var(--color-muted)]">
                     <OriginBadge note={note} />
                     <span>{NOTE_FORMATS[note.format] || note.format}</span>
-                    <span>{note.folderId ? folderName(note.folderId) : 'Без папки'}</span>
+                    <span>{note.folderName || folderName(note.folderId, note.origin)}</span>
                     {note.username && <span>· {note.username}</span>}
                   </div>
                 </div>
@@ -638,10 +655,10 @@ export function Notes() {
                   ))}
                 </div>
               )}
-              <p className="mt-4 line-clamp-3 text-[15px] leading-relaxed text-[var(--color-text-secondary)]">
+              <p className={cn('break-words text-sm leading-relaxed text-[var(--color-text-secondary)]', view === 'list' ? 'mt-2 line-clamp-2' : 'mt-4 line-clamp-3')}>
                 {plainText(note.content).slice(0, 280) || 'Пустая заметка'}
               </p>
-              <p className="mt-5 text-[12.5px] text-[var(--color-muted)]">
+              <p className="mt-3 text-xs text-[var(--color-muted)]">
                 Обновлена: {formatFullDate(note.updated_at)}
               </p>
             </article>
@@ -649,6 +666,8 @@ export function Notes() {
         </div>
       )}
 
+        </section>
+      </div>
       {editorOpen && (
         <NoteModal
           key={editing?.uid || "new"}
@@ -688,6 +707,7 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         'inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium',
         active ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
@@ -742,7 +762,7 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
   const [folderId, setFolderId] = useState(note?.folderId || '');
   const [error, setError] = useState('');
 
-  const origin: 'server' | 'local' = note?.origin || (isPublic ? 'server' : 'local');
+  const origin: 'server' | 'local' = note?.origin === 'server' || isPublic ? 'server' : 'local';
   const folderOptions = origin === 'server'
     ? serverFolders.map(f => ({ id: String(f.id), name: f.name }))
     : localFolders.map(f => ({ id: f.id, name: f.name }));
@@ -815,16 +835,19 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
   };
 
   return (
-    <div className="anim-modal fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/45 p-3 backdrop-blur-sm sm:p-6" onClick={requestClose} style={{ fontFamily: APPLE_FONT }}>
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/45 p-2 sm:p-5" onClick={requestClose} style={{ fontFamily: APPLE_FONT }}>
       <form
         onSubmit={submit}
         onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!readOnly && !saving) event.currentTarget.requestSubmit(); } }}
-        className="tf-modal-shell flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label={note?.id ? 'Редактирование заметки' : 'Новая заметка'}
+        className="tf-modal-shell flex max-h-[96dvh] w-full max-w-5xl flex-col overflow-hidden"
         onClick={event => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-3 px-4 pb-4 pt-4 sm:px-6">
           <h2 className="text-[24px] font-semibold tracking-tight text-[var(--color-text)]">
-            {localOnly ? 'Локальный черновик' : note ? 'Заметка' : 'Новая заметка'}
+            {localOnly ? 'Локальный черновик' : note?.id ? 'Заметка' : 'Новая заметка'}
           </h2>
           {note && (
             <span className="rounded-full bg-[var(--color-overlay)] px-3 py-1 text-[12.5px] font-medium text-[var(--color-text-secondary)]">
@@ -841,7 +864,7 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-7 pb-2 sm:px-9">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-3 sm:px-7">
           <fieldset disabled={readOnly} className="min-w-0 space-y-6">
           <input
             value={title}
@@ -878,7 +901,7 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
                 isPublic ? '' : 'bg-[var(--color-overlay)] text-[var(--color-text-secondary)] hover:bg-[var(--color-overlay-strong)] hover:text-[var(--color-text)]',
               )}
               style={isPublic ? { background: '#5f8f6a', color: '#fff' } : undefined}
-              title={isPublic ? 'Хранится на сервере, видна участникам пространства' : 'Хранится только на этом ПК'}
+              title={isPublic ? 'Хранится на сервере, видна участникам пространства' : origin === 'server' ? 'Личная заметка на сервере' : 'Хранится только на этом устройстве'}
             >
               {isPublic ? <Globe size={13} /> : <Lock size={13} />}
               {localOnly ? 'Только локально · черновик ИИ' : isPublic ? 'Общая' : 'Личная'}
@@ -896,7 +919,7 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
             <div className="mt-3 flex gap-2"><button type="button" className="tf-button tf-button-primary" onClick={() => applyFormat(pendingFormat)}>Преобразовать</button><button type="button" className="tf-button" onClick={() => setPendingFormat(null)}>Оставить формат</button></div>
           </div>}
 
-          <details className="rounded-xl border border-[var(--color-border)] p-3"><summary className="cursor-pointer text-sm font-medium">Папка и теги</summary>
+          <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-overlay)] p-3"><h3 className="text-sm font-medium">Папка и теги</h3>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-2 block text-[13px] font-medium text-[var(--color-text-secondary)]">
@@ -921,7 +944,7 @@ function NoteModal({ localOnly = false, note, inventory, onNavigate, serverFolde
               />
             </label>
           </div>
-          </details>
+          </section>
 
           </fieldset>
           <div>
