@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLocalNote, listLocalNotes, pickNotesDirectory } from '../src/lib/localNotes.ts';
+import { createLocalNote, listLocalNotes, pickNotesDirectory, softDeleteLocalNote, restoreLocalNote, purgeLocalNote } from '../src/lib/localNotes.ts';
 
 function storage({ abortWrite = false, failRead = false } = {}) {
   const databases = new Map(); let account = 'one'; let requests = 0;
@@ -12,7 +12,7 @@ function storage({ abortWrite = false, failRead = false } = {}) {
     const values = databases.get(name);
     const db = { close() {}, transaction() {
       const tx = { error: new Error('Disk quota'), objectStore() { return {
-        get(key) { const req = { result: structuredClone(values.get(key)), error: new Error('Read failed') }; queueMicrotask(() => failRead ? req.onerror?.() : req.onsuccess?.()); return req; },
+        get(key) { const req = { result: key === 'notesDir' ? values.get(key) : structuredClone(values.get(key)), error: new Error('Read failed') }; queueMicrotask(() => failRead ? req.onerror?.() : req.onsuccess?.()); return req; },
         put(value, key) {
           const req = {};
           queueMicrotask(() => {
@@ -20,7 +20,7 @@ function storage({ abortWrite = false, failRead = false } = {}) {
             queueMicrotask(() => { if (abortWrite) tx.onabort?.(); else { values.set(key, structuredClone(value)); tx.oncomplete?.(); } });
           }); return req;
         },
-        delete(key) { const req = {}; queueMicrotask(() => { values.delete(key); req.onsuccess?.(); }); return req; },
+        delete(key) { const req = {}; queueMicrotask(() => { values.delete(key); req.onsuccess?.(); tx.oncomplete?.(); }); return req; },
       }; } }; return tx;
     } };
     const req = { result: db }; queueMicrotask(() => req.onsuccess?.()); return req;
@@ -28,6 +28,31 @@ function storage({ abortWrite = false, failRead = false } = {}) {
   return { databases, switchAccount(value) { account = value; }, requests: () => requests };
 }
 const draft = { title: 'Local plan', content: '```sh\nrm -rf /\n```', format: 'markdown', tags: [], folderId: '' };
+
+test('local delete, restore and purge preserve content until permanent deletion and never use HTTP', async () => {
+  const mock = storage(); const note = await createLocalNote(draft);
+  await softDeleteLocalNote(note.id);
+  assert.equal((await listLocalNotes()).total, 0);
+  assert.equal((await listLocalNotes({ trash: true })).notes[0].content, draft.content);
+  await restoreLocalNote(note.id);
+  assert.equal((await listLocalNotes()).notes[0].id, note.id);
+  await softDeleteLocalNote(note.id); await purgeLocalNote(note.id);
+  assert.equal((await listLocalNotes({ trash: true })).total, 0);
+  assert.equal(mock.requests(), 0);
+});
+
+test('directory deletion reports denied permission instead of pretending success', async () => {
+  const mock = storage();
+  mock.databases.set('taskflow-local-notes-account-one', new Map([['notesDir', { requestPermission: async () => 'granted', removeEntry: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }]]));
+  await assert.rejects(purgeLocalNote('existing'), /Denied/);
+});
+
+test('revoked directory access cannot silently switch deletion to another storage', async () => {
+  const mock = storage();
+  mock.databases.set('taskflow-local-notes-account-one', new Map([['notesDir', { queryPermission: async () => 'denied' }], ['notesFallback', [{ ...draft, id: 'existing' }]]]));
+  await assert.rejects(purgeLocalNote('existing'), /Нет доступа/);
+  assert.equal(mock.databases.get('taskflow-local-notes-account-one').get('notesFallback').length, 1);
+});
 
 test('local draft survives reopening, belongs to its account and makes no HTTP writes', async () => {
   const mock = storage();

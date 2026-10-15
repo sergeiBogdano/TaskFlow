@@ -77,17 +77,16 @@ async function idbSet(key: string, value: unknown): Promise<void> {
 }
 
 async function idbDel(key: string): Promise<void> {
+  const db = await openDb();
   try {
-    const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('kv', 'readwrite');
-      const q = tx.objectStore('kv').delete(key);
-      q.onsuccess = () => resolve();
-      q.onerror = () => reject(q.error);
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error || new Error('Не удалось обновить локальное хранилище.'));
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore('kv').delete(key);
     });
-  } catch {
-    /* ignore */
-  }
+  } finally { db.close(); }
 }
 
 // ---------- Папка на ПК ----------
@@ -99,16 +98,11 @@ export function isDirPickerSupported(): boolean {
 async function loadDirHandle(): Promise<any | null> {
   const handle = await idbGet<any>('notesDir');
   if (!handle) return null;
-  try {
-    const opts = { mode: 'readwrite' };
-    if (typeof handle.queryPermission === 'function') {
-      const granted = await handle.queryPermission(opts);
-      if (granted !== 'granted') return null;
-    }
-    return handle;
-  } catch {
-    return null;
+  if (typeof handle.queryPermission === 'function') {
+    const granted = await handle.queryPermission({ mode: 'readwrite' });
+    if (granted !== 'granted') throw new Error('Нет доступа к выбранной папке заметок. Повторно выберите её в личных настройках.');
   }
+  return handle;
 }
 
 export async function pickNotesDirectory(): Promise<string> {
@@ -213,8 +207,8 @@ async function writeToDir(dir: any, note: LocalNote): Promise<void> {
 async function removeFromDir(dir: any, id: string): Promise<void> {
   try {
     await dir.removeEntry(`${id}.md`);
-  } catch {
-    /* ignore */
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
   }
 }
 
@@ -352,7 +346,6 @@ export async function createLocalFolder(name: string): Promise<LocalFolder> {
 
 export async function deleteLocalFolder(id: string): Promise<void> {
   const folders = (await idbGet<LocalFolder[]>('noteFolders')) || [];
-  await idbSet('noteFolders', folders.filter(f => f.id !== id));
   // Заметки остаются, папка у них сбрасывается
   const dir = await loadDirHandle();
   if (dir) {
@@ -364,4 +357,5 @@ export async function deleteLocalFolder(id: string): Promise<void> {
     const all = (await idbGet<LocalNote[]>('notesFallback')) || [];
     await idbSet('notesFallback', all.map(n => (n.folderId === id ? { ...n, folderId: '', updated_at: nowIso() } : n)));
   }
+  await idbSet('noteFolders', folders.filter(f => f.id !== id));
 }

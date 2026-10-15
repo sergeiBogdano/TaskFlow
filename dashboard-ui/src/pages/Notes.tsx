@@ -5,7 +5,8 @@ import { linkedNotes } from '../lib/noteLinks';
 import { folderMatches, folderSelection } from '../lib/noteFolders';
 import { sectionLabel } from '../lib/uiconfig';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Download, Eye, FolderPlus, Globe, HardDrive, Lock, Pencil, Plus, RotateCcw, Search, Server, StickyNote, Tag, Trash2, X } from 'lucide-react';
+import { ArrowRightLeft, Copy, Eye, FolderPlus, Globe, HardDrive, Lock, Pencil, Plus, RotateCcw, Search, Server, StickyNote, Tag, Trash2, X } from 'lucide-react';
+import { moveNote, runNoteBatch, type MovableNote, type NoteLocation } from '../lib/noteOperations';
 import { api, type Note, type NoteFolder } from '../api/client';
 import { SearchSelect } from '../components/SearchSelect';
 import { Select } from '../components/Select';
@@ -119,6 +120,15 @@ export function Notes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const operationLock = useRef(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [notice, setNotice] = useState('');
+  const [confirmation, setConfirmation] = useState<{ title: string; message: string; run: () => Promise<void> } | null>(null);
+  const [moving, setMoving] = useState<ViewNote[] | null>(null);
+  const [destination, setDestination] = useState('local:root');
+  const liveScope = useRef(noteAccessKey);
+  useEffect(() => { liveScope.current = noteAccessKey; setSelected([]); setMoving(null); setConfirmation(null); }, [noteAccessKey]);
 
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -143,9 +153,10 @@ export function Notes() {
     editorScope.current = noteAccessKey;
     setEditing({ uid: 'assistant-local-draft', origin: 'local', id: '', title: draft.title.slice(0, 200), content: draft.content.slice(0, 100000), format: 'markdown', tags: [], folderId: '', folderName: null, is_public: false, username: null, is_owner: true, updated_at: '', deleted_at: null });
     setEditorOpen(true); navigate(location.pathname, { replace: true, state: null });
-  }, [location.state, user?.id, navigate, location.pathname]);
+  }, [location.state, user?.id, navigate, location.pathname, noteAccessKey]);
   const sortedNotes = useMemo(() => [...notes].sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'ru') : b.updated_at.localeCompare(a.updated_at)), [notes, sort]);
   const trash = tab === 'trash';
+  useEffect(() => { setSelected([]); }, [tab, folder, search, tag, format]);
 
   const loadRevision = useRef(0);
   const load = async () => {
@@ -229,6 +240,7 @@ export function Notes() {
   };
 
   const openCreate = () => {
+    if (operationLock.current) return;
     editorScope.current = noteAccessKey;
     setLocalOnly(false);
     const chosen = folderSelection(folder);
@@ -238,6 +250,7 @@ export function Notes() {
   };
 
   const openEdit = (note: ViewNote) => {
+    if (operationLock.current) return;
     editorScope.current = noteAccessKey;
     setLocalOnly(false);
     setEditing(note);
@@ -305,66 +318,88 @@ export function Notes() {
     }
   };
 
-  const moveToTrash = async (note: ViewNote) => {
-    if (!confirm(`Удалить заметку «${note.title}» в корзину?`)) return;
+  const performBatch = async (targets: ViewNote[], action: (note: ViewNote) => Promise<void>) => {
+    if (operationLock.current) return;
+    operationLock.current = true; setBusy(true); setError(''); setNotice('');
+    const scope = noteAccessKey;
+    const workspace = getActiveWorkspaceId();
+    const assertScope = () => {
+      if (liveScope.current !== scope || getActiveWorkspaceId() !== workspace) throw new Error('Окружение или права изменились. Повторите операцию в исходном окружении.');
+    };
     try {
-      if (note.origin === 'local') await softDeleteLocalNote(String(note.id));
-      else if (typeof note.id === 'number') await api.deleteNote(note.id);
+      const result = await runNoteBatch(targets, async note => {
+        assertScope();
+        if (!note.is_owner) throw new Error('Можно изменять только свои заметки.');
+        await action(note);
+      });
+      if (liveScope.current !== scope) return;
+      setSelected(result.failed.map(f => f.item.uid));
       setInventoryVersion(value => value + 1);
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить заметку.');
+      if (liveScope.current !== scope) return;
+      setNotice(`Обработано: ${result.completed.length} из ${targets.length}.`);
+      if (result.failed.length) setError(result.failed.map(f => `${f.item.title}: ${f.message}`).join('\n'));
+    } finally { operationLock.current = false; setBusy(false); }
+  };
+  const requestDelete = (targets: ViewNote[], permanent = false) => {
+    setConfirmation({ title: permanent ? 'Удалить навсегда?' : 'Переместить в корзину?', message: `Заметок: ${targets.length}. ${permanent ? 'Восстановить их будет невозможно.' : 'Их можно будет восстановить из корзины.'}`, run: () => performBatch(targets, async note => {
+      if (note.origin === 'local') await (permanent ? purgeLocalNote(String(note.id)) : softDeleteLocalNote(String(note.id)));
+      else await api.deleteNote(Number(note.id), permanent);
+    }) });
+  };
+  const moveToTrash = (note: ViewNote) => requestDelete([note]);
+  const restore = (note: ViewNote) => performBatch([note], async item => {
+    if (item.origin === 'local') await restoreLocalNote(String(item.id));
+    else await api.restoreNote(Number(item.id));
+  });
+  const purge = (note: ViewNote) => requestDelete([note], true);
+  const beginMove = (targets: ViewNote[]) => {
+    if (busy) return;
+    setDestination(`${targets[0]?.origin || 'local'}:root`); setMoving(targets);
+  };
+  const transfer = async () => {
+    if (!moving) return;
+    const chosen = folderSelection(destination);
+    if (!chosen.origin) return;
+    const target: NoteLocation = { origin: chosen.origin, folderId: chosen.id === 'root' ? '' : chosen.id };
+    const scope = noteAccessKey; const workspace = getActiveWorkspaceId();
+    const assertScope = () => {
+      if (liveScope.current !== scope || workspace !== getActiveWorkspaceId()) throw new Error('Окружение или права изменились.');
+    };
+    let retained = 0;
+    await performBatch(moving, async note => {
+      const result = await moveNote(note, target, {
+        assertScope,
+        read: async source => {
+          if (source.origin === 'server') {
+            const current = await api.getNote(Number(source.id));
+            return { ...current, origin: 'server' } as MovableNote;
+          }
+          const current = (await listLocalNotes()).notes.find(n => n.id === source.id);
+          if (!current) throw new Error('Локальная заметка не найдена.');
+          return { ...current, origin: 'local', is_owner: true };
+        },
+        move: (source, folderId) => source.origin === 'local' ? updateLocalNote(String(source.id), { folderId }) : api.updateNote(Number(source.id), { folder_id: folderId ? Number(folderId) : null }),
+        create: (source, dest) => dest.origin === 'local'
+          ? createLocalNote({ title: source.title, content: source.content, format: source.format, tags: source.tags, folderId: dest.folderId })
+          : api.createNote({ title: source.title, content: source.content, format: source.format, tags: source.tags, folder_id: dest.folderId ? Number(dest.folderId) : null, is_public: false }),
+        archive: source => source.origin === 'local' ? softDeleteLocalNote(String(source.id)) : api.deleteNote(Number(source.id)),
+      });
+      if (result.sourceRetained) retained++;
+    });
+    if (liveScope.current === scope) {
+      setMoving(null);
+      if (retained) setNotice(`Копии сохранены. Исходные записи (${retained}) не удалось отправить в корзину — они тоже сохранены. Не повторяйте перенос этих записей.`);
     }
   };
 
-  const restore = async (note: ViewNote) => {
-    try {
-      if (note.origin === 'local') await restoreLocalNote(String(note.id));
-      else if (typeof note.id === 'number') await api.restoreNote(note.id);
-      setInventoryVersion(value => value + 1);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось восстановить заметку.');
-    }
-  };
-
-  const purge = async (note: ViewNote) => {
-    if (!confirm(`Удалить заметку «${note.title}» навсегда? Это действие необратимо.`)) return;
-    try {
-      if (note.origin === 'local') await purgeLocalNote(String(note.id));
-      else if (typeof note.id === 'number') await api.deleteNote(note.id, true);
-      setInventoryVersion(value => value + 1);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить заметку.');
-    }
-  };
-
-  const duplicate = async (note: ViewNote) => {
-    try {
+  const duplicate = (note: ViewNote) => performBatch([note], async note => {
       if (note.origin === 'local') await duplicateLocalNote(String(note.id));
       else if (typeof note.id === 'number') await api.duplicateNote(note.id);
-      setInventoryVersion(value => value + 1);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось дублировать заметку.');
-    }
-  };
-
-  const downloadToPc = async (note: ViewNote) => {
-    if (note.origin !== 'server' || typeof note.id !== 'number') return;
-    if (!confirm('Скачать заметку на этот ПК и удалить её с сервера?')) return;
-    try {
-      await createLocalNote({ title: note.title, content: note.content, format: note.format, tags: note.tags, folderId: '' });
-      await api.deleteNote(note.id, true);
-      setInventoryVersion(value => value + 1);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось перенести заметку.');
-    }
-  };
+  });
 
   const createFolder = async () => {
+    if (operationLock.current) return;
     const name = newFolderName.trim();
     if (!name) return;
     try {
@@ -381,7 +416,9 @@ export function Notes() {
   };
 
   const removeFolder = async (id: string, name: string) => {
-    if (!confirm(`Удалить папку «${name}»? Заметки останутся без папки.`)) return;
+    setConfirmation({ title: 'Удалить папку?', message: `Папка «${name}» будет удалена. Заметки останутся без папки.`, run: async () => {
+    if (operationLock.current) return;
+    operationLock.current = true; setBusy(true);
     try {
       const selected = folderSelection(id);
       if (selected.origin === 'server') await api.deleteNoteFolder(Number(selected.id));
@@ -391,13 +428,14 @@ export function Notes() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить папку.');
-    }
+    } finally { operationLock.current = false; setBusy(false); }
+    } });
   };
 
-  const folders = [
+  const folders = useMemo(() => [
     ...(tab === 'shared' ? [] : localFolders.map(f => ({ id: `local:${f.id}`, name: f.name, origin: 'local' as const }))),
     ...serverFolders.map(f => ({ id: `server:${f.id}`, name: f.name, origin: 'server' as const })),
-  ];
+  ], [tab, localFolders, serverFolders]);
   const folderName = useMemo(() => {
     const map = new Map(folders.map(f => [f.id, f.name]));
     return (id: string, origin: 'local' | 'server') => (id ? map.get(`${origin}:${id}`) || '—' : 'Без папки');
@@ -545,8 +583,19 @@ export function Notes() {
         <span className="text-sm text-[var(--color-muted)]">Заметок: {notes.length}</span>
         <div className="flex flex-wrap gap-2"><Select value={sort} onChange={setSort} label="Порядок" options={[{ value: 'updated', label: 'Сначала обновлённые' }, { value: 'title', label: 'По названию' }]} /><button className="tf-button" onClick={() => setView(view === 'list' ? 'cards' : 'list')}>{view === 'list' ? 'Карточки' : 'Список'}</button></div>
       </div>
+      {notes.some(n => n.is_owner) && <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">
+        <label className="inline-flex items-center gap-2"><input type="checkbox" disabled={busy} checked={notes.filter(n => n.is_owner).every(n => selected.includes(n.uid))} onChange={event => setSelected(event.target.checked ? notes.filter(n => n.is_owner).map(n => n.uid) : [])} />Выбрать все свои</label>
+        <span className="text-[var(--color-muted)]">Выбрано: {selected.length}</span>
+        {selected.length > 0 && <>
+          {!trash && <button type="button" disabled={busy} className="tf-button" onClick={() => beginMove(notes.filter(n => selected.includes(n.uid)))}><ArrowRightLeft size={15} />Перенести</button>}
+          {trash && <button type="button" disabled={busy} className="tf-button" onClick={() => void performBatch(notes.filter(n => selected.includes(n.uid)), async note => { if (note.origin === 'local') await restoreLocalNote(String(note.id)); else await api.restoreNote(Number(note.id)); })}>Восстановить</button>}
+          <button type="button" disabled={busy} className="tf-button text-[var(--color-danger)]" onClick={() => requestDelete(notes.filter(n => selected.includes(n.uid)), trash)}>{trash ? 'Удалить навсегда' : 'В корзину'}</button>
+        </>}
+        {busy && <span role="status">Обработка заметок…</span>}
+      </div>}
+      {notice && <p role="status" className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">{notice}</p>}
       {error && (
-        <div className="rounded-[20px] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/[.07] px-6 py-4 text-[15px] font-medium text-[var(--color-danger)]">
+        <div role="alert" className="whitespace-pre-line rounded-[20px] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/[.07] px-6 py-4 text-[15px] font-medium text-[var(--color-danger)]">
           {error}
         </div>
       )}
@@ -599,6 +648,7 @@ export function Notes() {
               style={{ boxShadow: 'var(--shadow-soft)' }}
             >
               <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
+                {note.is_owner && <input type="checkbox" aria-label={`Выбрать заметку ${note.title}`} checked={selected.includes(note.uid)} disabled={busy} className="mt-1 shrink-0" onClick={event => event.stopPropagation()} onChange={event => setSelected(prev => event.target.checked ? [...prev, note.uid] : prev.filter(id => id !== note.uid))} />}
                 <div className="min-w-0 flex-1">
                   <h3 className="line-clamp-2 break-words text-base font-semibold text-[var(--color-text)]">{note.title}</h3>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[var(--color-muted)]">
@@ -608,7 +658,7 @@ export function Notes() {
                     {note.username && <span>· {note.username}</span>}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5 opacity-100 transition" onClick={event => event.stopPropagation()}>
+                <div inert={busy || undefined} className="flex shrink-0 items-center gap-1.5 opacity-100 transition" onClick={event => event.stopPropagation()}>
                   {!trash && (
                     <CircleButton onClick={() => openEdit(note)} title={note.is_owner ? 'Редактировать' : 'Просмотр'}>
                       {note.is_owner ? <Pencil size={15} /> : <Eye size={15} />}
@@ -619,9 +669,9 @@ export function Notes() {
                       <Copy size={15} />
                     </CircleButton>
                   )}
-                  {!trash && note.origin === 'server' && note.is_owner && typeof note.id === 'number' && (
-                    <CircleButton onClick={() => downloadToPc(note)} title="Скачать на этот ПК">
-                      <Download size={15} />
+                  {!trash && note.is_owner && (
+                    <CircleButton onClick={() => beginMove([note])} title="Перенести заметку">
+                      <ArrowRightLeft size={15} />
                     </CircleButton>
                   )}
                   {!trash && note.is_owner && (
@@ -668,6 +718,21 @@ export function Notes() {
 
         </section>
       </div>
+      {confirmation && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/45 p-4">
+        <section role="dialog" aria-modal="true" aria-labelledby="note-action-title" className="tf-modal-shell w-full max-w-md space-y-4 p-5">
+          <h3 id="note-action-title" className="text-lg font-semibold">{confirmation.title}</h3>
+          <p className="text-sm text-[var(--color-text-secondary)]">{confirmation.message}</p>
+          <div className="flex justify-end gap-2"><button type="button" className="tf-button" onClick={() => setConfirmation(null)}>Отмена</button><button type="button" disabled={busy} className="tf-button tf-button-primary" onClick={() => { const action = confirmation.run; setConfirmation(null); void action(); }}>Подтвердить</button></div>
+        </section>
+      </div>}
+      {moving && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/45 p-4">
+        <section role="dialog" aria-modal="true" aria-labelledby="note-move-title" className="tf-modal-shell w-full max-w-lg space-y-4 p-5">
+          <h3 id="note-move-title" className="text-lg font-semibold">Перенести заметки · {moving.length}</h3>
+          <Select disabled={busy} value={destination} onChange={setDestination} label="Куда перенести" options={[{ value: 'local:root', label: 'На устройство · без папки' }, ...localFolders.map(f => ({ value: `local:${f.id}`, label: `На устройство · ${f.name}` })), { value: 'server:root', label: 'На сервер · без папки' }, ...serverFolders.map(f => ({ value: `server:${f.id}`, label: `На сервер · ${f.name}` }))]} />
+          <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">На сервере новые записи будут личными, в текущем окружении. При смене хранилища сначала сохраняется копия, затем оригинал перемещается в корзину. Локальные заметки не отправляются на сервер без вашего подтверждения.</p>
+          <div className="flex justify-end gap-2"><button type="button" disabled={busy} className="tf-button" onClick={() => setMoving(null)}>Отмена</button><button type="button" disabled={busy} className="tf-button tf-button-primary" onClick={() => void transfer()}>{busy ? 'Перенос…' : 'Перенести'}</button></div>
+        </section>
+      </div>}
       {editorOpen && (
         <NoteModal
           key={editing?.uid || "new"}

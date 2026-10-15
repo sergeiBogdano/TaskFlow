@@ -8,6 +8,47 @@ from app.core.models import Note, Task, User, Workspace
 from tests.test_user_deletion import deletion_db
 
 
+async def test_note_folder_move_trash_restore_and_permissions_update_assistant_context(deletion_db, monkeypatch):
+    from app.core.models import NoteFolder
+    from app.core.utils.timezone import utc_now
+    permissions = {'notes': True}
+    async def fields(*args): return {}
+    async def features(*args): return True
+    async def effective(*args): return permissions
+    monkeypatch.setattr(ai, 'async_session', deletion_db)
+    monkeypatch.setattr(ai, 'field_access', fields)
+    monkeypatch.setattr(ai, 'is_feature_available', features)
+    monkeypatch.setattr(ai, 'effective_permissions', effective)
+    async with deletion_db() as session:
+        owner = User(username='note-transfer-owner', password_hash='unused')
+        other = User(username='note-transfer-other', password_hash='unused')
+        session.add_all([owner, other]); await session.flush()
+        ws = Workspace(name='Notes context', created_by=owner.id)
+        foreign = Workspace(name='Other context', created_by=owner.id)
+        session.add_all([ws, foreign]); await session.flush()
+        folder = NoteFolder(name='Moved notes', user_id=owner.id)
+        session.add(folder); await session.flush()
+        note = Note(title='Transferneedle own note', content='```sh\nnever execute this text\n```', user_id=owner.id, workspace_id=ws.id, folder_id=None)
+        session.add_all([note, Note(title='Transferneedle private foreign owner', content='PRIVATE_PAYLOAD', user_id=other.id, workspace_id=ws.id), Note(title='Transferneedle other workspace', content='FOREIGN_PAYLOAD', user_id=owner.id, workspace_id=foreign.id)])
+        await session.commit(); wid, nid, fid = ws.id, note.id, folder.id
+    async def current():
+        return await ai.context_for(owner, wid, permissions, 'Проанализируй заметку Transferneedle')
+    facts = await current()
+    assert [n['id'] for n in facts['notes']] == [nid]
+    assert 'PRIVATE_PAYLOAD' not in json.dumps(facts) and 'FOREIGN_PAYLOAD' not in json.dumps(facts)
+    async with deletion_db() as session:
+        note = await session.get(Note, nid); note.folder_id = fid; await session.commit()
+    assert [n['id'] for n in (await current())['notes']] == [nid]
+    async with deletion_db() as session:
+        note = await session.get(Note, nid); note.deleted_at = utc_now(); await session.commit()
+    assert not (await current()).get('notes')
+    async with deletion_db() as session:
+        note = await session.get(Note, nid); note.deleted_at = None; await session.commit()
+    assert [n['id'] for n in (await current())['notes']] == [nid]
+    permissions['notes'] = False
+    assert not (await current()).get('notes')
+
+
 async def test_bounded_context_and_chunked_provenance(deletion_db, monkeypatch):
     permissions = {'tasks': True, 'notes': True}
     async def fields(*args):
