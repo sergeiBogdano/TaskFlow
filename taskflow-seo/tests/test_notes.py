@@ -253,6 +253,23 @@ class TestNoteFolders:
 
 class TestNotesTrash:
 
+    def test_move_multiple_notes_then_delete_restore_preserves_folder_and_content(self, sync_request, admin_cookies):
+        folder = sync_request('POST', '/api/notes/folders', json={'name': 'Batch destination'}, cookies=admin_cookies).json()
+        notes = [sync_request('POST', '/api/notes', json=_login_note_payload(title=f'Batch record {index}'), cookies=admin_cookies).json() for index in range(3)]
+        for note in notes:
+            moved = sync_request('PUT', f"/api/notes/{note['id']}", json={'folder_id': folder['id']}, cookies=admin_cookies)
+            assert moved.status_code == 200, moved.text
+            assert moved.json()['content'] == note['content']
+            removed = sync_request('DELETE', f"/api/notes/{note['id']}", cookies=admin_cookies)
+            assert removed.status_code == 200, removed.text
+        archived = sync_request('GET', f"/api/notes?archived=true&folder_id={folder['id']}", cookies=admin_cookies).json()['notes']
+        assert {note['id'] for note in notes} <= {note['id'] for note in archived}
+        for note in notes:
+            restored = sync_request('POST', f"/api/notes/{note['id']}/restore", cookies=admin_cookies)
+            assert restored.status_code == 200, restored.text
+            assert restored.json()['folder_id'] == folder['id']
+            assert restored.json()['content'] == note['content']
+
     def test_soft_delete_moves_to_archive(self, sync_request, admin_cookies):
         note_id = sync_request('POST', '/api/notes', json=_login_note_payload(title='Trash me'), cookies=admin_cookies).json()['id']
 
